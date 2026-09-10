@@ -5,8 +5,7 @@ import sitemap from '@astrojs/sitemap';
 import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
-  site: 'https://sehyunnoh.github.io',
-  base: '/techblog',
+  site: 'https://lleg.dev',
   trailingSlash: 'ignore',
   integrations: [mdx(), sitemap()],
   /*

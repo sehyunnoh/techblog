@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://sehyunnoh.github.io/techblog/sitemap-index.xml
+Sitemap: https://lleg.dev/sitemap-index.xml
