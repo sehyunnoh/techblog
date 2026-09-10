@@ -1,7 +1,7 @@
 # TechBlog 요구사항 정의서
 
-> 최종 수정: 2026-09-09
-> 상태: 확정 (남은 작업은 [§8.1](#81-남은-작업-사용자-직접-수행-필요) 참고)
+> 최종 수정: 2026-09-10
+> 상태: 운영 중 (셋업 진행 상태는 [§8.1](#81-셋업-진행-상태) 참고)
 
 ---
 
@@ -185,23 +185,30 @@ linkedin  : https://www.linkedin.com/in/devnoh
 > 따라서 모든 내부 링크·이미지 경로는 `import.meta.env.BASE_URL` 기준 헬퍼(`withBase()`)를 통해 생성한다.
 > 하드코딩된 `/foo` 절대 경로는 404를 유발하므로 금지.
 
-### 8.1 남은 작업 (사용자 직접 수행 필요)
+### 8.1 셋업 진행 상태
 
-| # | 항목 | 내용 |
+| # | 항목 | 상태 |
 |---|---|---|
-| 1 | GitHub 저장소 생성 | `sehyunnoh/techblog` public으로 생성 후 Settings → Pages → Source를 **GitHub Actions**로 설정 |
-| 2 | Umami Cloud 가입 | [cloud.umami.is](https://cloud.umami.is) 가입 → 사이트 등록 → **Website ID** 발급받아 전달 |
-| 3 | Search Console 등록 | 배포 완료 후 사이트 소유권 확인 + sitemap 제출 |
-| 4 | 첫 번째 글 주제 | 셋업 완료 후 파이프라인 전체 검증용 |
+| 1 | GitHub 저장소 + Pages | ✅ 완료 — `sehyunnoh/techblog`, Actions 배포 |
+| 2 | 첫 번째 글 | ✅ 게시됨 — Observability 비용·카디널리티 |
+| 3 | Umami Cloud | ✅ 연동 완료 — 아래 참고 |
+| 4 | Search Console 등록 | ⬜ 소유권 확인 + sitemap 제출 (사용자 직접) |
 
-> 2번 Website ID를 받기 전까지는 애널리틱스 스크립트를 **환경변수 기반 조건부 렌더링**으로 넣어두고,
-> ID가 들어오면 그때 활성화한다. (ID 없으면 스크립트 자체가 출력되지 않음)
+#### 애널리틱스 배선
+
+- Website ID는 GitHub Actions **variable** `UMAMI_WEBSITE_ID`에 저장한다 (secret 아님).
+  이 값은 모든 페이지 HTML에 그대로 출력되므로 애초에 공개 값이다.
+- 빌드 시 `import.meta.env.UMAMI_WEBSITE_ID`로 읽고, **값이 없으면 스크립트 태그 자체를 출력하지 않는다.**
+  덕분에 로컬 `npm run dev`/`npm run build`는 통계를 오염시키지 않는다.
+- Umami는 도메인 단위로 등록되므로 사이트는 `sehyunnoh.github.io`로 잡혀 있다.
+  기존 개인 블로그와 도메인을 공유하므로, 나중에 그쪽에도 Umami를 붙일 때는 분리를 검토한다.
 
 ### 8.2 보류 항목 (나중에)
 
 | 항목 | 시점 |
 |---|---|
 | 댓글(giscus) | 글이 어느 정도 쌓인 뒤 |
+| 기존 블로그와 Umami 사이트 분리 | 기존 블로그에도 추적을 붙일 때 |
 | 커스텀 도메인 | 보유 도메인 없음. 필요해지면 `CNAME` + DNS 설정 + `base` 제거 |
 
 ---

@@ -31,8 +31,10 @@ jobs:
       - name: Build site
         run: npm run build
         env:
-          # Analytics stays off until the secret is set in the repository.
-          UMAMI_WEBSITE_ID: ${{ secrets.UMAMI_WEBSITE_ID }}
+          # A repository variable rather than a secret: the id is emitted into
+          # every page's HTML, so it is public by construction. Keeping it out
+          # of the repo still means local and preview builds send nothing.
+          UMAMI_WEBSITE_ID: ${{ vars.UMAMI_WEBSITE_ID }}
 
       - uses: actions/configure-pages@v5
 
