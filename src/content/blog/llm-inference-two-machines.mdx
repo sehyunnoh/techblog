@@ -1,0 +1,252 @@
+---
+title: 'Your LLM Is Two Different Machines'
+description: 'Prefill and decode have opposite performance characteristics, and almost everything confusing about LLM latency, cost and context limits falls out of that one split.'
+pubDate: 2026-09-10
+tags: ['ai', 'llm', 'architecture', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+import Figure from '../../components/Figure.astro';
+
+Here is a question with a genuinely interesting answer: why do LLM APIs stream?
+
+The convenient explanation is that it feels nicer. The real one is that the model cannot do anything else. Generating the hundredth token requires having generated the ninety-ninth, so the tokens arrive one at a time whether or not you display them that way. Streaming is not a UX choice layered on top of the model — it is the model's execution shape leaking through the API.
+
+That shape has a name. Inference runs in two phases, **prefill** and **decode**, and they behave so differently that treating them as one workload is the root of most confusion about LLM latency, cost and context limits.
+
+## Two phases, opposite bottlenecks
+
+**Prefill** processes your entire prompt at once. Every input token is known upfront, so the model can push all of them through the network in parallel. NVIDIA describes it as "a matrix-matrix operation that's highly parallelized," and it "effectively saturate[s] GPU utilization."[^1]
+
+**Decode** produces output tokens one at a time, each conditioned on everything before it. There is exactly one new token to process per step, so the same computation becomes "a matrix-vector operation that underutilizes the GPU compute ability compared to the prefill phase."[^1]
+
+That is the whole asymmetry, and it has a sharp consequence. Prefill is **compute-bound**: the GPU's arithmetic units are the constraint. Decode is **memory-bandwidth-bound**: the GPU spends most of its time waiting for weights and cached state to arrive from memory, with the arithmetic units mostly idle.[^1]
+
+<Figure
+  caption="One request, two workloads. Prefill does a large parallel pass over the whole prompt and produces the first token; decode then runs one small sequential step per token. <b>Time to first token</b> is dominated by prefill; everything after it is decode."
+  label="Timeline diagram showing a single wide prefill block followed by a sequence of narrow decode steps"
+>
+  <svg viewBox="0 0 700 212" width="100%" role="img" aria-labelledby="phases-title">
+    <title id="phases-title">Prefill runs once over the whole prompt; decode runs once per output token</title>
+
+    <text x="0" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">PREFILL — once, parallel, compute-bound</text>
+    <rect x="0" y="22" width="250" height="44" rx="6" fill="var(--series-1)" opacity="0.16" stroke="var(--series-1)" stroke-width="1.5" />
+    <text x="125" y="42" text-anchor="middle" fill="var(--fg)" font-size="12" font-family="var(--font-sans)" font-weight="600">whole prompt at once</text>
+    <text x="125" y="58" text-anchor="middle" fill="var(--fg-muted)" font-size="11" font-family="var(--font-mono)">n tokens in, KV cache out</text>
+
+    <text x="286" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">DECODE — once per token, sequential, memory-bound</text>
+    {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+      <g>
+        <rect x={286 + i * 52} y="22" width="40" height="44" rx="5" fill="var(--series-2)" opacity="0.16" stroke="var(--series-2)" stroke-width="1.5" />
+        <text x={306 + i * 52} y="49" text-anchor="middle" fill="var(--fg)" font-size="11" font-family="var(--font-mono)">t{i + 1}</text>
+      </g>
+    ))}
+    <text x="650" y="49" fill="var(--fg-faint)" font-size="14" font-family="var(--font-sans)">…</text>
+
+    <path d="M0 80 H250" stroke="var(--series-1)" stroke-width="1.5" />
+    <path d="M0 76 v8 M250 76 v8" stroke="var(--series-1)" stroke-width="1.5" />
+    <text x="125" y="98" text-anchor="middle" fill="var(--series-1)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">time to first token</text>
+
+    <path d="M286 80 H338" stroke="var(--series-2)" stroke-width="1.5" />
+    <path d="M286 76 v8 M338 76 v8" stroke="var(--series-2)" stroke-width="1.5" />
+    <text x="312" y="98" text-anchor="middle" fill="var(--series-2)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">per-token latency</text>
+
+    <line x1="0" y1="122" x2="700" y2="122" stroke="var(--line)" stroke-width="1" />
+
+    <text x="0" y="146" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">WHAT LIMITS IT</text>
+    <rect x="0" y="156" width="250" height="46" rx="6" fill="var(--bg-subtle)" stroke="var(--line)" stroke-width="1" />
+    <text x="125" y="174" text-anchor="middle" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">arithmetic units</text>
+    <text x="125" y="190" text-anchor="middle" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">scales with prompt length</text>
+
+    <rect x="286" y="156" width="414" height="46" rx="6" fill="var(--bg-subtle)" stroke="var(--line)" stroke-width="1" />
+    <text x="493" y="174" text-anchor="middle" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">memory bandwidth</text>
+    <text x="493" y="190" text-anchor="middle" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">scales with output length × model size</text>
+  </svg>
+</Figure>
+
+Once you have this split, a pile of unrelated-looking observations collapse into one explanation. A long prompt delays the first token but not the ones after it. A long *output* costs time roughly linearly, regardless of prompt size. Batching helps throughput enormously but makes any single request slower to start. All three are the same fact seen from different angles.
+
+## The KV cache is the thing that actually fills up
+
+Decode is memory-bound partly because of the weights, and increasingly because of the **KV cache**.
+
+Attention needs the key and value vectors for every previous token. Recomputing them at each step would be quadratic and absurd, so they are computed once and kept. NVIDIA gives the size directly:[^1]
+
+```
+KV cache bytes per token = 2 × num_layers × (num_heads × dim_head) × precision_in_bytes
+```
+
+The leading `2` is the K and the V. Everything else is fixed by the architecture, which means **the cache grows linearly with context length and there is nothing clever you can do about the slope** — only the constant.
+
+That constant is what grouped-query attention attacks. Multi-query attention collapses all key-value heads into one, which is fast but "can lead to quality degradation"; GQA uses "an intermediate (more than one, less than number of query heads) number of key-value heads" and reaches "quality close to multi-head attention with comparable speed to MQA."[^2] It is not a minor tuning knob:
+
+<Chart
+  type="line"
+  logY
+  height={340}
+  caption="KV cache for one sequence on a 70B-class model (80 layers, 128-dim heads, fp16), with 64 key-value heads versus 8. The <b>8× gap is constant</b> — GQA moves the line down, it cannot flatten it. Computed from the formula above; a real deployment also holds the weights, roughly 140 GB at fp16."
+  label="Logarithmic line chart comparing KV cache size from 1K to 128K context for multi-head attention versus grouped-query attention"
+  labels={['1K', '4K', '16K', '64K', '128K']}
+  series={[
+    { name: '64 KV heads (MHA)', data: [2.5, 10, 40, 160, 320] },
+    { name: '8 KV heads (GQA)', data: [0.3125, 1.25, 5, 20, 40] },
+  ]}
+  yTitle="KV cache, GiB (log scale)"
+  xTitle="Context length"
+  format="plain"
+/>
+
+This is the honest answer to "why is the context window that size and not bigger." The window is not a number someone picked. It is where the KV cache stops fitting next to the weights at a batch size that still makes economic sense.
+
+## Why batching is not optional
+
+If decode is bandwidth-bound, the fix follows mechanically. The expensive part of a decode step is *reading the weights*, and that read is the same whether you are generating one token or thirty-two.
+
+<Figure
+  caption="A decode step reads the entire weight set from memory regardless of how many sequences are in flight. Batching does not make the read cheaper — it makes the read produce more tokens. This is why serving throughput and single-request latency pull in opposite directions."
+  label="Diagram comparing a batch of one, where one weight read yields one token, against a batch of thirty-two, where the same read yields thirty-two tokens"
+>
+  <svg viewBox="0 0 700 196" width="100%" role="img" aria-labelledby="batch-title">
+    <title id="batch-title">One weight read produces one token at batch 1, or many tokens at batch 32</title>
+
+    <text x="0" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">BATCH = 1</text>
+    <rect x="0" y="22" width="150" height="38" rx="6" fill="var(--bg-subtle)" stroke="var(--line)" stroke-width="1" />
+    <text x="75" y="40" text-anchor="middle" fill="var(--fg)" font-size="11" font-family="var(--font-mono)">read ~140 GB</text>
+    <text x="75" y="53" text-anchor="middle" fill="var(--fg-muted)" font-size="10" font-family="var(--font-sans)">of weights</text>
+    <path d="M156 41 H186" stroke="var(--fg-faint)" stroke-width="1.5" />
+    <path d="M180 37 l6 4 -6 4" fill="var(--fg-faint)" />
+    <rect x="192" y="30" width="26" height="22" rx="4" fill="var(--series-2)" opacity="0.2" stroke="var(--series-2)" stroke-width="1.3" />
+    <text x="205" y="45" text-anchor="middle" fill="var(--fg)" font-size="10" font-family="var(--font-mono)">1</text>
+    <text x="236" y="45" fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-sans)">token per read</text>
+
+    <text x="0" y="92" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">BATCH = 32</text>
+    <rect x="0" y="102" width="150" height="38" rx="6" fill="var(--bg-subtle)" stroke="var(--line)" stroke-width="1" />
+    <text x="75" y="120" text-anchor="middle" fill="var(--fg)" font-size="11" font-family="var(--font-mono)">read ~140 GB</text>
+    <text x="75" y="133" text-anchor="middle" fill="var(--fg-muted)" font-size="10" font-family="var(--font-sans)">of weights — unchanged</text>
+    <path d="M156 121 H186" stroke="var(--fg-faint)" stroke-width="1.5" />
+    <path d="M180 117 l6 4 -6 4" fill="var(--fg-faint)" />
+    {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((i) => (
+      <rect x={192 + (i % 12) * 22} y="110" width="18" height="22" rx="4" fill="var(--series-3)" opacity="0.25" stroke="var(--series-3)" stroke-width="1.2" />
+    ))}
+    <text x="466" y="125" fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-sans)">…32 tokens per read</text>
+
+    <line x1="0" y1="158" x2="700" y2="158" stroke="var(--line)" stroke-width="1" />
+    <text x="0" y="180" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">Throughput scales with batch size. <tspan fill="var(--fg-muted)">Each individual request waits longer to be scheduled.</tspan></text>
+  </svg>
+</Figure>
+
+The catch is that batching in the obvious way — collect *n* requests, run them together, return them together — wastes most of the benefit, because sequences finish at different times and the whole batch waits for the slowest. Production servers use **continuous batching** instead, admitting and retiring sequences at the granularity of a single decode step.
+
+Doing that requires solving a memory problem. Every sequence's KV cache grows unpredictably, so reserving a contiguous block per sequence means reserving for the worst case and wasting the rest. vLLM's PagedAttention borrows virtual memory paging: the KV cache lives in fixed-size blocks that need not be contiguous. The paper reports "near-zero waste in KV cache memory" and 2–4× throughput at the same latency versus the prior state of the art.[^3]
+
+<Mermaid
+  caption="Where each optimisation sits. Everything on the left attacks prefill; everything on the right attacks decode. They are largely independent, which is why a stack can adopt them one at a time."
+  label="Flowchart of a request through a serving stack, showing prompt caching and prefill on one side and continuous batching, paged KV cache and speculative decoding on the other"
+  code={`
+flowchart LR
+  R["Request<br/>arrives"] --> C{"Prompt prefix<br/>already cached?"}
+  C -- "Yes" --> S["Skip prefill<br/>for that prefix"]
+  C -- "No" --> P["Prefill<br/>compute-bound"]
+  S --> Q["Scheduler<br/>continuous batching"]
+  P --> Q
+  Q --> D["Decode step<br/>memory-bound"]
+  D --> K["Paged KV cache"]
+  K --> D
+  D --> V["Speculative decoding<br/>draft + verify"]
+  V --> O["Tokens<br/>stream out"]
+`}
+/>
+
+### When prefill and decode fight
+
+Continuous batching creates a scheduling problem the two-phase split makes inevitable. A decode step is tiny; a prefill for a 100K-token prompt is enormous. Put them on the same device and the long prefill occupies the GPU while every in-flight generation stalls — one arriving request adds a visible stutter to everyone else's stream.
+
+**Chunked prefill** is the fix: split a large prefill into pieces and batch those pieces alongside decode steps, so generation keeps advancing. vLLM prioritises decode requests and batches pending decodes before scheduling prefill work.[^6]
+
+It is a redistribution, not a free win, and the direction is exactly what you would predict. Smaller chunks protect inter-token latency for sequences already generating, at the cost of time to first token for the request being admitted; larger chunks do the reverse.[^6] The knob does not remove the conflict between the two phases — it just decides which request absorbs it.
+
+**Speculative decoding** attacks the same bottleneck from another direction. A small draft model proposes several tokens; the large model verifies them in a single parallel pass — which it can do cheaply, because verification looks like prefill rather than decode. The original paper reports 2–3× acceleration "with identical outputs," and this matters more than the speedup: the sampling scheme is constructed so the output distribution is unchanged.[^4] You are not trading quality for latency. You are exploiting the fact that the GPU was idle anyway.
+
+## Prompt caching: the part you actually control
+
+Everything above happens inside someone else's serving stack. Prompt caching is the one lever exposed to you, and it makes sense only in terms of prefill: if a prefix has been prefilled before, its KV cache can be reused instead of recomputed.
+
+The pricing shows how large the saving is. On Claude Opus 5, base input is $5.00/MTok, a 5-minute cache write is 1.25× that, a 1-hour write is 2×, and a **cache read is 0.1× — $0.50/MTok**.[^5]
+
+<Chart
+  type="bar"
+  horizontal
+  valueLabels
+  height={250}
+  caption="Published Claude Opus 5 input pricing per million tokens. A cache read costs a tenth of a fresh read, which is the price of skipping prefill. The write premium is paid once; every subsequent hit collects the discount."
+  label="Horizontal bar chart of Claude Opus 5 input token prices: base 5 dollars, 5-minute cache write 6.25, 1-hour cache write 10, cache read 0.50 per million tokens"
+  labels={['Base input', '5-min cache write', '1-hour cache write', 'Cache read']}
+  series={[{ name: 'Price per MTok', data: [5.0, 6.25, 10.0, 0.5] }]}
+  xTitle="USD per million input tokens"
+  format="usd"
+/>
+
+The mechanism is a **prefix match**, and that word does the work. Caching is keyed on a cumulative hash of everything up to a breakpoint, rendered in the order `tools → system → messages`.[^5] Any byte that changes anywhere in the prefix changes the hash, and everything after it is recomputed.
+
+This produces the single most common way caching silently fails: putting the breakpoint after something that varies.
+
+```python
+# Broken — the timestamp changes every request, so the prefix hash does too.
+# You pay the 1.25x write premium on every call and never get a hit.
+system = [
+    {"type": "text", "text": LONG_STABLE_CONTEXT},
+    {"type": "text",
+     "text": f"Current time: {datetime.now()}",
+     "cache_control": {"type": "ephemeral"}},
+]
+
+# Correct — the breakpoint sits on the last block whose prefix is identical
+# across requests. Volatile content moves after it, uncached.
+system = [
+    {"type": "text", "text": LONG_STABLE_CONTEXT,
+     "cache_control": {"type": "ephemeral"}},
+]
+messages = [{"role": "user", "content": f"Current time: {datetime.now()}\n{query}"}]
+```
+
+Three further details decide whether caching works at all:
+
+- **There is a minimum.** Prefixes below the model's threshold are not cached even when marked — 512 tokens on Claude Opus 5, up to 4,096 on other models.[^5] Below it, `cache_control` is silently a no-op.
+- **You get four breakpoints.** Automatic caching consumes one of them.[^5]
+- **The TTL runs from the start of the request, not the end.** A response that streams for four minutes leaves about one minute of a five-minute window for the follow-up.[^5]
+
+Verification is one line and worth wiring into your logs permanently: if `usage.cache_read_input_tokens` is zero across requests that share a prefix, something is invalidating it.
+
+## What this costs you
+
+Every technique above trades something. Being specific about what separates engineering from cargo-culting.
+
+**Throughput and latency are in tension, structurally.** Larger batches mean more tokens per weight read and a longer wait for any given request to be scheduled. There is no batch size that optimises both, which is why serving stacks expose it as a knob rather than choosing for you — and why a p99 latency target and a cost-per-token target are negotiating with each other, not merely coexisting.
+
+**The advertised context window is not a promise about your batch.** A million-token window is a statement about what the model can attend to, not about how many concurrent million-token sequences a deployment can hold. The KV cache is the binding constraint, and it is per sequence. Long-context and high-concurrency are the same budget spent twice.
+
+**Prefill and decode want different hardware.** One is starved for arithmetic, the other for bandwidth. Running both on the same device means at least one is being under-served at any moment, and that they interleave badly under load — chunked prefill manages the collision but cannot remove it. This is why disaggregating the two phases onto separate pools is now a serious deployment pattern rather than an exotic one.
+
+**Speculative decoding is a bet, and losing costs real compute.** When the draft model's proposals are rejected, the verification pass is discarded work. On workloads where the draft model predicts poorly — unusual domains, heavy tool-call syntax, low-temperature outputs it was not trained on — acceptance rates fall and the technique can be net negative. It pays off on predictable text and degrades quietly on the rest.
+
+**Cache writes cost more than no caching at all.** A 1.25× write that never gets a hit is a 25% surcharge, and a 2× one-hour write that never gets a hit is worse. Caching is only a saving if the prefix is genuinely reused within the TTL — so the traffic pattern, not the prompt size, decides whether it is worth enabling.
+
+## Takeaways
+
+- **Prefill and decode are different workloads on the same hardware.** One is compute-bound and parallel; the other is memory-bandwidth-bound and sequential. Almost every LLM performance question resolves to which one you are asking about.
+- **Prompt length buys time to first token; output length buys everything after.** They are separate budgets and should be optimised separately.
+- **The KV cache grows linearly with context and cannot be made sublinear** — GQA changes the constant, not the slope. It, not the advertised window, is what limits concurrency.
+- **Batching is how decode is made economical**, and it works precisely because the weight read is fixed cost. That is also why it raises per-request latency.
+- **Prompt caching is prefill reuse, matched on an exact prefix.** One varying byte early in the prompt turns the whole thing into a surcharge. Log `cache_read_input_tokens` and watch it.
+- **Speculative decoding is free latency only when the draft model is right.** Measure acceptance on your own traffic before assuming the published speedup.
+
+## References
+
+[^1]: NVIDIA, [Mastering LLM Techniques: Inference Optimization](https://developer.nvidia.com/blog/mastering-llm-techniques-inference-optimization/) — prefill/decode characterisation and the KV cache size formula.
+[^2]: Ainslie et al., [GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints](https://arxiv.org/abs/2305.13245) (arXiv:2305.13245).
+[^3]: Kwon et al., [Efficient Memory Management for Large Language Model Serving with PagedAttention](https://arxiv.org/abs/2309.06180) (arXiv:2309.06180) — vLLM; near-zero KV cache waste and 2–4× throughput.
+[^4]: Leviathan et al., [Fast Inference from Transformers via Speculative Decoding](https://arxiv.org/abs/2211.17192) (arXiv:2211.17192) — 2–3× with identical outputs.
+[^5]: Anthropic, [Prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) — pricing multipliers, minimum cacheable prefix, breakpoint limit, TTL semantics and prefix invalidation.
+[^6]: vLLM, [Optimization and tuning](https://docs.vllm.ai/en/latest/configuration/optimization.html) — chunked prefill, decode prioritisation and the ITL/TTFT tradeoff.

@@ -81,6 +81,21 @@ const { code, caption, label } = Astro.props;
     }
 
     await renderAll();
+
+    /*
+     * Diagrams render after the document lays out, so each one grows the page
+     * and pushes everything below it down. The browser has already jumped to
+     * any `#hash` by then, leaving the reader in the wrong place — visibly
+     * wrong for the table of contents, which is all in-page anchors. Re-run
+     * the jump once the heights are final.
+     */
+    if (location.hash) {
+      const target = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+      target?.scrollIntoView({
+        behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+      });
+    }
+
     document.addEventListener('themechange', () => void renderAll());
   }
 </script>

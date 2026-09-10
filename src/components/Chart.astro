@@ -70,7 +70,9 @@ function fmt(v: number | null | undefined): string {
     case 'usd':
       return Math.abs(v) >= 1000
         ? '$' + (v / 1000).toLocaleString('en-US', { maximumFractionDigits: 1 }) + 'k'
-        : '$' + v.toLocaleString('en-US', { maximumFractionDigits: 2 });
+        // Money reads wrong with a ragged number of decimals ($0.5 next to
+        // $6.25), so pin both bounds below the thousands cutoff.
+        : '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     case 'percent':
       return v.toLocaleString('en-US', { maximumFractionDigits: 1 }) + '%';
     case 'compact':
@@ -165,7 +167,8 @@ function fmt(v: number | null | undefined): string {
           case 'usd':
             return Math.abs(v) >= 1000
               ? '$' + (v / 1000).toLocaleString('en-US', { maximumFractionDigits: 1 }) + 'k'
-              : '$' + v.toLocaleString('en-US', { maximumFractionDigits: 2 });
+              : '$' +
+                v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
           case 'percent':
             return v.toLocaleString('en-US', { maximumFractionDigits: 1 }) + '%';
           case 'compact':
@@ -186,6 +189,17 @@ function fmt(v: number | null | undefined): string {
       };
     }
 
+    const DIRECT_LABEL_FONT = () => '600 12px ' + (css('--font-sans') || 'system-ui');
+
+    /** Width the widest series name needs, plus the gap and a little slack. */
+    function measureLabelRoom(series: { name: string }[]): number {
+      const ctx = document.createElement('canvas').getContext('2d');
+      if (!ctx) return 72;
+      ctx.font = DIRECT_LABEL_FONT();
+      const widest = Math.max(...series.map((s) => ctx.measureText(s.name).width));
+      return Math.ceil(widest) + 14;
+    }
+
     /**
      * Direct labels for line charts with few series: identity should not depend
      * on a colour-to-legend lookup. Skipped past four series, where the labels
@@ -201,7 +215,7 @@ function fmt(v: number | null | undefined): string {
         if (sets.length < 2 || sets.length > 4) return;
         const ctx = chart.ctx;
         ctx.save();
-        ctx.font = '600 12px ' + (css('--font-sans') || 'system-ui');
+        ctx.font = DIRECT_LABEL_FONT();
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
         const placed: number[] = [];
@@ -370,7 +384,12 @@ function fmt(v: number | null | undefined): string {
         }
 
         const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-        const labelRoom = base === 'line' && datasets.length >= 2 && datasets.length <= 4 ? 72 : 8;
+
+        // Reserve room for direct labels by measuring them, not by guessing:
+        // a fixed padding clips any series name longer than it.
+        const wantsDirectLabels =
+          base === 'line' && datasets.length >= 2 && datasets.length <= 4;
+        const labelRoom = wantsDirectLabels ? measureLabelRoom(cfg.series) : 8;
 
         return {
           type: base,
