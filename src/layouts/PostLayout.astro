@@ -2,7 +2,6 @@
 import type { MarkdownHeading } from 'astro';
 import BaseLayout from './BaseLayout.astro';
 import TagBadge from '../components/TagBadge.astro';
-import { SITE, SOCIALS } from '../consts';
 import { withBase } from '../utils/url';
 import { formatDate, isoDate, readingTime, type Post } from '../utils/posts';
 
@@ -80,33 +79,21 @@ const toc = headings.filter(
       <slot />
     </div>
 
-    <footer class="post__footer" data-pagefind-ignore>
-      <div class="author">
-        <div class="author__mark" aria-hidden="true"></div>
-        <div>
-          <p class="author__name">{SITE.author}</p>
-          <p class="author__links">
-            {SOCIALS.map((s) => <a href={s.href} rel="noopener">{s.label}</a>)}
-          </p>
-        </div>
-      </div>
-
-      {
-        related.length > 0 && (
-          <section class="related">
-            <h2 class="related__title">Keep reading</h2>
-            <ul class="related__list">
-              {related.map((r) => (
-                <li>
-                  <a href={withBase(`/posts/${r.id}`)}>{r.data.title}</a>
-                  <span class="related__date">{formatDate(r.data.pubDate)}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )
-      }
-    </footer>
+    {
+      related.length > 0 && (
+        <footer class="post__footer" data-pagefind-ignore>
+          <h2 class="related__title">Keep reading</h2>
+          <ul class="related__list">
+            {related.map((r) => (
+              <li>
+                <a href={withBase(`/posts/${r.id}`)}>{r.data.title}</a>
+                <span class="related__date">{formatDate(r.data.pubDate)}</span>
+              </li>
+            ))}
+          </ul>
+        </footer>
+      )
+    }
   </article>
 </BaseLayout>
 
@@ -206,48 +193,6 @@ const toc = headings.filter(
     margin-top: 3.5rem;
     padding-top: 1.75rem;
     border-top: 1px solid var(--line);
-  }
-
-  .author {
-    display: flex;
-    align-items: center;
-    gap: 0.85rem;
-  }
-
-  .author__mark {
-    width: 2.4rem;
-    height: 2.4rem;
-    border-radius: 8px;
-    background: linear-gradient(135deg, var(--accent), color-mix(in oklab, var(--accent) 45%, var(--bg-subtle)));
-    flex-shrink: 0;
-  }
-
-  .author__name {
-    margin: 0;
-    font-weight: 620;
-    font-size: 0.9375rem;
-  }
-
-  .author__links {
-    margin: 0.15rem 0 0;
-    display: flex;
-    gap: 0.85rem;
-    font-size: 0.8125rem;
-  }
-
-  .author__links a {
-    color: var(--fg-muted);
-    text-decoration: none;
-  }
-
-  .author__links a:hover {
-    color: var(--accent);
-    text-decoration: underline;
-    text-underline-offset: 3px;
-  }
-
-  .related {
-    margin-top: 2.5rem;
   }
 
   .related__title {

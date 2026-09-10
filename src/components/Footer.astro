@@ -1,33 +1,71 @@
 ---
-import { SITE, SOCIALS } from '../consts';
+import { SITE } from '../consts';
 import { withBase } from '../utils/url';
 
 const year = new Date().getFullYear();
+
+/*
+ * Brand marks are filled paths because that is how they are published; RSS is
+ * stroked to match the rest of the site's iconography. Every icon link carries
+ * a label — an icon alone is not an accessible name.
+ */
+const icons = [
+  {
+    label: 'GitHub',
+    href: 'https://github.com/sehyunnoh',
+    rel: 'me noopener',
+    path: 'M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.21.09 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.62-5.49 5.92.43.37.82 1.1.82 2.22 0 1.6-.02 2.89-.02 3.29 0 .32.22.7.83.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5z',
+  },
+  {
+    label: 'LinkedIn',
+    href: 'https://www.linkedin.com/in/devnoh',
+    rel: 'me noopener',
+    path: 'M20.45 20.45h-3.56v-5.57c0-1.33-.03-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.35V9h3.41v1.56h.05a3.74 3.74 0 0 1 3.37-1.85c3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13zM7.12 20.45H3.55V9h3.57v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.72v20.56C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.72V1.72C24 .77 23.2 0 22.22 0z',
+  },
+];
 ---
 
 <footer class="site-footer">
   <div class="site-footer__inner">
-    <p class="site-footer__meta">
-      &copy; {year} {SITE.author}. Built with Astro, deployed on GitHub Pages.
-    </p>
+    <p class="site-footer__meta">&copy; {year} {SITE.author}</p>
+
     <nav class="site-footer__links" aria-label="Footer">
-      {SOCIALS.map((s) => <a href={s.href} rel="me noopener">{s.label}</a>)}
-      <a href={withBase('/rss.xml')}>RSS</a>
-      <a href={withBase('/privacy')}>Privacy</a>
+      {
+        icons.map((icon) => (
+          <a href={icon.href} rel={icon.rel} class="icon-link" aria-label={icon.label} title={icon.label}>
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d={icon.path} fill="currentColor" />
+            </svg>
+          </a>
+        ))
+      }
+
+      <a href={withBase('/rss.xml')} class="icon-link" aria-label="RSS feed" title="RSS feed">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path
+            d="M5 10.5a8.5 8.5 0 0 1 8.5 8.5M5 4.5A14.5 14.5 0 0 1 19.5 19"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"></path>
+          <circle cx="5.9" cy="18.1" r="1.9" fill="currentColor"></circle>
+        </svg>
+      </a>
+
+      <a href={withBase('/privacy')} class="text-link">Privacy</a>
     </nav>
   </div>
 </footer>
 
 <style>
   .site-footer {
-    margin-top: 5rem;
     border-top: 1px solid var(--line);
   }
 
   .site-footer__inner {
     max-width: 72rem;
     margin-inline: auto;
-    padding: 1.75rem 1.25rem 3rem;
+    padding: 1.25rem 1.25rem 1.5rem;
     display: flex;
     flex-wrap: wrap;
     gap: 0.75rem 1.5rem;
@@ -43,15 +81,39 @@ const year = new Date().getFullYear();
 
   .site-footer__links {
     display: flex;
-    gap: 1rem;
+    align-items: center;
+    gap: 0.35rem;
   }
 
-  .site-footer__links a {
+  .icon-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    /* Comfortably past the 24px minimum for a pointer target. */
+    width: 2rem;
+    height: 2rem;
+    border-radius: 6px;
+    color: var(--fg-muted);
+    transition: color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .icon-link svg {
+    width: 1.05rem;
+    height: 1.05rem;
+  }
+
+  .icon-link:hover {
+    color: var(--accent);
+    background-color: var(--bg-subtle);
+  }
+
+  .text-link {
+    margin-left: 0.4rem;
     color: var(--fg-muted);
     text-decoration: none;
   }
 
-  .site-footer__links a:hover {
+  .text-link:hover {
     color: var(--accent);
     text-decoration: underline;
     text-underline-offset: 3px;
