@@ -13,6 +13,7 @@ const year = new Date().getFullYear();
     <nav class="site-footer__links" aria-label="Footer">
       {SOCIALS.map((s) => <a href={s.href} rel="me noopener">{s.label}</a>)}
       <a href={withBase('/rss.xml')}>RSS</a>
+      <a href={withBase('/privacy')}>Privacy</a>
     </nav>
   </div>
 </footer>

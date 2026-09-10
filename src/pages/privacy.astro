@@ -1,0 +1,171 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { SITE, SOCIALS } from '../consts';
+import { withBase } from '../utils/url';
+
+// Bump this whenever the disclosures below change.
+const LAST_UPDATED = new Date('2026-09-10T00:00:00Z');
+const updated = new Intl.DateTimeFormat('en-US', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+  timeZone: 'UTC',
+}).format(LAST_UPDATED);
+---
+
+<BaseLayout
+  title="Privacy"
+  description={`What ${SITE.title} collects, what it does not, and which third parties see anything.`}
+  path="/privacy"
+  narrow
+>
+  <h1 class="page-title">Privacy</h1>
+  <p class="page-sub">Last updated {updated}</p>
+
+  <div class="summary">
+    <p class="summary__title">The short version</p>
+    <p>
+      This is a static blog. There are no accounts, no cookies, no advertising and no cross-site
+      tracking. Three parties see something when you load a page: a privacy-focused analytics
+      service that records an anonymous page view, GitHub, which serves the files and logs your IP
+      for security, and Google, which serves the web fonts.
+    </p>
+  </div>
+
+  <div class="prose policy">
+    <h2>What is collected</h2>
+
+    <h3>Analytics</h3>
+    <p>
+      This site uses <a href="https://umami.is" rel="noopener">Umami</a>, a cookieless analytics
+      service, to count page views. Per its documentation it records{' '}
+      <strong>page views, referrer URLs, browser, operating system, device type and country of
+      origin</strong>, uses no cookies in its tracking code, collects no personally identifiable
+      information and anonymises what it does collect. It does not track you across other websites.
+    </p>
+    <p>
+      There is no way for me to identify an individual reader from this data, and I do not try to.
+      What I look at is which posts get read and where readers arrive from.
+    </p>
+
+    <h3>Server logs</h3>
+    <p>
+      The site is hosted on GitHub Pages. GitHub's documentation states plainly that when a GitHub
+      Pages site is visited, "the visitor's IP address is logged and stored for security purposes,
+      regardless of whether the visitor has signed into GitHub or not." That logging is GitHub's,
+      not mine — I have no access to it. It is governed by the{' '}
+      <a href="https://docs.github.com/en/site-policy/privacy-policies/github-privacy-statement" rel="noopener">
+        GitHub Privacy Statement</a>.
+    </p>
+
+    <h3>Fonts</h3>
+    <p>
+      Pages load the Inter and JetBrains Mono typefaces from Google Fonts
+      (<code>fonts.googleapis.com</code> and <code>fonts.gstatic.com</code>). Fetching them sends
+      your IP address and browser details to Google, the way any request to a third-party server
+      does. No cookie is set by these requests. Google's handling of that data falls under the{' '}
+      <a href="https://policies.google.com/privacy" rel="noopener">Google Privacy Policy</a>.
+    </p>
+
+    <h3>Search</h3>
+    <p>
+      The <a href={withBase('/search')}>search page</a> runs{' '}
+      <a href="https://pagefind.app" rel="noopener">Pagefind</a> entirely in your browser against a
+      static index downloaded with the page. Your queries are never sent to a server and are not
+      recorded anywhere.
+    </p>
+
+    <h3>Theme preference</h3>
+    <p>
+      Choosing light or dark mode stores a single value — <code>theme</code> — in your browser's{' '}
+      <code>localStorage</code>. It never leaves your device, is not readable by anyone else, and is
+      not a cookie. Clearing your site data removes it, and the site then follows your operating
+      system's preference.
+    </p>
+
+    <h2>What is not collected</h2>
+    <ul>
+      <li>No cookies are set by this site.</li>
+      <li>No advertising, ad networks or advertising identifiers.</li>
+      <li>No cross-site or cross-device tracking, and no fingerprinting.</li>
+      <li>No accounts, sign-ups, comments or newsletter — there is nothing to submit.</li>
+      <li>No email addresses or contact details are collected anywhere on this site.</li>
+      <li>Nothing is sold or shared with data brokers.</li>
+    </ul>
+
+    <h2>Links to other sites</h2>
+    <p>
+      Posts link out to documentation, papers and source repositories. Following one of those links
+      takes you to a site with its own privacy practices, which I have no control over and do not
+      vouch for.
+    </p>
+
+    <h2>Your data rights</h2>
+    <p>
+      Because nothing collected here identifies you, there is no personal record for me to look up,
+      export or delete. If you have a question about any of this, or think something on this page is
+      inaccurate, the fastest route is to open an issue on the{' '}
+      <a href="https://github.com/sehyunnoh/techblog" rel="noopener">site's repository</a> or reach
+      me on {SOCIALS.map((s, i) => (
+        <>{i > 0 ? ' or ' : ''}<a href={s.href} rel="noopener">{s.label}</a></>
+      ))}.
+    </p>
+
+    <h2>Changes</h2>
+    <p>
+      If what this site collects changes, this page changes with it and the date at the top is
+      updated. The page lives in the site's public{' '}
+      <a href="https://github.com/sehyunnoh/techblog/commits/main/src/pages/privacy.astro" rel="noopener">
+        Git history</a>, so every revision is visible.
+    </p>
+  </div>
+</BaseLayout>
+
+<style>
+  .page-title {
+    margin: 0;
+    font-size: 2rem;
+    letter-spacing: -0.028em;
+    font-weight: 680;
+  }
+
+  .page-sub {
+    margin: 0.4rem 0 1.75rem;
+    color: var(--fg-faint);
+    font-size: 0.8125rem;
+  }
+
+  .summary {
+    padding: 1.15rem 1.35rem;
+    background-color: var(--bg-subtle);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin-bottom: 2.5rem;
+  }
+
+  .summary__title {
+    margin: 0 0 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 620;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+
+  .summary p:last-child {
+    margin: 0;
+    line-height: 1.7;
+    font-size: 0.9375rem;
+  }
+
+  .policy {
+    max-width: none;
+  }
+
+  /* The first heading sits right under the summary card, so drop the rule. */
+  .policy :global(h2:first-of-type) {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+  }
+</style>
