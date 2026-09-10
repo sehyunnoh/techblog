@@ -1,0 +1,286 @@
+---
+import type { MarkdownHeading } from 'astro';
+import BaseLayout from './BaseLayout.astro';
+import TagBadge from '../components/TagBadge.astro';
+import { SITE, SOCIALS } from '../consts';
+import { withBase } from '../utils/url';
+import { formatDate, isoDate, readingTime, type Post } from '../utils/posts';
+
+interface Props {
+  post: Post;
+  headings: MarkdownHeading[];
+  related: Post[];
+}
+
+const { post, headings, related } = Astro.props;
+const { title, description, pubDate, updatedDate, tags } = post.data;
+const minutes = readingTime(post.body);
+
+// Only h2/h3 belong in the contents list; deeper levels make it a wall.
+const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
+---
+
+<BaseLayout
+  title={title}
+  description={description}
+  path={`/posts/${post.id}`}
+  type="article"
+  publishedTime={pubDate}
+  modifiedTime={updatedDate}
+  tags={tags}
+  noindex={post.data.draft}
+>
+  {/* data-pagefind-body scopes the search index to post content, keeping the
+      chrome (nav, footer, tag lists) out of every result excerpt. */}
+  <article class="post" data-pagefind-body>
+    <header class="post__header">
+      <div class="post__meta">
+        <time datetime={isoDate(pubDate)}>{formatDate(pubDate)}</time>
+        <span aria-hidden="true">·</span>
+        <span>{minutes} min read</span>
+        {
+          updatedDate && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span>Updated {formatDate(updatedDate)}</span>
+            </>
+          )
+        }
+      </div>
+
+      <h1 class="post__title" data-pagefind-meta="title">{title}</h1>
+      <p class="post__lede">{description}</p>
+
+      <div class="post__tags">
+        {tags.map((tag) => <TagBadge tag={tag} size="md" />)}
+      </div>
+    </header>
+
+    {
+      toc.length >= 3 && (
+        <nav class="toc" aria-label="Table of contents" data-pagefind-ignore>
+          <p class="toc__title">Contents</p>
+          <ol class="toc__list">
+            {toc.map((h) => (
+              <li class:list={['toc__item', h.depth === 3 && 'toc__item--sub']}>
+                <a href={`#${h.slug}`}>{h.text}</a>
+              </li>
+            ))}
+          </ol>
+        </nav>
+      )
+    }
+
+    <div class="prose post__body">
+      <slot />
+    </div>
+
+    <footer class="post__footer" data-pagefind-ignore>
+      <div class="author">
+        <div class="author__mark" aria-hidden="true"></div>
+        <div>
+          <p class="author__name">{SITE.author}</p>
+          <p class="author__links">
+            {SOCIALS.map((s) => <a href={s.href} rel="noopener">{s.label}</a>)}
+          </p>
+        </div>
+      </div>
+
+      {
+        related.length > 0 && (
+          <section class="related">
+            <h2 class="related__title">Keep reading</h2>
+            <ul class="related__list">
+              {related.map((r) => (
+                <li>
+                  <a href={withBase(`/posts/${r.id}`)}>{r.data.title}</a>
+                  <span class="related__date">{formatDate(r.data.pubDate)}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )
+      }
+    </footer>
+  </article>
+</BaseLayout>
+
+<style>
+  .post {
+    max-width: 46rem;
+    margin-inline: auto;
+  }
+
+  .post__header {
+    padding-bottom: 1.75rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .post__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    font-size: 0.8125rem;
+    color: var(--fg-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .post__title {
+    margin: 0.6rem 0 0;
+    font-size: clamp(1.85rem, 1.35rem + 2vw, 2.65rem);
+    line-height: 1.15;
+    letter-spacing: -0.028em;
+    font-weight: 680;
+  }
+
+  .post__lede {
+    margin: 0.9rem 0 0;
+    font-size: 1.075rem;
+    line-height: 1.65;
+    color: var(--fg-muted);
+  }
+
+  .post__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: 1.25rem;
+  }
+
+  .toc {
+    margin: 2rem 0 0;
+    padding: 1.1rem 1.35rem;
+    background-color: var(--bg-subtle);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+  }
+
+  .toc__title {
+    margin: 0 0 0.6rem;
+    font-size: 0.75rem;
+    font-weight: 620;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+
+  .toc__list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    counter-reset: toc;
+  }
+
+  .toc__item {
+    line-height: 1.75;
+    font-size: 0.9rem;
+  }
+
+  .toc__item--sub {
+    padding-left: 1.1rem;
+    font-size: 0.85rem;
+  }
+
+  .toc__item a {
+    color: var(--fg-muted);
+    text-decoration: none;
+  }
+
+  .toc__item a:hover {
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .post__body {
+    margin-top: 2.25rem;
+    max-width: none;
+  }
+
+  .post__footer {
+    margin-top: 3.5rem;
+    padding-top: 1.75rem;
+    border-top: 1px solid var(--line);
+  }
+
+  .author {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+  }
+
+  .author__mark {
+    width: 2.4rem;
+    height: 2.4rem;
+    border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent), color-mix(in oklab, var(--accent) 45%, var(--bg-subtle)));
+    flex-shrink: 0;
+  }
+
+  .author__name {
+    margin: 0;
+    font-weight: 620;
+    font-size: 0.9375rem;
+  }
+
+  .author__links {
+    margin: 0.15rem 0 0;
+    display: flex;
+    gap: 0.85rem;
+    font-size: 0.8125rem;
+  }
+
+  .author__links a {
+    color: var(--fg-muted);
+    text-decoration: none;
+  }
+
+  .author__links a:hover {
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .related {
+    margin-top: 2.5rem;
+  }
+
+  .related__title {
+    margin: 0 0 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 620;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+
+  .related__list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .related__list li {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.55rem 0;
+    border-top: 1px solid var(--line);
+    font-size: 0.9375rem;
+  }
+
+  .related__list a {
+    color: var(--fg);
+    text-decoration: none;
+  }
+
+  .related__list a:hover {
+    color: var(--accent);
+  }
+
+  .related__date {
+    color: var(--fg-faint);
+    font-size: 0.8125rem;
+    white-space: nowrap;
+  }
+</style>

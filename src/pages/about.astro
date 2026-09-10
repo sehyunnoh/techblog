@@ -1,0 +1,71 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { SITE, SOCIALS } from '../consts';
+import { withBase } from '../utils/url';
+---
+
+<BaseLayout
+  title="About"
+  description={`About ${SITE.title} and its author, ${SITE.author}.`}
+  path="/about"
+  narrow
+>
+  <h1 class="page-title">About</h1>
+
+  <div class="prose about">
+    <p>
+      <strong>{SITE.title}</strong> is a working notebook kept in public. It covers AI and LLM systems,
+      web engineering, and the infrastructure that has to keep both of them up.
+    </p>
+
+    <p>
+      Every post here follows the same rules, because they are the rules that make a technical post
+      worth the reading time:
+    </p>
+
+    <ul>
+      <li>
+        <strong>Show the mechanism.</strong> Diagrams, charts and measured numbers, not adjectives. If
+        a claim can be plotted, it gets plotted.
+      </li>
+      <li>
+        <strong>Name the trade-off.</strong> Every technique costs something. A post that only lists
+        benefits is advertising.
+      </li>
+      <li>
+        <strong>Cite the source.</strong> Each post ends with links to the documentation, papers and
+        benchmarks it leans on — so you can check the work rather than trust it.
+      </li>
+    </ul>
+
+    <h2>Colophon</h2>
+
+    <p>
+      Built with <a href="https://astro.build">Astro</a>, styled with Tailwind CSS, diagrams by
+      Mermaid, charts by Chart.js, search by Pagefind. Deployed to GitHub Pages from
+      <a href="https://github.com/sehyunnoh/techblog">sehyunnoh/techblog</a>. The chart palette is
+      validated for colour-vision deficiency in both light and dark themes, and every chart ships a
+      data table alongside it.
+    </p>
+
+    <h2>Elsewhere</h2>
+
+    <ul>
+      {SOCIALS.map((s) => <li><a href={s.href} rel="me noopener">{s.label}</a></li>)}
+      <li><a href={withBase('/rss.xml')}>RSS feed</a></li>
+    </ul>
+  </div>
+</BaseLayout>
+
+<style>
+  .page-title {
+    margin: 0 0 1.5rem;
+    font-size: 2rem;
+    letter-spacing: -0.028em;
+    font-weight: 680;
+  }
+
+  .about {
+    max-width: none;
+  }
+</style>

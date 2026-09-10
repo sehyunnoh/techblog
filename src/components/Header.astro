@@ -1,0 +1,112 @@
+---
+import { SITE } from '../consts';
+import { withBase, isActive } from '../utils/url';
+import ThemeToggle from './ThemeToggle.astro';
+
+const current = Astro.url.pathname;
+
+const nav = [
+  { label: 'Posts', href: '/posts' },
+  { label: 'Tags', href: '/tags' },
+  { label: 'Search', href: '/search' },
+  { label: 'About', href: '/about' },
+];
+---
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href={withBase('/')}>
+      <span class="brand__mark" aria-hidden="true"></span>
+      <span class="brand__name">{SITE.title}</span>
+    </a>
+
+    <nav class="nav" aria-label="Main">
+      {
+        nav.map((item) => (
+          <a
+            href={withBase(item.href)}
+            class="nav__link"
+            aria-current={isActive(item.href, current) ? 'page' : undefined}
+          >
+            {item.label}
+          </a>
+        ))
+      }
+    </nav>
+
+    <ThemeToggle />
+  </div>
+</header>
+
+<style>
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background-color: color-mix(in oklab, var(--bg) 88%, transparent);
+    backdrop-filter: saturate(1.4) blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .site-header__inner {
+    max-width: 72rem;
+    margin-inline: auto;
+    padding: 0.7rem 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 640;
+    letter-spacing: -0.015em;
+    color: var(--fg);
+    text-decoration: none;
+    margin-right: auto;
+  }
+
+  .brand__mark {
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 2px;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+
+  .nav {
+    display: flex;
+    align-items: center;
+    gap: 0.15rem;
+  }
+
+  .nav__link {
+    padding: 0.35rem 0.6rem;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    color: var(--fg-muted);
+    text-decoration: none;
+    transition: color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .nav__link:hover {
+    color: var(--fg);
+    background-color: var(--bg-subtle);
+  }
+
+  .nav__link[aria-current='page'] {
+    color: var(--fg);
+    font-weight: 550;
+  }
+
+  @media (max-width: 34rem) {
+    .brand__name {
+      display: none;
+    }
+    .nav__link {
+      padding-inline: 0.45rem;
+    }
+  }
+</style>

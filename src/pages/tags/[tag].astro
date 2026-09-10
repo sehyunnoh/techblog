@@ -1,0 +1,85 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PostCard from '../../components/PostCard.astro';
+import { withBase } from '../../utils/url';
+import { getTagCounts, getPostsByTag } from '../../utils/posts';
+import { tagLabel, tagDescription } from '../../tags';
+
+export async function getStaticPaths() {
+  const counts = await getTagCounts();
+  return Promise.all(
+    counts.map(async ({ tag }) => ({
+      params: { tag },
+      props: { tag, posts: await getPostsByTag(tag) },
+    })),
+  );
+}
+
+const { tag, posts } = Astro.props;
+const label = tagLabel(tag);
+const desc = tagDescription(tag);
+---
+
+<BaseLayout
+  title={`${label} posts`}
+  description={desc || `Posts tagged ${label} on lleg's study.`}
+  path={`/tags/${tag}`}
+  narrow
+>
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <a href={withBase('/tags')}>Tags</a>
+    <span aria-hidden="true">/</span>
+    <span>{label}</span>
+  </nav>
+
+  <h1 class="page-title"><span class="hash" aria-hidden="true">#</span>{label}</h1>
+  {desc && <p class="page-sub">{desc}</p>}
+  <p class="count">{posts.length} {posts.length === 1 ? 'post' : 'posts'}</p>
+
+  {posts.map((post) => <PostCard post={post} />)}
+</BaseLayout>
+
+<style>
+  .crumbs {
+    display: flex;
+    gap: 0.45rem;
+    font-size: 0.8125rem;
+    color: var(--fg-faint);
+    margin-bottom: 1rem;
+  }
+
+  .crumbs a {
+    color: var(--fg-muted);
+    text-decoration: none;
+  }
+
+  .crumbs a:hover {
+    color: var(--accent);
+  }
+
+  .page-title {
+    margin: 0;
+    font-size: 2rem;
+    letter-spacing: -0.028em;
+    font-weight: 680;
+  }
+
+  .hash {
+    color: var(--fg-faint);
+    font-weight: 500;
+  }
+
+  .page-sub {
+    margin: 0.5rem 0 0;
+    color: var(--fg-muted);
+    font-size: 0.9375rem;
+    max-width: 34rem;
+    line-height: 1.65;
+  }
+
+  .count {
+    margin: 0.6rem 0 1.5rem;
+    font-size: 0.8125rem;
+    color: var(--fg-faint);
+  }
+</style>

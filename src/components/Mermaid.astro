@@ -1,0 +1,100 @@
+---
+import Figure from './Figure.astro';
+
+/**
+ * A Mermaid diagram.
+ *
+ * Rendering happens in the browser rather than at build time so the diagram can
+ * be re-drawn when the reader flips the theme — a build-time SVG would bake in
+ * one palette. Mermaid is dynamically imported, so the ~500 kB bundle is only
+ * fetched on pages that actually contain a diagram.
+ */
+interface Props {
+  code: string;
+  caption: string;
+  label?: string;
+}
+
+const { code, caption, label } = Astro.props;
+---
+
+<Figure caption={caption} label={label}>
+  <div class="mermaid-host" data-mermaid data-state="pending">
+    <pre class="sr-only" data-mermaid-src set:text={code.trim()} />
+  </div>
+</Figure>
+
+<style>
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+</style>
+
+<script>
+  const hosts = document.querySelectorAll<HTMLElement>('[data-mermaid]');
+
+  if (hosts.length > 0) {
+    const { default: mermaid } = await import('mermaid');
+
+    const sources = new Map<HTMLElement, string>();
+    hosts.forEach((host) => {
+      const src = host.querySelector<HTMLElement>('[data-mermaid-src]');
+      if (src?.textContent) sources.set(host, src.textContent);
+    });
+
+    const cssVar = (name: string) =>
+      getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+    async function renderAll() {
+      const dark = document.documentElement.classList.contains('dark');
+
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: 'strict',
+        fontFamily: cssVar('--font-sans') || 'system-ui, sans-serif',
+        theme: 'base',
+        themeVariables: {
+          background: cssVar('--bg-surface'),
+          primaryColor: dark ? '#1f2530' : '#eef4f3',
+          primaryTextColor: cssVar('--fg'),
+          primaryBorderColor: cssVar('--accent'),
+          secondaryColor: cssVar('--bg-subtle'),
+          tertiaryColor: cssVar('--bg-subtle'),
+          lineColor: cssVar('--fg-muted'),
+          textColor: cssVar('--fg'),
+          mainBkg: dark ? '#1f2530' : '#eef4f3',
+          nodeBorder: cssVar('--accent'),
+          clusterBkg: 'transparent',
+          clusterBorder: cssVar('--line'),
+          edgeLabelBackground: cssVar('--bg-surface'),
+          fontSize: '14px',
+        },
+      });
+
+      let i = 0;
+      for (const [host, code] of sources) {
+        try {
+          const { svg } = await mermaid.render(`mmd-${Date.now()}-${i++}`, code);
+          host.innerHTML = svg;
+          host.dataset.state = 'ready';
+        } catch (err) {
+          host.dataset.state = 'error';
+          host.innerHTML =
+            '<p style="color:var(--fg-muted);font-size:.8125rem">Diagram failed to render.</p>';
+          console.error('[mermaid]', err);
+        }
+      }
+    }
+
+    await renderAll();
+    document.addEventListener('themechange', () => void renderAll());
+  }
+</script>

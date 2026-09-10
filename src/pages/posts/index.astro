@@ -1,0 +1,68 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PostCard from '../../components/PostCard.astro';
+import { getPublishedPosts } from '../../utils/posts';
+
+const posts = await getPublishedPosts();
+
+// Group by year so a growing archive stays scannable.
+const byYear = new Map<number, typeof posts>();
+for (const post of posts) {
+  const year = post.data.pubDate.getUTCFullYear();
+  byYear.set(year, [...(byYear.get(year) ?? []), post]);
+}
+const years = [...byYear.keys()].sort((a, b) => b - a);
+---
+
+<BaseLayout
+  title="All posts"
+  description="Every post on lleg's study, newest first, grouped by year."
+  path="/posts"
+  narrow
+>
+  <h1 class="page-title">All posts</h1>
+  <p class="page-sub">{posts.length} {posts.length === 1 ? 'post' : 'posts'}</p>
+
+  {
+    years.map((year) => (
+      <section class="year">
+        <h2 class="year__label">{year}</h2>
+        {byYear.get(year)!.map((post) => <PostCard post={post} />)}
+      </section>
+    ))
+  }
+
+  {posts.length === 0 && <p class="empty">No posts yet.</p>}
+</BaseLayout>
+
+<style>
+  .page-title {
+    margin: 0;
+    font-size: 2rem;
+    letter-spacing: -0.028em;
+    font-weight: 680;
+  }
+
+  .page-sub {
+    margin: 0.4rem 0 2rem;
+    color: var(--fg-muted);
+    font-size: 0.9375rem;
+  }
+
+  .year {
+    margin-top: 2.25rem;
+  }
+
+  .year__label {
+    margin: 0;
+    font-size: 0.75rem;
+    font-weight: 620;
+    letter-spacing: 0.07em;
+    color: var(--fg-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .empty {
+    color: var(--fg-muted);
+  }
+</style>

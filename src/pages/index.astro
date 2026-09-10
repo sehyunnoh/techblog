@@ -1,0 +1,111 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PostCard from '../components/PostCard.astro';
+import TagBadge from '../components/TagBadge.astro';
+import { SITE } from '../consts';
+import { withBase } from '../utils/url';
+import { getPublishedPosts, getTagCounts } from '../utils/posts';
+
+const posts = await getPublishedPosts();
+const recent = posts.slice(0, 6);
+const tags = (await getTagCounts()).slice(0, 12);
+---
+
+<BaseLayout title={SITE.title} description={SITE.description} path="/">
+  <section class="hero">
+    <h1 class="hero__title">{SITE.tagline}</h1>
+    <p class="hero__text">
+      Deep dives on AI, web engineering and the infrastructure underneath — written for people who
+      have to run the thing in production. Diagrams and measured numbers over adjectives.
+    </p>
+  </section>
+
+  {
+    tags.length > 0 && (
+      <section class="topics" aria-label="Browse by tag">
+        {tags.map((t) => <TagBadge tag={t.tag} count={t.count} />)}
+      </section>
+    )
+  }
+
+  <section class="feed">
+    <div class="feed__head">
+      <h2 class="feed__title">Latest</h2>
+      {posts.length > recent.length && <a href={withBase('/posts')}>All {posts.length} posts →</a>}
+    </div>
+
+    {
+      recent.length === 0 ? (
+        <p class="empty">No posts yet. The first one is being written.</p>
+      ) : (
+        recent.map((post, i) => <PostCard post={post} featured={i === 0} />)
+      )
+    }
+  </section>
+</BaseLayout>
+
+<style>
+  .hero {
+    max-width: 40rem;
+    padding-bottom: 2rem;
+  }
+
+  .hero__title {
+    margin: 0;
+    font-size: clamp(1.9rem, 1.3rem + 2.4vw, 2.9rem);
+    line-height: 1.12;
+    letter-spacing: -0.032em;
+    font-weight: 690;
+  }
+
+  .hero__text {
+    margin: 1rem 0 0;
+    font-size: 1.05rem;
+    line-height: 1.7;
+    color: var(--fg-muted);
+  }
+
+  .topics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    padding: 1.25rem 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .feed {
+    margin-top: 1.5rem;
+    max-width: 46rem;
+  }
+
+  .feed__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .feed__title {
+    margin: 0;
+    font-size: 0.75rem;
+    font-weight: 620;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+
+  .feed__head a {
+    font-size: 0.8125rem;
+    color: var(--fg-muted);
+    text-decoration: none;
+  }
+
+  .feed__head a:hover {
+    color: var(--accent);
+  }
+
+  .empty {
+    padding: 2rem 0;
+    color: var(--fg-muted);
+  }
+</style>

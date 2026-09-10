@@ -1,0 +1,104 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { withBase } from '../utils/url';
+
+// Pagefind builds its index from `dist/` after `astro build`, so these assets
+// only exist in a production build. In dev the page says so rather than
+// throwing a 404 into the console.
+const bundlePath = withBase('/pagefind/');
+const uiScript = withBase('/pagefind/pagefind-component-ui.js');
+const uiStyles = withBase('/pagefind/pagefind-component-ui.css');
+const isDev = import.meta.env.DEV;
+---
+
+<BaseLayout
+  title="Search"
+  description="Full-text search across every post on lleg's study."
+  path="/search"
+  narrow
+  noindex
+>
+  <h1 class="page-title">Search</h1>
+  <p class="page-sub">Full-text search across every published post.</p>
+
+  {
+    !isDev && (
+      <>
+        <link rel="stylesheet" href={uiStyles} />
+        {/* Component UI over the older Default UI: it follows WAI-ARIA. */}
+        <script is:inline type="module" src={uiScript} />
+        <div class="search-host">
+          <pagefind-config bundle-path={bundlePath} />
+          <pagefind-searchbox
+            placeholder="Search posts…"
+            show-sub-results="true"
+            max-results="20"
+          />
+        </div>
+      </>
+    )
+  }
+
+  {
+    isDev && (
+      <p class="notice">
+        The search index is generated during <code>npm run build</code>. Run a production build and
+        then <code>npm run preview</code> to try it.
+      </p>
+    )
+  }
+</BaseLayout>
+
+<style is:global>
+  /* Map Pagefind's theme variables onto the site tokens, both modes. */
+  .search-host {
+    margin-top: 1.5rem;
+    --pagefind-ui-scale: 0.9;
+    --pagefind-ui-primary: var(--fg);
+    --pagefind-ui-text: var(--fg);
+    --pagefind-ui-background: var(--bg-surface);
+    --pagefind-ui-border: var(--line);
+    --pagefind-ui-tag: var(--bg-subtle);
+    --pagefind-ui-border-width: 1px;
+    --pagefind-ui-border-radius: 8px;
+    --pagefind-ui-font: var(--font-sans);
+  }
+
+  .search-host mark {
+    background: var(--accent-soft);
+    color: var(--fg);
+    border-radius: 2px;
+  }
+</style>
+
+<style>
+  .page-title {
+    margin: 0;
+    font-size: 2rem;
+    letter-spacing: -0.028em;
+    font-weight: 680;
+  }
+
+  .page-sub {
+    margin: 0.4rem 0 0;
+    color: var(--fg-muted);
+    font-size: 0.9375rem;
+  }
+
+  .notice {
+    margin-top: 1.25rem;
+    padding: 0.9rem 1.1rem;
+    border: 1px dashed var(--line);
+    border-radius: 8px;
+    color: var(--fg-muted);
+    font-size: 0.875rem;
+    line-height: 1.6;
+  }
+
+  .notice code {
+    background: var(--bg-subtle);
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+</style>

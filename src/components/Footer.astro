@@ -1,0 +1,58 @@
+---
+import { SITE, SOCIALS } from '../consts';
+import { withBase } from '../utils/url';
+
+const year = new Date().getFullYear();
+---
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <p class="site-footer__meta">
+      &copy; {year} {SITE.author}. Built with Astro, deployed on GitHub Pages.
+    </p>
+    <nav class="site-footer__links" aria-label="Footer">
+      {SOCIALS.map((s) => <a href={s.href} rel="me noopener">{s.label}</a>)}
+      <a href={withBase('/rss.xml')}>RSS</a>
+    </nav>
+  </div>
+</footer>
+
+<style>
+  .site-footer {
+    margin-top: 5rem;
+    border-top: 1px solid var(--line);
+  }
+
+  .site-footer__inner {
+    max-width: 72rem;
+    margin-inline: auto;
+    padding: 1.75rem 1.25rem 3rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1.5rem;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.8125rem;
+    color: var(--fg-muted);
+  }
+
+  .site-footer__meta {
+    margin: 0;
+  }
+
+  .site-footer__links {
+    display: flex;
+    gap: 1rem;
+  }
+
+  .site-footer__links a {
+    color: var(--fg-muted);
+    text-decoration: none;
+  }
+
+  .site-footer__links a:hover {
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+</style>

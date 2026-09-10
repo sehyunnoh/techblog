@@ -1,0 +1,23 @@
+---
+/**
+ * Shared frame for every visual in a post: diagram, chart or inline SVG.
+ *
+ * Captions are mandatory. A figure that cannot be described in one sentence is
+ * usually decoration, and decoration does not belong in a technical post.
+ */
+interface Props {
+  caption: string;
+  /** Screen-reader description. Falls back to the caption. */
+  label?: string;
+  id?: string;
+}
+
+const { caption, label, id } = Astro.props;
+---
+
+<figure class="figure" id={id}>
+  <div class="figure__frame" role="group" aria-label={label ?? caption}>
+    <slot />
+  </div>
+  <figcaption class="figure__caption" set:html={caption} />
+</figure>

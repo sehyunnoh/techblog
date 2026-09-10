@@ -1,0 +1,96 @@
+---
+// The initial class is applied by the inline script in BaseHead; this control
+// only flips it and persists the choice.
+---
+
+<button
+  type="button"
+  id="theme-toggle"
+  class="theme-toggle"
+  aria-label="Toggle colour theme"
+  title="Toggle colour theme"
+>
+  <svg class="icon icon--sun" viewBox="0 0 24 24" aria-hidden="true">
+    <circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.7"></circle>
+    <path
+      d="M12 2.6v2.2M12 19.2v2.2M4.4 12H2.2M21.8 12h-2.2M6.3 6.3 4.8 4.8M19.2 19.2l-1.5-1.5M17.7 6.3l1.5-1.5M4.8 19.2l1.5-1.5"
+      stroke="currentColor"
+      stroke-width="1.7"
+      stroke-linecap="round"></path>
+  </svg>
+  <svg class="icon icon--moon" viewBox="0 0 24 24" aria-hidden="true">
+    <path
+      d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.4 8.4 0 1 0 10.2 10.2Z"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.7"
+      stroke-linejoin="round"></path>
+  </svg>
+</button>
+
+<style>
+  .theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.1rem;
+    height: 2.1rem;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    color: var(--fg-muted);
+    background: transparent;
+    cursor: pointer;
+    transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .theme-toggle:hover {
+    color: var(--fg);
+    background-color: var(--bg-subtle);
+    border-color: var(--line);
+  }
+
+  .icon {
+    width: 1.05rem;
+    height: 1.05rem;
+  }
+
+  .icon--moon {
+    display: none;
+  }
+
+  :global(html.dark) .icon--sun {
+    display: none;
+  }
+
+  :global(html.dark) .icon--moon {
+    display: block;
+  }
+</style>
+
+<script>
+  const button = document.getElementById('theme-toggle');
+
+  button?.addEventListener('click', () => {
+    const dark = document.documentElement.classList.toggle('dark');
+    try {
+      localStorage.setItem('theme', dark ? 'dark' : 'light');
+    } catch {
+      /* Ignore storage failures; the in-page toggle still works. */
+    }
+    // Canvas-based visuals (Chart.js, Mermaid) cannot see a CSS change.
+    document.dispatchEvent(new CustomEvent('themechange', { detail: { dark } }));
+  });
+
+  // Follow the OS only while the reader has expressed no preference.
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+    let stored: string | null = null;
+    try {
+      stored = localStorage.getItem('theme');
+    } catch {
+      /* no-op */
+    }
+    if (stored) return;
+    document.documentElement.classList.toggle('dark', e.matches);
+    document.dispatchEvent(new CustomEvent('themechange', { detail: { dark: e.matches } }));
+  });
+</script>

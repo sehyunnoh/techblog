@@ -1,0 +1,101 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import TagBadge from '../../components/TagBadge.astro';
+import { getTagCounts } from '../../utils/posts';
+import { TAG_GROUPS, tagGroup, tagDescription, tagLabel } from '../../tags';
+
+const counts = await getTagCounts();
+
+// Only tags that are actually in use — an empty tag page is a dead end.
+const grouped = TAG_GROUPS.map((group) => ({
+  group,
+  tags: counts.filter((c) => tagGroup(c.tag) === group),
+})).filter((g) => g.tags.length > 0);
+---
+
+<BaseLayout
+  title="Tags"
+  description="Every topic covered on lleg's study, grouped by domain, technology and format."
+  path="/tags"
+  narrow
+>
+  <h1 class="page-title">Tags</h1>
+  <p class="page-sub">
+    {counts.length} {counts.length === 1 ? 'tag' : 'tags'} in use. Tags come from a fixed vocabulary,
+    so related posts always land under the same label.
+  </p>
+
+  {
+    grouped.map(({ group, tags }) => (
+      <section class="group">
+        <h2 class="group__label">{group}</h2>
+        <ul class="group__list">
+          {tags.map(({ tag, count }) => (
+            <li class="row">
+              <TagBadge tag={tag} count={count} size="md" />
+              <p class="row__desc">{tagDescription(tag) || tagLabel(tag)}</p>
+            </li>
+          ))}
+        </ul>
+      </section>
+    ))
+  }
+
+  {counts.length === 0 && <p class="empty">No tags yet — they appear once posts are published.</p>}
+</BaseLayout>
+
+<style>
+  .page-title {
+    margin: 0;
+    font-size: 2rem;
+    letter-spacing: -0.028em;
+    font-weight: 680;
+  }
+
+  .page-sub {
+    margin: 0.4rem 0 2.5rem;
+    color: var(--fg-muted);
+    font-size: 0.9375rem;
+    line-height: 1.65;
+    max-width: 34rem;
+  }
+
+  .group {
+    margin-bottom: 2.5rem;
+  }
+
+  .group__label {
+    margin: 0 0 0.9rem;
+    font-size: 0.75rem;
+    font-weight: 620;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+
+  .group__list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.9rem;
+    padding: 0.6rem 0;
+    border-top: 1px solid var(--line);
+    flex-wrap: wrap;
+  }
+
+  .row__desc {
+    margin: 0;
+    color: var(--fg-muted);
+    font-size: 0.875rem;
+    flex: 1 1 16rem;
+  }
+
+  .empty {
+    color: var(--fg-muted);
+  }
+</style>

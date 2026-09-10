@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://sehyunnoh.github.io/techblog/sitemap-index.xml

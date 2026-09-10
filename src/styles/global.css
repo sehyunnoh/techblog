@@ -1,0 +1,281 @@
+@import 'tailwindcss';
+@plugin '@tailwindcss/typography';
+
+/* Theme is class-driven so the toggle can override the OS preference. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Inter var', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', 'Cascadia Code', Consolas, monospace;
+
+  --color-ink: #16181d;
+  --color-ink-muted: #5c6270;
+  --color-paper: #fbfbf9;
+  --color-surface: #ffffff;
+  --color-line: #e4e4de;
+  --color-accent: #0f766e;
+  --color-accent-soft: #ccfbf1;
+}
+
+/*
+ * Semantic tokens. Every color used in the UI resolves through one of these,
+ * so a theme swap never leaves a hard-coded value behind.
+ */
+:root {
+  color-scheme: light;
+  --bg: #fbfbf9;
+  --bg-surface: #ffffff;
+  --bg-subtle: #f3f3ef;
+  --fg: #16181d;
+  --fg-muted: #5c6270;
+  --fg-faint: #8b909c;
+  --line: #e4e4de;
+  --accent: #0f766e;
+  --accent-fg: #ffffff;
+  --accent-soft: #e6f4f1;
+  --shadow: 0 1px 2px rgb(16 24 40 / 0.04), 0 4px 16px -4px rgb(16 24 40 / 0.06);
+}
+
+:root.dark {
+  color-scheme: dark;
+  --bg: #0f1115;
+  --bg-surface: #171a21;
+  --bg-subtle: #1c2029;
+  --fg: #e7e9ee;
+  --fg-muted: #9aa1af;
+  --fg-faint: #6b7280;
+  --line: #262b35;
+  --accent: #2dd4bf;
+  --accent-fg: #06231f;
+  --accent-soft: #12302c;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 16px -4px rgb(0 0 0 / 0.45);
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 5rem;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background-color: var(--accent-soft);
+  color: var(--fg);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------------------------------------------------------------- prose -- */
+
+.prose {
+  --tw-prose-body: var(--fg);
+  --tw-prose-headings: var(--fg);
+  --tw-prose-lead: var(--fg-muted);
+  --tw-prose-links: var(--accent);
+  --tw-prose-bold: var(--fg);
+  --tw-prose-counters: var(--fg-muted);
+  --tw-prose-bullets: var(--line);
+  --tw-prose-hr: var(--line);
+  --tw-prose-quotes: var(--fg);
+  --tw-prose-quote-borders: var(--accent);
+  --tw-prose-captions: var(--fg-muted);
+  --tw-prose-code: var(--fg);
+  --tw-prose-th-borders: var(--line);
+  --tw-prose-td-borders: var(--line);
+}
+
+.prose :where(h2) {
+  margin-top: 2.75em;
+  padding-top: 0.6em;
+  border-top: 1px solid var(--line);
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.prose :where(h3) {
+  margin-top: 2em;
+  font-weight: 640;
+  letter-spacing: -0.01em;
+}
+
+.prose :where(a) {
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.prose :where(code):not(pre code) {
+  background-color: var(--bg-subtle);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.875em;
+  font-weight: 500;
+}
+.prose :where(code):not(pre code)::before,
+.prose :where(code):not(pre code)::after { content: ''; }
+
+.prose :where(pre) {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 0.85em;
+  line-height: 1.7;
+}
+
+/* Wide content must scroll inside its own box, never the page body. */
+.prose :where(table) { display: block; overflow-x: auto; }
+
+/* Shiki emits both themes; show the one matching the active theme. */
+html.dark .astro-code,
+html.dark .astro-code span {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg) !important;
+  font-style: var(--shiki-dark-font-style) !important;
+}
+
+/* -------------------------------------------------------------- figures -- */
+
+.figure {
+  margin: 2.5rem 0;
+}
+
+.figure__frame {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1.25rem;
+  overflow-x: auto;
+}
+
+.figure__caption {
+  margin-top: 0.7rem;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--fg-muted);
+}
+
+.figure__caption b {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+/* --------------------------------------------------------- data viz ------ */
+/*
+ * Categorical series palette. Both modes are validated with the dataviz
+ * skill's checker against this site's own chart surfaces:
+ *   light (#ffffff): all checks pass; three slots fall below 3:1 contrast, so
+ *     every chart ships a data table view as the documented relief.
+ *   dark  (#171a21): all checks pass, including contrast.
+ * Slot order is the CVD-safety mechanism — assign in order, never cycle.
+ */
+:root {
+  --viz-surface: #ffffff;
+  --viz-grid: #e8e8e3;
+  --viz-axis: #b9b9b1;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+}
+
+:root.dark {
+  --viz-surface: #171a21;
+  --viz-grid: #262b35;
+  --viz-axis: #3d4450;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+}
+
+.chart__canvas-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.chart__table {
+  margin-top: 0.85rem;
+  font-size: 0.8125rem;
+}
+
+.chart__table summary {
+  cursor: pointer;
+  color: var(--fg-muted);
+  user-select: none;
+}
+
+.chart__table table {
+  margin-top: 0.6rem;
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.chart__table th,
+.chart__table td {
+  border: 1px solid var(--line);
+  padding: 0.3rem 0.55rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.chart__table th:first-child,
+.chart__table td:first-child {
+  text-align: left;
+}
+
+.chart__table thead th {
+  background-color: var(--bg-subtle);
+  font-weight: 600;
+}
+
+.chart__swatch {
+  display: inline-block;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 2px;
+  margin-right: 0.4rem;
+  vertical-align: baseline;
+}
+
+/* Mermaid renders client-side; reserve space so the page does not jump. */
+.mermaid-host {
+  display: flex;
+  justify-content: center;
+  min-height: 4rem;
+}
+
+.mermaid-host svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.mermaid-host[data-state='pending']::after {
+  content: 'Rendering diagram…';
+  color: var(--fg-faint);
+  font-size: 0.8125rem;
+}

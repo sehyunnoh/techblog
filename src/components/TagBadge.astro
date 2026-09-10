@@ -1,0 +1,69 @@
+---
+import { withBase } from '../utils/url';
+import { tagLabel, tagDescription } from '../tags';
+
+interface Props {
+  tag: string;
+  count?: number;
+  size?: 'sm' | 'md';
+}
+
+const { tag, count, size = 'sm' } = Astro.props;
+---
+
+<a
+  href={withBase(`/tags/${tag}`)}
+  class:list={['tag', `tag--${size}`]}
+  title={tagDescription(tag)}
+>
+  <span class="tag__hash" aria-hidden="true">#</span>{tagLabel(tag)}
+  {count !== undefined && <span class="tag__count">{count}</span>}
+</a>
+
+<style>
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.1rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background-color: var(--bg-surface);
+    color: var(--fg-muted);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .tag--sm {
+    padding: 0.12rem 0.6rem;
+    font-size: 0.75rem;
+  }
+
+  .tag--md {
+    padding: 0.28rem 0.8rem;
+    font-size: 0.8125rem;
+  }
+
+  .tag:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+    background-color: var(--accent-soft);
+  }
+
+  .tag__hash {
+    color: var(--fg-faint);
+    margin-right: 0.05rem;
+  }
+
+  .tag:hover .tag__hash {
+    color: var(--accent);
+  }
+
+  .tag__count {
+    margin-left: 0.4rem;
+    padding-left: 0.4rem;
+    border-left: 1px solid var(--line);
+    color: var(--fg-faint);
+    font-variant-numeric: tabular-nums;
+  }
+</style>

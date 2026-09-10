@@ -1,0 +1,417 @@
+---
+import Figure from './Figure.astro';
+
+export interface Series {
+  name: string;
+  data: (number | null)[];
+  /** Overrides automatic slot assignment. 1-8, following the validated order. */
+  slot?: number;
+  /** Renders this series as a dashed reference line rather than a solid one. */
+  dashed?: boolean;
+}
+
+interface Props {
+  type: 'bar' | 'line' | 'area';
+  caption: string;
+  label?: string;
+  labels: (string | number)[];
+  series: Series[];
+  /** Axis titles. The x title is often redundant with the caption - omit it then. */
+  yTitle?: string;
+  xTitle?: string;
+  stacked?: boolean;
+  horizontal?: boolean;
+  /** Logarithmic y axis. Use for quantities that span orders of magnitude. */
+  logY?: boolean;
+  /** Number presentation for ticks, tooltips and the table view. */
+  format?: 'plain' | 'compact' | 'usd' | 'percent' | 'bytes';
+  /** Draw the value beside each bar. Off by default - never label every point. */
+  valueLabels?: boolean;
+  height?: number;
+}
+
+const {
+  type,
+  caption,
+  label,
+  labels,
+  series,
+  yTitle,
+  xTitle,
+  stacked = false,
+  horizontal = false,
+  logY = false,
+  format = 'plain',
+  valueLabels = false,
+  height = 320,
+} = Astro.props;
+
+const config = {
+  type,
+  labels,
+  series,
+  yTitle,
+  xTitle,
+  stacked,
+  horizontal,
+  logY,
+  format,
+  valueLabels,
+};
+
+/** Mirrors the client-side formatter so the no-JS table reads identically. */
+function fmt(v: number | null | undefined): string {
+  if (v === null || v === undefined) return '—';
+  switch (format) {
+    case 'usd':
+      return Math.abs(v) >= 1000
+        ? '$' + (v / 1000).toLocaleString('en-US', { maximumFractionDigits: 1 }) + 'k'
+        : '$' + v.toLocaleString('en-US', { maximumFractionDigits: 2 });
+    case 'percent':
+      return v.toLocaleString('en-US', { maximumFractionDigits: 1 }) + '%';
+    case 'compact':
+      return v.toLocaleString('en-US', { notation: 'compact', maximumFractionDigits: 1 });
+    case 'bytes': {
+      const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+      let n = v;
+      let i = 0;
+      while (Math.abs(n) >= 1024 && i < units.length - 1) {
+        n /= 1024;
+        i++;
+      }
+      return n.toLocaleString('en-US', { maximumFractionDigits: 1 }) + ' ' + units[i];
+    }
+    default:
+      return v.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  }
+}
+---
+
+<Figure caption={caption} label={label}>
+  <div class="chart__canvas-wrap" style={`height:${height}px`}>
+    <canvas data-chart={JSON.stringify(config)} aria-label={label ?? caption} role="img"></canvas>
+  </div>
+
+  <!--
+    The table is the documented relief for the light-mode contrast warning and
+    doubles as the no-JavaScript fallback. It is never optional.
+  -->
+  <details class="chart__table">
+    <summary>Show data table</summary>
+    <div style="overflow-x:auto">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">{xTitle ?? ''}</th>
+            {
+              series.map((s, i) => (
+                <th scope="col">
+                  <span
+                    class="chart__swatch"
+                    style={`background:var(--series-${s.slot ?? (i % 8) + 1})`}
+                    aria-hidden="true"
+                  />
+                  {s.name}
+                </th>
+              ))
+            }
+          </tr>
+        </thead>
+        <tbody>
+          {
+            labels.map((l, row) => (
+              <tr>
+                <th scope="row">{l}</th>
+                {series.map((s) => <td>{fmt(s.data[row])}</td>)}
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+  </details>
+</Figure>
+
+<script>
+  import type { Chart as ChartType, ChartConfiguration, Plugin } from 'chart.js';
+
+  const canvases = document.querySelectorAll<HTMLCanvasElement>('[data-chart]');
+
+  if (canvases.length > 0) {
+    const { Chart, registerables } = await import('chart.js');
+    Chart.register(...registerables);
+
+    const css = (name: string) =>
+      getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+    type Fmt = 'plain' | 'compact' | 'usd' | 'percent' | 'bytes';
+
+    function makeFormatter(format: Fmt) {
+      return (v: number | null | undefined): string => {
+        if (v === null || v === undefined || Number.isNaN(v)) return '—';
+        switch (format) {
+          case 'usd':
+            return Math.abs(v) >= 1000
+              ? '$' + (v / 1000).toLocaleString('en-US', { maximumFractionDigits: 1 }) + 'k'
+              : '$' + v.toLocaleString('en-US', { maximumFractionDigits: 2 });
+          case 'percent':
+            return v.toLocaleString('en-US', { maximumFractionDigits: 1 }) + '%';
+          case 'compact':
+            return v.toLocaleString('en-US', { notation: 'compact', maximumFractionDigits: 1 });
+          case 'bytes': {
+            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            let n = v;
+            let i = 0;
+            while (Math.abs(n) >= 1024 && i < units.length - 1) {
+              n /= 1024;
+              i++;
+            }
+            return n.toLocaleString('en-US', { maximumFractionDigits: 1 }) + ' ' + units[i];
+          }
+          default:
+            return v.toLocaleString('en-US', { maximumFractionDigits: 2 });
+        }
+      };
+    }
+
+    /**
+     * Direct labels for line charts with few series: identity should not depend
+     * on a colour-to-legend lookup. Skipped past four series, where the labels
+     * would collide more than they help.
+     */
+    const directLabels: Plugin<'line'> = {
+      id: 'directLabels',
+      afterDatasetsDraw(chart) {
+        // Plugins are registered globally, so this must opt out of bar charts
+        // itself — otherwise series names get painted across the bars.
+        if (chart.config.type !== 'line') return;
+        const sets = chart.data.datasets;
+        if (sets.length < 2 || sets.length > 4) return;
+        const ctx = chart.ctx;
+        ctx.save();
+        ctx.font = '600 12px ' + (css('--font-sans') || 'system-ui');
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        const placed: number[] = [];
+        sets.forEach((ds, i) => {
+          const meta = chart.getDatasetMeta(i);
+          if (meta.hidden) return;
+          const pts = meta.data;
+          if (!pts.length) return;
+          const last = pts[pts.length - 1];
+          let y = last.y;
+          // Nudge apart labels that would otherwise overlap.
+          while (placed.some((p) => Math.abs(p - y) < 14)) y -= 14;
+          placed.push(y);
+          ctx.fillStyle = (ds.borderColor as string) || css('--fg');
+          ctx.fillText(String(ds.label ?? ''), last.x + 8, y);
+        });
+        ctx.restore();
+      },
+    };
+
+    /** Value labels at the end of bars. Opt-in, never automatic. */
+    const barValues: Plugin<'bar'> = {
+      id: 'barValues',
+      afterDatasetsDraw(chart, _args, opts) {
+        if (chart.config.type !== 'bar') return;
+        const o = opts as { enabled?: boolean; format?: Fmt; horizontal?: boolean };
+        if (!o || !o.enabled) return;
+        const f = makeFormatter(o.format ?? 'plain');
+        const ctx = chart.ctx;
+        ctx.save();
+        ctx.font = '500 11px ' + (css('--font-sans') || 'system-ui');
+        ctx.fillStyle = css('--fg-muted');
+        chart.data.datasets.forEach((ds, i) => {
+          const meta = chart.getDatasetMeta(i);
+          if (meta.hidden) return;
+          meta.data.forEach((el, j) => {
+            const raw = ds.data[j] as number | null;
+            if (raw === null || raw === undefined) return;
+            if (o.horizontal) {
+              ctx.textAlign = 'left';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(f(raw), el.x + 6, el.y);
+            } else {
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'bottom';
+              ctx.fillText(f(raw), el.x, el.y - 5);
+            }
+          });
+        });
+        ctx.restore();
+      },
+    };
+
+    Chart.register(directLabels, barValues);
+
+    const instances: { chart: ChartType; build: () => ChartConfiguration }[] = [];
+
+    canvases.forEach((canvas) => {
+      const cfg = JSON.parse(canvas.dataset.chart as string);
+      const isArea = cfg.type === 'area';
+      const base = isArea ? 'line' : cfg.type;
+      const f = makeFormatter(cfg.format as Fmt);
+
+      const build = (): ChartConfiguration => {
+        const grid = css('--viz-grid');
+        const axis = css('--viz-axis');
+        const ink = css('--fg');
+        const inkMuted = css('--fg-muted');
+        const surface = css('--viz-surface');
+
+        const datasets = cfg.series.map((s: any, i: number) => {
+          const color = css('--series-' + (s.slot ?? (i % 8) + 1));
+          if (base === 'bar') {
+            return {
+              label: s.name,
+              data: s.data,
+              backgroundColor: color,
+              // 4px rounded data-ends, anchored flat to the baseline.
+              borderRadius: { topLeft: 4, topRight: 4, bottomLeft: 0, bottomRight: 0 },
+              borderSkipped: 'start',
+              // A 2px surface gap keeps stacked segments from bleeding together.
+              borderColor: surface,
+              borderWidth: cfg.stacked ? 2 : 0,
+              categoryPercentage: 0.7,
+              barPercentage: 0.88,
+              // Thin marks: a handful of categories should not produce slabs.
+              maxBarThickness: 52,
+            };
+          }
+          return {
+            label: s.name,
+            data: s.data,
+            borderColor: color,
+            borderWidth: 2,
+            borderDash: s.dashed ? [5, 4] : undefined,
+            fill: isArea ? (cfg.stacked ? '-1' : 'origin') : false,
+            backgroundColor: isArea
+              ? 'color-mix(in oklab, ' + color + ' 18%, transparent)'
+              : color,
+            tension: 0.25,
+            pointRadius: 0,
+            pointHoverRadius: 5,
+            pointHitRadius: 14,
+            pointBackgroundColor: color,
+            pointBorderColor: surface,
+            pointBorderWidth: 2,
+          };
+        });
+
+        const valueAxis: any = {
+          stacked: cfg.stacked,
+          type: cfg.logY ? 'logarithmic' : 'linear',
+          beginAtZero: !cfg.logY,
+          border: { display: false },
+          grid: { color: grid, drawTicks: false },
+          ticks: {
+            color: inkMuted,
+            font: { size: 11 },
+            padding: 8,
+            callback: (v: any) => f(Number(v)),
+          },
+        };
+        if (cfg.yTitle) {
+          valueAxis.title = {
+            display: true,
+            text: cfg.yTitle,
+            color: inkMuted,
+            font: { size: 11, weight: 500 },
+            padding: { bottom: 6 },
+          };
+        }
+
+        const catAxis: any = {
+          stacked: cfg.stacked,
+          border: { color: axis },
+          grid: { display: false },
+          ticks: {
+            color: inkMuted,
+            font: { size: 11 },
+            padding: 6,
+            maxRotation: 0,
+            autoSkipPadding: 12,
+          },
+        };
+        if (cfg.xTitle) {
+          catAxis.title = {
+            display: true,
+            text: cfg.xTitle,
+            color: inkMuted,
+            font: { size: 11, weight: 500 },
+          };
+        }
+
+        const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const labelRoom = base === 'line' && datasets.length >= 2 && datasets.length <= 4 ? 72 : 8;
+
+        return {
+          type: base,
+          data: { labels: cfg.labels, datasets },
+          options: {
+            indexAxis: cfg.horizontal ? 'y' : 'x',
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: reduceMotion ? false : { duration: 400 },
+            layout: { padding: { right: cfg.horizontal ? 44 : labelRoom, top: 8 } },
+            interaction:
+              base === 'line'
+                ? { mode: 'index', intersect: false }
+                : { mode: 'nearest', intersect: true },
+            scales: cfg.horizontal ? { x: valueAxis, y: catAxis } : { x: catAxis, y: valueAxis },
+            plugins: {
+              legend: {
+                display: datasets.length >= 2,
+                position: 'top',
+                align: 'start',
+                labels: {
+                  color: ink,
+                  boxWidth: 10,
+                  boxHeight: 10,
+                  usePointStyle: true,
+                  pointStyle: 'rectRounded',
+                  padding: 16,
+                  font: { size: 12 },
+                },
+              },
+              tooltip: {
+                backgroundColor: css('--bg-surface'),
+                titleColor: ink,
+                bodyColor: inkMuted,
+                borderColor: css('--line'),
+                borderWidth: 1,
+                padding: 10,
+                cornerRadius: 6,
+                usePointStyle: true,
+                displayColors: datasets.length >= 2,
+                callbacks: {
+                  label: (c: any) =>
+                    ' ' + c.dataset.label + ': ' + f(c.parsed[cfg.horizontal ? 'x' : 'y']),
+                },
+              },
+              barValues: {
+                enabled: cfg.valueLabels,
+                format: cfg.format,
+                horizontal: cfg.horizontal,
+              },
+            },
+          },
+        } as ChartConfiguration;
+      };
+
+      const chart = new Chart(canvas, build());
+      instances.push({ chart, build });
+    });
+
+    // Charts draw to a canvas, so a CSS theme swap cannot reach them - rebuild.
+    document.addEventListener('themechange', () => {
+      instances.forEach((entry) => {
+        const next = entry.build();
+        entry.chart.data = next.data;
+        entry.chart.options = next.options as any;
+        entry.chart.update('none');
+      });
+    });
+  }
+</script>

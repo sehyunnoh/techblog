@@ -1,0 +1,214 @@
+# TechBlog 요구사항 정의서
+
+> 최종 수정: 2026-09-09
+> 상태: 확정 (남은 작업은 [§8.1](#81-남은-작업-사용자-직접-수행-필요) 참고)
+
+---
+
+## 1. 프로젝트 개요
+
+AI, Web, 인프라 등 다양한 기술 주제를 다루는 개인 기술 블로그.
+
+운영 방식은 단순하다. **사용자가 주제를 하나 던지면 → Claude가 조사·집필·시각화·게시까지 한 번에 처리한다.**
+
+| 항목 | 내용 |
+|---|---|
+| 블로그 이름 | **lleg's study** |
+| 작업 디렉터리 | `D:\workspace\TechBlog` |
+| GitHub 저장소 | `sehyunnoh/techblog` (프로젝트 저장소) |
+| 배포 URL | `https://sehyunnoh.github.io/techblog` |
+| 저자 | **lleg** — [GitHub](https://github.com/sehyunnoh) · [LinkedIn](https://www.linkedin.com/in/devnoh) |
+| 집필 언어 | **영어 (English)** |
+| 대화 언어 | 한국어 (Claude ↔ 사용자) |
+| 주제 범위 | AI/ML, Web, Backend, DevOps, 아키텍처 등 기술 전반 (제한 없음) |
+
+---
+
+## 2. 기술 스택
+
+| 레이어 | 선택 | 비고 |
+|---|---|---|
+| 사이트 생성기 | **Astro** | Content Collections로 글·태그 관리 |
+| 콘텐츠 포맷 | **MDX** (Markdown + 컴포넌트) | 차트/SVG 컴포넌트 삽입용 |
+| 스타일 | Tailwind CSS | 라이트/다크 테마 모두 대응 |
+| 다이어그램 | Mermaid | 빌드 타임 렌더링 |
+| 차트 | Chart.js 또는 Recharts | Astro Island로 필요한 글에만 로드 |
+| 배포 | **GitHub Pages** | GitHub Actions로 `main` push 시 자동 배포 |
+| 검색 | Pagefind (정적 검색) | 빌드 시 인덱스 생성 |
+| 피드 | RSS + sitemap.xml | `@astrojs/rss`, `@astrojs/sitemap` |
+| 애널리틱스 | **Umami Cloud** | 쿠키리스·2KB 스크립트. 무료 티어 월 10만 이벤트 |
+| 검색 유입 분석 | **Google Search Console** | 유입 검색어 확인용 (애널리틱스로는 불가) |
+| 댓글 | 없음 (**추후 giscus**) | 글이 쌓이면 GitHub Discussions 기반으로 추가 |
+
+---
+
+## 3. 글 작성 규칙
+
+### 3.1 대상 독자 및 분량
+
+- **대상**: 중급 이상 실무 개발자
+- **분량**: 1,500 ~ 2,500 단어 (읽는 데 8~12분)
+- **톤**: 실무적이고 구체적. 마케팅 문구·과장 금지. 트레이드오프를 반드시 언급.
+
+### 3.2 리서치
+
+**모든 글은 웹 검색 조사를 선행한다.**
+
+1. 주제 접수 → WebSearch/WebFetch로 최신 자료 조사
+   - 공식 문서 / 릴리스 노트
+   - 벤치마크·측정 데이터
+   - 주요 블로그·논문·RFC
+2. 조사 결과를 근거로 집필
+3. 모든 참조 링크는 **실제 접근 가능한 URL만** 사용 (환각 링크 금지)
+
+### 3.3 글 구조 (표준 템플릿)
+
+```
+1. Hook / Problem statement   — 왜 이 주제가 지금 중요한가
+2. Background                 — 최소한의 전제 지식
+3. Core content (3~5 sections) — 각 섹션마다 시각 자료 1개 이상
+4. Trade-offs / Pitfalls      — 실무에서 걸리는 지점
+5. Takeaways                  — 3~5개 불릿 요약
+6. References                 — 번호 매긴 링크 목록
+```
+
+### 3.4 코드 예제
+
+- 실행 가능한 수준의 완결된 스니펫
+- 언어 태그 명시 (`ts`, `py`, `bash` 등)
+- 20줄 초과 시 핵심 부분만 발췌하고 주석으로 생략 표시
+
+---
+
+## 4. 인포그래픽 / 시각화 (핵심 요구사항)
+
+> **"최대한 인포그래픽을 사용한다"** — 글마다 최소 3개 이상의 시각 자료를 목표로 한다.
+
+### 4.1 시각화 유형별 사용 기준
+
+| 유형 | 사용처 | 구현 |
+|---|---|---|
+| **Mermaid 다이어그램** | 플로우차트, 시퀀스, 아키텍처, 상태 전이, ER | ```` ```mermaid ```` 코드 블록 |
+| **인라인 SVG** | 개념도, 비교표, 타임라인, 레이어 구조 등 Mermaid로 표현 안 되는 것 | 직접 작성한 `<svg>` |
+| **데이터 차트** | 벤치마크, 비용 비교, 성능 추이, 점유율 | Chart.js / Recharts 컴포넌트 |
+
+### 4.2 시각화 공통 규칙
+
+- **다크모드 대응 필수**: 색상은 CSS 변수 또는 `prefers-color-scheme`으로 양쪽 테마 처리
+- **반응형**: 모바일에서 가로 스크롤 컨테이너(`overflow-x: auto`) 안에 배치
+- **접근성**: 모든 시각 자료에 캡션 + `aria-label`/`<title>` 제공
+- **차트 팔레트**: `dataviz` 스킬의 검증된 팔레트 규칙을 따름
+- **텍스트 최소 크기**: 12px 이상 (모바일에서 읽을 수 있어야 함)
+
+---
+
+## 5. 태그 시스템
+
+### 5.1 기능 요구사항
+
+- 글마다 **3~6개** 태그 부여
+- `/tags` — 전체 태그 목록 (글 수 표시)
+- `/tags/[tag]` — 해당 태그의 글 목록 페이지
+- 글 상단/하단에 태그 배지 표시 (클릭 시 태그 페이지로 이동)
+- 태그는 **정해진 어휘집(taxonomy)에서만** 선택 → 무한 증식 방지
+
+### 5.2 태그 어휘집 (초안, 확장 가능)
+
+| 카테고리 | 태그 |
+|---|---|
+| 분야 | `ai`, `llm`, `web`, `backend`, `frontend`, `devops`, `data`, `security`, `mobile` |
+| 기술 | `python`, `typescript`, `rust`, `go`, `react`, `docker`, `kubernetes`, `postgres` |
+| 성격 | `tutorial`, `deep-dive`, `benchmark`, `architecture`, `opinion`, `news` |
+
+> 새 태그가 필요하면 `content/tags.json`에 추가한 뒤 사용.
+
+---
+
+## 6. 콘텐츠 스키마 (frontmatter)
+
+```yaml
+---
+title: "Article title in English"
+description: "One-sentence summary for SEO and card previews"
+pubDate: 2026-09-09
+updatedDate: 2026-09-15      # optional
+tags: ["ai", "llm", "deep-dive"]
+heroImage: "./hero.svg"       # optional
+draft: false
+readingTime: 11               # auto-calculated
+---
+```
+
+---
+
+## 7. 작업 워크플로 (주제 접수 → 게시)
+
+```
+[사용자] 주제 제시
+    ↓
+[1] 리서치      — WebSearch/WebFetch로 최신 자료 수집
+    ↓
+[2] 아웃라인    — 섹션 구성 + 각 섹션의 시각 자료 계획 수립
+    ↓
+[3] 집필        — 영어로 본문 작성 (1500~2500 words)
+    ↓
+[4] 시각화      — Mermaid / SVG / 차트 제작 및 삽입
+    ↓
+[5] 참조 정리   — References 섹션에 링크 목록 정리 + 유효성 확인
+    ↓
+[6] 태그 부여   — 어휘집에서 3~6개 선택
+    ↓
+[7] 로컬 빌드   — `npm run build`로 검증 (링크·MDX·다이어그램 렌더링)
+    ↓
+[8] 게시        — git commit & push → GitHub Actions → GitHub Pages
+```
+
+### 7.1 사용자 확인 지점
+
+- **[2] 아웃라인 이후**: 방향이 맞는지 한 번 확인받고 진행 (선택 사항 — 원하면 생략 가능)
+- **[8] 게시 직전**: push 전 항상 사용자 승인을 받는다
+
+---
+
+## 8. 사이트 설정값 (확정)
+
+```
+site      : https://sehyunnoh.github.io
+base      : /techblog
+title     : lleg's study
+author    : lleg
+github    : https://github.com/sehyunnoh
+linkedin  : https://www.linkedin.com/in/devnoh
+```
+
+> `sehyunnoh.github.io`는 기존 개인 블로그가 쓰고 있으므로 **프로젝트 저장소 방식**을 사용한다.
+> 따라서 모든 내부 링크·이미지 경로는 `import.meta.env.BASE_URL` 기준 헬퍼(`withBase()`)를 통해 생성한다.
+> 하드코딩된 `/foo` 절대 경로는 404를 유발하므로 금지.
+
+### 8.1 남은 작업 (사용자 직접 수행 필요)
+
+| # | 항목 | 내용 |
+|---|---|---|
+| 1 | GitHub 저장소 생성 | `sehyunnoh/techblog` public으로 생성 후 Settings → Pages → Source를 **GitHub Actions**로 설정 |
+| 2 | Umami Cloud 가입 | [cloud.umami.is](https://cloud.umami.is) 가입 → 사이트 등록 → **Website ID** 발급받아 전달 |
+| 3 | Search Console 등록 | 배포 완료 후 사이트 소유권 확인 + sitemap 제출 |
+| 4 | 첫 번째 글 주제 | 셋업 완료 후 파이프라인 전체 검증용 |
+
+> 2번 Website ID를 받기 전까지는 애널리틱스 스크립트를 **환경변수 기반 조건부 렌더링**으로 넣어두고,
+> ID가 들어오면 그때 활성화한다. (ID 없으면 스크립트 자체가 출력되지 않음)
+
+### 8.2 보류 항목 (나중에)
+
+| 항목 | 시점 |
+|---|---|
+| 댓글(giscus) | 글이 어느 정도 쌓인 뒤 |
+| 커스텀 도메인 | 보유 도메인 없음. 필요해지면 `CNAME` + DNS 설정 + `base` 제거 |
+
+---
+
+## 9. 비범위 (하지 않는 것)
+
+- 다국어(i18n) 지원 — 영어 단일 언어
+- 회원가입 / 로그인 / 유료 구독
+- CMS 관리자 UI — 집필은 Claude + Markdown 파일로만
+- 뉴스레터 발송 시스템
