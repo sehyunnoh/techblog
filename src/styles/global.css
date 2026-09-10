@@ -137,6 +137,22 @@ body {
   letter-spacing: -0.01em;
 }
 
+/*
+ * Typography inserts curly quotes around blockquotes via ::before/::after.
+ * Quoted source material already carries its own quotation marks, so the two
+ * stack up as ""like this"". The explicit ones in the text win — they mark
+ * verbatim quotation and survive copy-paste, which generated content does not.
+ */
+.prose :where(blockquote p):first-of-type::before,
+.prose :where(blockquote p):last-of-type::after {
+  content: none;
+}
+
+.prose :where(blockquote) {
+  font-style: normal;
+  font-weight: 400;
+}
+
 .prose :where(a) {
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;

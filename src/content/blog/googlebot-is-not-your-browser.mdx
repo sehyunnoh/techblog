@@ -1,0 +1,186 @@
+---
+title: 'Googlebot Is Not Your Browser'
+description: 'Rendering is a separate, queued, stateless stage between crawling and indexing. Almost everything confusing about JavaScript and search comes from ignoring that.'
+pubDate: 2026-09-10
+tags: ['web', 'frontend', 'architecture', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Figure from '../../components/Figure.astro';
+
+Most writing about SEO cannot be checked. "Google prefers fresh content." "Dwell time affects rankings." Sourceless, unfalsifiable, and repeated until it sounds like fact.
+
+This post stays inside what Google documents and what you can measure yourself. That turns out to be enough to answer the question engineers actually have: **my page works in Chrome — why does Google see something else?**
+
+The answer is that Googlebot is not running Chrome on your page the way you are. It is running a *queue*.
+
+## Three stages, and the one in the middle
+
+Google describes processing in three stages: crawling, rendering, indexing.[^1] The middle one is where the surprises live, and it comes with a fact most people get wrong:
+
+> "All pages with a `200` HTTP status code are sent to the rendering queue, no matter whether JavaScript is present on the page."[^1]
+
+Every page. Static HTML with no script tag at all still goes through the render queue. Rendering is not a special path for JavaScript-heavy sites; it is the normal path for everything.
+
+<Mermaid
+  caption="The pipeline as Google documents it. The render queue is a real queue with real waiting — it is not a synchronous step inside the crawl."
+  label="Flowchart showing URL discovery, crawl queue, render queue with headless Chromium, and indexing, with links discovered during rendering feeding back to the crawl queue"
+  code={`
+flowchart LR
+  D["URL<br/>discovered"] --> CQ["Crawl queue"]
+  CQ --> F["Fetch<br/>HTTP 200"]
+  F --> RQ["Render queue<br/>———————<br/>every 200 lands here"]
+  RQ --> R["Headless Chromium<br/>runs the JavaScript"]
+  R --> I["Index"]
+  R -.->|"links found<br/>only after render"| CQ
+`}
+/>
+
+How long does a page sit in that queue? Google's answer is deliberately vague, and the vagueness is the point:
+
+> "The page may stay on this queue for a few seconds, but it can take longer than that."[^1]
+
+That sentence is the source of a lot of folklore. It is where the "second wave of indexing" model came from — the idea that Google indexes your HTML first, then comes back days later to index the JavaScript. **That model no longer appears anywhere in Google's JavaScript documentation.** I looked. What the docs describe now is one queue with variable latency, not two passes.
+
+The practical consequence survives regardless of which model you prefer: **anything that only exists after JavaScript runs is discovered later than anything in the initial HTML.** Including links. A URL that appears only after hydration cannot enter the crawl queue until rendering completes.
+
+## What the renderer is not
+
+Here is where the "it works in my browser" intuition breaks. Googlebot's renderer is a real Chromium, but it is running under constraints your browser never has.
+
+<Figure
+  caption="Three documented differences between your browser and Googlebot's renderer. Each one silently breaks a pattern that works perfectly in local testing."
+  label="Comparison diagram of a normal browser session against Googlebot's Web Rendering Service across state, permissions and blocked resources"
+>
+  <svg viewBox="0 0 700 260" width="100%" role="img" aria-labelledby="wrs-title">
+    <title id="wrs-title">Your browser keeps state and grants permissions; Googlebot's renderer does neither</title>
+
+    <text x="0" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">YOUR BROWSER</text>
+    <text x="366" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">GOOGLEBOT · WEB RENDERING SERVICE</text>
+
+    {[
+      { y: 26, label: 'State between page loads', mine: 'cookies, localStorage kept', theirs: 'all cleared, every load' },
+      { y: 104, label: 'Permission prompts', mine: 'you can say yes', theirs: 'declined' },
+      { y: 182, label: 'Resources blocked in robots.txt', mine: 'loaded normally', theirs: 'not fetched, not run' },
+    ].map((row) => (
+      <g>
+        <text x="0" y={row.y + 14} fill="var(--fg)" font-size="12" font-family="var(--font-sans)" font-weight="600">{row.label}</text>
+
+        <rect x="0" y={row.y + 24} width="330" height="38" rx="6" fill="var(--series-3)" opacity="0.12" stroke="var(--series-3)" stroke-width="1.3" />
+        <text x="165" y={row.y + 48} text-anchor="middle" fill="var(--fg)" font-size="12" font-family="var(--font-sans)">{row.mine}</text>
+
+        <rect x="366" y={row.y + 24} width="334" height="38" rx="6" fill="var(--series-2)" opacity="0.12" stroke="var(--series-2)" stroke-width="1.3" />
+        <text x="533" y={row.y + 48} text-anchor="middle" fill="var(--fg)" font-size="12" font-family="var(--font-sans)">{row.theirs}</text>
+      </g>
+    ))}
+
+    <path d="M340 45 h16 M340 123 h16 M340 201 h16" stroke="var(--fg-faint)" stroke-width="1.3" />
+    <path d="M350 41 l6 4 -6 4 M350 119 l6 4 -6 4 M350 197 l6 4 -6 4" fill="var(--fg-faint)" />
+  </svg>
+</Figure>
+
+**It keeps no state.** Google is explicit: "WRS does not retain state across page loads: Local Storage and Session Storage data are cleared across page loads. HTTP Cookies are cleared across page loads."[^2]
+
+Read that against how a typical app behaves. A page that reads a token from `localStorage` to decide what to fetch gets nothing. A "you've seen this already" flag never persists. Every page load is the first one, from a visitor who has never been to your site.
+
+**It says no to permissions.** "Expect Googlebot to decline user permission requests."[^2] Any content gated behind geolocation, notifications or the camera is content Googlebot will not reach — which is why Google's advice is to "provide a way for users to access your content without being forced to allow camera access."[^2]
+
+**It cannot use what robots.txt blocks.** "Google Search won't render JavaScript from blocked files or on blocked pages."[^1] Blocking `/static/` or `/_next/` in robots.txt to "save crawl budget" is a way to make your own site unrenderable — the fetch fails, the script never runs, and the page indexes as whatever the empty shell contained.
+
+## Where your content actually lives
+
+Once rendering is a queued, constrained stage rather than a guarantee, the rendering-strategy question stops being about performance fashion and becomes concrete: **how much of your content is in the initial HTML response, before any of this applies?**
+
+<Figure
+  caption="What arrives in the first HTTP response under each strategy. Everything to the right of the dashed line depends on the render queue; everything to the left is indexable the moment it is crawled."
+  label="Diagram comparing client-side rendering, server-side rendering and static generation by how much content is present in the initial HTML response"
+>
+  <svg viewBox="0 0 700 244" width="100%" role="img" aria-labelledby="strategy-title">
+    <title id="strategy-title">Client-side rendering ships an empty shell; server-side and static rendering ship content</title>
+
+    <text x="0" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">IN THE INITIAL HTML</text>
+    <text x="470" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">NEEDS THE RENDER QUEUE</text>
+    <path d="M452 20 V232" stroke="var(--fg-faint)" stroke-width="1.3" stroke-dasharray="5 4" />
+
+    {[
+      { y: 26, name: 'Client-side (CSR)', shell: 'empty div + bundle', w: 118, rest: 'all content, all links' },
+      { y: 100, name: 'Server-side (SSR)', shell: 'full content + links', w: 300, rest: 'interactivity only' },
+      { y: 174, name: 'Static (SSG)', shell: 'full content + links', w: 300, rest: 'interactivity only' },
+    ].map((row) => (
+      <g>
+        <text x="0" y={row.y + 12} fill="var(--fg)" font-size="12" font-family="var(--font-sans)" font-weight="600">{row.name}</text>
+        <rect x="0" y={row.y + 22} width={row.w} height="34" rx="5" fill="var(--series-1)" opacity="0.16" stroke="var(--series-1)" stroke-width="1.3" />
+        <text x={row.w / 2} y={row.y + 43} text-anchor="middle" fill="var(--fg)" font-size="11" font-family="var(--font-sans)">{row.shell}</text>
+        <text x="470" y={row.y + 43} fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-sans)">{row.rest}</text>
+      </g>
+    ))}
+  </svg>
+</Figure>
+
+Google's own recommendation list is short — "server-side rendering, static rendering, hydration" — and it is explicit about what *not* to reach for.[^3] Dynamic rendering, the pattern of serving a pre-rendered copy to bots and the real app to humans, is now described by Google as "a workaround and not a long-term solution," rejected because "it creates additional complexities and resource requirements."[^3]
+
+That is a notable reversal. Dynamic rendering was Google's own recommended fix for years, and plenty of production setups still carry it. If yours does, it is now maintaining a second rendering path that the search engine it was built for has stopped endorsing.
+
+## What is not your problem
+
+The most useful thing a post like this can do is tell you what to stop worrying about.
+
+**Crawl budget is almost certainly not your problem.** Google puts a size gate on its own guide: it applies to "large sites (1 million+ unique pages) with content that changes moderately often (once a week)" or "medium or larger sites (10,000+ unique pages) with very rapidly changing content (daily)."[^4] The page opens by telling most readers to leave:
+
+> "If your site doesn't have a large number of pages that change rapidly, or if your pages seem to be crawled the same day that they are published, you don't need to read this guide."[^4]
+
+A blog with fifty posts is not in that conversation. Neither is a marketing site, or most internal tools. The crawl-budget advice that circulates — trim your sitemap, block low-value paths, flatten your URL structure — is aimed at a class of site almost nobody reading it operates, and applying it is how people end up blocking the resources their own rendering depends on.
+
+**And none of the stages are guaranteed anyway.** Google states it plainly: "Google doesn't guarantee that it will crawl, index, or serve your page, even if your page follows the Google Search Essentials."[^5] Indexing specifically: "Indexing isn't guaranteed; not every page that Google processes will be indexed."[^5]
+
+Crawled does not mean rendered. Rendered does not mean indexed. Indexed does not mean it appears for any query. Each arrow in that chain is a filter, and technical correctness only buys you eligibility for the next one.
+
+## What you can actually measure
+
+Nearly everything above is unobservable from outside — you cannot watch the render queue, and Google publishes no timing you can hold them to. Two things are directly checkable.
+
+**The rendered HTML, per URL.** Search Console's URL Inspection has two modes that people routinely confuse. The indexed result shows "the most recently indexed version of a page, not the live version on the web"; the live test fetches it now.[^6] Both expose the useful part via **View crawled page → More info** or **View tested page → More info**, which lists "a list of resources, page code, and more information."[^6]
+
+That resource list is the highest-value screen in the tool and the least used. It tells you which scripts and stylesheets failed to load during rendering — the exact failure mode that a robots.txt block or a flaky third-party host produces, and the one that is invisible in your browser because your browser fetched them fine.
+
+The live test also renders a screenshot showing how "the Google-InspectionTool sees the page,"[^6] which settles "is my content actually there" in about five seconds.
+
+**A crude diff you can run yourself.** Fetch the page without executing JavaScript and look at what comes back:
+
+```bash
+# What the crawler gets before anything renders.
+curl -sL https://example.com/some-page | wc -c
+
+# Is the actual content in there, or just a shell?
+curl -sL https://example.com/some-page | grep -c "a distinctive phrase from the page"
+```
+
+If that grep returns `0`, your content depends entirely on the render queue. That is not automatically wrong — Google does render — but it means the content and every link on the page are behind a stage with no promised latency.
+
+## What this costs
+
+**Server-rendering has a real price, and it is not the search engine's problem.** SSR means running your app per request; static generation means a build step that grows with page count. Choosing one for indexing reasons is choosing to pay that cost. On a site whose content is genuinely dynamic and personalized, and which nobody would search for, client-side rendering remains a perfectly good answer.
+
+**Fixing what you can measure will not fix what you cannot.** Getting every page into the initial HTML makes your content eligible. It does not make it rank. Everything above buys you a place in the queue, and the queue is not the thing that decides.
+
+**The queue's latency is unknowable, so do not build on assumptions about it.** "A few seconds, but it can take longer" is all you get.[^1] Any plan that depends on rendering finishing within some window — a launch, an embargo, a time-sensitive page — should put the content in the initial HTML instead of betting on a queue with no SLA.
+
+## Takeaways
+
+- **Rendering is a separate, queued stage, and every 200 response goes through it** — JavaScript or not. It is the normal path, not a special one.
+- **Googlebot's renderer keeps no state and declines permissions.** Cookies, `localStorage` and `sessionStorage` are cleared between page loads, so anything gated on them is invisible.
+- **Blocking JS or CSS in robots.txt breaks your own rendering.** Blocked files are not fetched and not run; the page indexes as the shell.
+- **Links only in the rendered output are discovered late.** Content behind the render queue can be indexed; links behind it delay everything downstream.
+- **Dynamic rendering is over.** Google now calls it a workaround and recommends server-side or static rendering instead.
+- **Crawl budget starts at roughly a million pages.** If your pages get crawled the day you publish them, the entire topic is someone else's.
+- **Use URL Inspection's resource list.** It shows what failed to load during rendering — the failure your browser will never reproduce.
+
+## References
+
+[^1]: Google Search Central, [Understand JavaScript SEO basics](https://developers.google.com/search/docs/crawling-indexing/javascript/javascript-seo-basics) — the three stages, the render queue, and blocked resources.
+[^2]: Google Search Central, [Fix search-related JavaScript problems](https://developers.google.com/search/docs/crawling-indexing/javascript/fix-search-javascript) — WRS statelessness and declined permissions.
+[^3]: Google Search Central, [Dynamic rendering as a workaround](https://developers.google.com/search/docs/crawling-indexing/javascript/dynamic-rendering) — why it is no longer recommended.
+[^4]: Google Search Central, [Large site owner's guide to managing crawl budget](https://developers.google.com/search/docs/crawling-indexing/large-site-managing-crawl-budget) — who the guidance is and is not for.
+[^5]: Google Search Central, [How Google Search works](https://developers.google.com/search/docs/fundamentals/how-search-works) — no guarantee of crawling, indexing or serving.
+[^6]: Google Search Console Help, [URL Inspection tool](https://support.google.com/webmasters/answer/9012289) — indexed result versus live test, resource list and rendered screenshot.
