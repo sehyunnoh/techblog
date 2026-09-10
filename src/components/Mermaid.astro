@@ -20,7 +20,7 @@ const { code, caption, label } = Astro.props;
 
 <Figure caption={caption} label={label}>
   <div class="mermaid-host" data-mermaid data-state="pending">
-    <pre class="sr-only" data-mermaid-src set:text={code.trim()} />
+    <pre class="sr-only" data-mermaid-src data-pagefind-ignore set:text={code.trim()} />
   </div>
 </Figure>
 
