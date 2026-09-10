@@ -1,0 +1,299 @@
+---
+title: 'Your Observability Bill Is a Multiplication Problem'
+description: 'Cardinality does not creep up on you — it multiplies. Here is the arithmetic behind an exploding metrics bill, the four places the multiplication hides, and what actually shrinks it.'
+pubDate: 2026-09-10
+tags: ['observability', 'opentelemetry', 'cost-engineering', 'devops', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+import Figure from '../../components/Figure.astro';
+
+Nobody ever shipped the change that tripled the observability bill. That is the whole problem.
+
+Every individual instrumentation change looks harmless in review. Someone adds a `pod` label so they can tell which replica is slow. Someone adds `customer_tier` because a product manager asked. Someone swaps a counter for a histogram to get p99 latency. Each of these is one line of code, and each one is obviously correct in isolation.
+
+The bill does not add these changes up. It multiplies them.
+
+## The arithmetic
+
+A time series is identified by its metric name plus the exact set of label key-value pairs attached to it. Every distinct combination is a separate series, with its own index entry, its own chunk in memory, and its own line on the invoice. The Prometheus documentation puts it plainly: "every unique combination of key-value label pairs represents a new time series."[^1]
+
+That word *combination* is doing enormous work. The series count for one metric is the **product** of the cardinalities of its labels, not the sum:
+
+```
+series = ∏ cardinality(label_i)
+```
+
+Take a request-latency metric on a mid-sized service. Six HTTP methods. A hundred and twenty routes. Forty distinct status codes across the fleet. Sixty pods. None of those numbers is alarming on its own.
+
+<Chart
+  type="line"
+  logY
+  height={340}
+  caption="One metric, four ordinary labels, one histogram. Each step multiplies rather than adds, so the y-axis is logarithmic — a linear axis would render the first four points as a flat line on the floor. <b>Illustrative arithmetic</b>, not measurements from a specific system."
+  label="Cumulative time series count as labels are added to a single metric, rising from 1 to 24.2 million on a logarithmic scale"
+  labels={['Bare metric', '+ method (6)', '+ route (120)', '+ status (40)', '+ pod (60)', '+ 12 le buckets']}
+  series={[{ name: 'Time series', data: [1, 6, 720, 28800, 1728000, 24192000] }]}
+  yTitle="Time series (log scale)"
+  format="compact"
+/>
+
+Twenty-four million series from one metric. The histogram is the final indignity: a classic Prometheus histogram is not one series but one series *per bucket boundary*, plus `_sum` and `_count`. Twelve `le` buckets means every one of those 1.7 million label combinations becomes fourteen stored series.
+
+This is why cardinality budgets fail when they are expressed as "keep metrics under control." Multiplication has no intuitive feel for it. A label with 60 values does not add 60 to anything — it multiplies everything upstream of it by 60.
+
+## Where the multiplication hides
+
+Four sources account for nearly all of it, and only the first is widely understood.
+
+### Unbounded labels
+
+The textbook case. Prometheus is explicit: "Do not use labels to store dimensions with high cardinality (many different label values), such as user IDs, email addresses, or other unbounded sets of values."[^1] Grafana's example is a `user_id` label — one label that grows with your customer base rather than with your architecture.[^2]
+
+Most teams have internalised this rule for the obvious offenders. The ones that still slip through are the disguised ones: an un-normalised URL path (`/orders/8823`, `/orders/8824`, …), a raw error message used as a label value, or a `version` label carrying a full git SHA.
+
+### Histogram fan-out
+
+A classic histogram trades one series for many. Native histograms, now specified in Prometheus, collapse the entire distribution back into a single series with sparse exponential buckets — "first class citizens in the Prometheus data model" rather than something "broken down into float components upon ingestion."[^3]
+
+<Figure
+  caption="A classic histogram stores every bucket boundary as its own time series; a native histogram stores the whole distribution in one, with dynamic exponential buckets. The reduction is roughly <b>(buckets + 2)×</b> — and it applies on top of every label combination, not once."
+  label="Diagram comparing a classic histogram fanning out into 14 time series against a native histogram producing a single series"
+>
+  <svg viewBox="0 0 700 206" width="100%" role="img" aria-labelledby="hist-title">
+    <title id="hist-title">Classic histogram produces 14 series; native histogram produces 1</title>
+
+    <text x="0" y="14" fill="var(--fg-muted)" font-size="12" font-family="var(--font-sans)" font-weight="600">CLASSIC HISTOGRAM</text>
+    <rect x="0" y="26" width="150" height="34" rx="6" fill="var(--bg-subtle)" stroke="var(--line)" stroke-width="1" />
+    <text x="75" y="47" text-anchor="middle" fill="var(--fg)" font-size="12" font-family="var(--font-mono)">1 observation</text>
+    <path d="M75 60 v16" stroke="var(--fg-faint)" stroke-width="1.5" />
+    <path d="M12 76 H244 M12 76 v10 M75 76 v10 M138 76 v10 M201 76 v10 M244 76 v10" stroke="var(--fg-faint)" stroke-width="1.5" fill="none" />
+
+    {[
+      { x: 0, l: 'le=0.05' },
+      { x: 63, l: 'le=0.1' },
+      { x: 126, l: 'le=0.5' },
+      { x: 189, l: '…' },
+      { x: 232, l: '+Inf' },
+    ].map((b) => (
+      <g>
+        <rect x={b.x} y="86" width="56" height="26" rx="4" fill="var(--bg-surface)" stroke="var(--series-2)" stroke-width="1.3" />
+        <text x={b.x + 28} y="103" text-anchor="middle" fill="var(--fg-muted)" font-size="10" font-family="var(--font-mono)">{b.l}</text>
+      </g>
+    ))}
+
+    <rect x="0" y="122" width="56" height="26" rx="4" fill="var(--bg-surface)" stroke="var(--series-2)" stroke-width="1.3" />
+    <text x="28" y="139" text-anchor="middle" fill="var(--fg-muted)" font-size="10" font-family="var(--font-mono)">_sum</text>
+    <rect x="63" y="122" width="56" height="26" rx="4" fill="var(--bg-surface)" stroke="var(--series-2)" stroke-width="1.3" />
+    <text x="91" y="139" text-anchor="middle" fill="var(--fg-muted)" font-size="10" font-family="var(--font-mono)">_count</text>
+
+    <text x="0" y="176" fill="var(--series-2)" font-size="22" font-family="var(--font-sans)" font-weight="700">14 series</text>
+    <text x="0" y="196" fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-sans)">per label combination</text>
+
+    <path d="M320 22 V196" stroke="var(--line)" stroke-width="1" />
+
+    <text x="380" y="14" fill="var(--fg-muted)" font-size="12" font-family="var(--font-sans)" font-weight="600">NATIVE HISTOGRAM</text>
+    <rect x="380" y="26" width="150" height="34" rx="6" fill="var(--bg-subtle)" stroke="var(--line)" stroke-width="1" />
+    <text x="455" y="47" text-anchor="middle" fill="var(--fg)" font-size="12" font-family="var(--font-mono)">1 observation</text>
+    <path d="M455 60 v26" stroke="var(--fg-faint)" stroke-width="1.5" />
+
+    <rect x="380" y="86" width="150" height="62" rx="6" fill="var(--bg-surface)" stroke="var(--series-3)" stroke-width="1.6" />
+    {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+      <rect
+        x={392 + i * 18}
+        y={138 - [8, 16, 30, 42, 26, 14, 6][i]}
+        width="11"
+        height={[8, 16, 30, 42, 26, 14, 6][i]}
+        rx="2"
+        fill="var(--series-3)"
+      />
+    ))}
+
+    <text x="380" y="176" fill="var(--series-3)" font-size="22" font-family="var(--font-sans)" font-weight="700">1 series</text>
+    <text x="380" y="196" fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-sans)">sparse exponential buckets</text>
+  </svg>
+</Figure>
+
+### Churn
+
+The quietest one. "Active series" is a snapshot; your index and your retained storage are a union over time.
+
+A `pod` label on a Kubernetes deployment does not hold sixty values — it holds sixty values *right now*, and a fresh sixty after every rollout. Deploy ten times a day and that label has contributed six hundred distinct series to the retention window while every dashboard you look at reports sixty. The same applies to `container_id`, `instance` on autoscaled fleets, and any label derived from an ephemeral identity.
+
+Datadog bills custom metrics as a monthly average of the *distinct* timeseries counted each hour,[^4] which means churn lands squarely on the invoice even though no single instant looks expensive.
+
+### Metrics that were never queried
+
+Every default dashboard bundle, every library that helpfully instruments itself, every metric someone added for one incident in 2024. These carry the full multiplication cost of their labels and answer no question anyone is asking.
+
+## Why the invoice follows the index, not the bytes
+
+It is tempting to model observability cost as a volume problem — bytes ingested, bytes retained. That intuition is wrong in a way that sends optimisation efforts in the wrong direction.
+
+A metric data point is small. What is expensive is the *identity*: the inverted index entry, the label strings, the open chunk held in memory for as long as the series is active. Datadog states the consequence outright — a custom metric is "uniquely identified by a combination of a metric name and tag values (including the host tag)," and billable usage "is not impacted by data point submission frequency or the number of queries you run on your metrics."[^4]
+
+Read that twice, because it inverts the usual optimisation instinct. Scraping twice as often is nearly free. Adding one label with 60 values is a 60× event.
+
+The allotments make the scale concrete: Datadog includes 100 indexed custom metrics per host on Pro and 200 on Enterprise, counted across the whole infrastructure.[^4] A sixty-host Pro account is therefore entitled to 6,000 indexed custom metrics in total — against which the single 24-million-series metric above is roughly four thousand times over budget, on its own.
+
+Self-hosted Prometheus bills you in RAM and index pressure instead of dollars, but the shape of the cost is identical.
+
+The practical consequence: **compressing or shortening your metrics will not save you.** Removing a dimension will.
+
+<Mermaid
+  caption="The four intervention points, from cheapest to most invasive. Everything to the left of the backend is under your control and costs you nothing per series; everything to the right is metered."
+  label="Pipeline diagram showing application SDK, OpenTelemetry Collector and metrics backend, with four cost-control interventions placed along it"
+  code={`
+flowchart LR
+  A["Application SDK<br/>———————<br/>4 · high-cardinality context<br/>moves to exemplars"]
+  B["OTel Collector · free<br/>———————<br/>2 · drop what nothing queries<br/>3 · aggregate dimensions away"]
+  C["Metrics backend · metered<br/>———————<br/>1 · measure cardinality here"]
+  D["Dashboards<br/>and alerts"]
+  A --> B --> C --> D
+`}
+/>
+
+## Four moves, in order of leverage
+
+### 1. Measure before you cut
+
+Cardinality optimisation done blind is how teams delete the metric that mattered and keep six that do not. Prometheus exposes the answer directly at `/api/v1/status/tsdb`, which returns `seriesCountByMetricName`, `labelValueCountByLabelName`, and `seriesCountByLabelValuePair` — respectively, which metrics are expensive, which labels are unbounded, and which specific label values are doing the damage.[^5]
+
+The same question in PromQL, when you want it on a dashboard:
+
+```promql
+# Which metric names cost the most series?
+topk(20, count by (__name__)({__name__=~".+"}))
+
+# How many values does one label actually have?
+count(count by (pod)(http_request_duration_seconds_bucket))
+```
+
+Run this before touching anything. In practice the distribution is brutally top-heavy: a handful of metrics usually account for most of the series count, which means the first three cuts do nearly all the work.
+
+### 2. Drop what nothing queries
+
+The bluntest and cheapest move. The OpenTelemetry Collector's `filterprocessor` removes metrics before they are ever metered, using OTTL conditions:[^6]
+
+```yaml
+processors:
+  filter/drop_unused:
+    error_mode: ignore
+    metrics:
+      metric:
+        - 'name == "runtime.jvm.buffer.count"'
+        - 'IsMatch(name, "^rpc\\.server\\.duration.*") and
+           resource.attributes["deployment.environment"] == "dev"'
+```
+
+The equivalent at the Prometheus scrape config, if you are not running a Collector:
+
+```yaml
+metric_relabel_configs:
+  - source_labels: [__name__]
+    regex: 'go_gc_duration_seconds.*'
+    action: drop
+```
+
+This is reversible and low-risk, which is exactly why it should be first. The cost is that it is all-or-nothing per metric.
+
+### 3. Aggregate the dimension away
+
+More surgical, and where most of the real savings live. You usually do not need per-pod latency — you need latency, and the ability to find the bad pod *when there is one*. The Collector's `transformprocessor` will strip an attribute and re-aggregate the datapoints behind it:[^7]
+
+```yaml
+processors:
+  transform/reduce_cardinality:
+    metric_statements:
+      - context: metric
+        statements:
+          # Keep only the dimensions that dashboards and alerts actually use.
+          - aggregate_on_attributes("sum", ["http.route", "http.response.status_code"])
+            where name == "http.server.request.duration"
+```
+
+One warning that the documentation is emphatic about, and that bites people in production: **deleting attributes without re-aggregating is not a cost optimisation, it is a correctness bug.** Strip a label with `delete_matching_keys` and you are left with several datapoints sharing an identical identity — a violation of metric semantics that surfaces as identity conflicts or silently wrong sums downstream. Delete and aggregate are one operation, not two.[^7]
+
+Datadog's Metrics without Limits offers the managed version of the same idea, letting you ingest everything while paying to index only an allowlist of tags.[^8]
+
+### 4. Move high-cardinality context out of metrics entirely
+
+This is the move that resolves the argument rather than winning it. When someone insists they need `user_id` on a latency metric, they almost never want to *graph* per-user latency — they want to jump from a spike to the specific request that caused it.
+
+That is what exemplars are for. An exemplar attaches a trace ID to a metric observation, and Prometheus stores them in a fixed-size circular buffer at roughly 100 bytes of memory per exemplar with a trace reference.[^9] A hundred bytes, once — versus an entire new time series, forever, multiplied by every other label on the metric.
+
+<Mermaid
+  caption="The question to ask in code review. Most requests for a new label are really requests for a <b>navigation path</b>, and exemplars provide that without touching the series count."
+  label="Decision flowchart for whether a dimension should be a metric label, an exemplar or a log field"
+  code={`
+flowchart TD
+  Q["New dimension<br/>requested"] --> B{"Bounded, and<br/>stable over time?"}
+  B -- No --> E["Exemplar → trace<br/>or a log field"]
+  B -- Yes --> C{"Used by an alert<br/>or a dashboard?"}
+  C -- No --> D["Do not add it"]
+  C -- Yes --> N{"Under ~100 values,<br/>and no churn?"}
+  N -- No --> A["Aggregate at<br/>the Collector"]
+  N -- Yes --> L["Make it a label"]
+`}
+/>
+
+Applied to the 24-million-series metric from the opening, these moves compose multiplicatively in your favour for once:
+
+<Chart
+  type="bar"
+  horizontal
+  valueLabels
+  height={230}
+  caption="How much each move divides the series count by, applied to the worked example. Composed, they take it from 24.2M series to roughly 3,600 — a factor of about 6,700. <b>Illustrative</b>: your own factors depend entirely on which labels are unbounded in your system."
+  label="Horizontal bar chart of reduction factors: native histograms 14 times, aggregating away the pod label 60 times, collapsing status codes to classes 8 times"
+  labels={['Native histograms', 'Aggregate away `pod`', 'Status code → class']}
+  series={[{ name: 'Reduction factor', data: [14, 60, 8] }]}
+  xTitle="Divides series count by"
+  format="plain"
+/>
+
+## The trace side of the same problem
+
+Traces have the identical structure with different vocabulary: you cannot keep everything, so you decide what to throw away and when.
+
+OpenTelemetry draws the line at head versus tail sampling. Head sampling decides "as early as possible," knowing essentially nothing beyond a trace ID and a target percentage. Tail sampling decides after the spans complete, so it can keep exactly the traces you care about — the errors, the slow ones, the ones touching a specific service.[^10]
+
+Tail sampling is obviously better and is not free. The OpenTelemetry documentation is unusually blunt about the cost: tail samplers are "stateful systems that can accept and store a large amount of data," potentially requiring "dozens or even hundreds of compute nodes" depending on traffic, and they may need to degrade to simpler techniques when overwhelmed.[^10] There is also a load-balancing constraint that catches teams out — every span of a trace must reach the *same* sampler instance, which means a routing tier in front of it.
+
+So tail sampling does not eliminate the cost. It converts a storage bill into an infrastructure bill and an operational burden. That trade is usually worth making at scale and usually not worth making below it.
+
+## What breaks
+
+Every technique above deletes information. Being specific about which information is the difference between cost engineering and self-harm.
+
+**A dropped dimension is a question you can no longer ask.** Aggregating away `pod` means that when one replica degrades, your metrics will show a muted fleet-wide average instead of one bad host. That is an acceptable trade only if something else — traces, logs, or a lower-resolution per-pod metric with a short retention — can still answer it. Decide what that fallback is *before* you strip the label.
+
+**You cannot average percentiles.** This is the most common way cardinality reduction quietly corrupts a dashboard. If you aggregate a pre-computed p99 across pods, the result is not the fleet p99 and has no statistical meaning at all. Percentiles must be computed from bucket counts after aggregation, never aggregated from percentiles. Native histograms and `histogram_quantile()` over summed buckets do this correctly; a `avg(p99_latency)` panel does not.
+
+**Sampling and rare events are in tension.** Head sampling at 1% will miss an error that occurs in 0.1% of requests, most of the time. If your reliability model depends on catching rare failures, sampling policy is a reliability decision, not a cost decision.
+
+**Cardinality limits fail silently by default.** Most backends enforce a limit by dropping what exceeds it — and what exceeds it is whatever arrived last, not whatever matters least. A limit you have not paired with an alert on rejected series is a limit that will delete your most important metric during your worst incident.
+
+## Takeaways
+
+- **Series count is a product, not a sum.** A label with 60 values multiplies everything upstream of it by 60. This is why gradual instrumentation produces sudden bills.
+- **The index is the cost, not the bytes.** Scrape faster if you need to; add a dimension only if you must. Compression saves nothing that matters.
+- **Measure before cutting.** `/api/v1/status/tsdb` and `topk(count by (__name__))` will tell you in two minutes what a week of guessing will not. The distribution is always top-heavy.
+- **Aggregate rather than delete, and never delete without re-aggregating** — that is a correctness bug, not a saving.
+- **Most requests for a high-cardinality label are requests for a navigation path.** Exemplars cost about 100 bytes and answer that need without touching the series count.
+- **Name the question you are giving up.** Every reduction removes an answer. Write down which one, and what will answer it instead.
+
+## References
+
+[^1]: Prometheus, [Metric and label naming](https://prometheus.io/docs/practices/naming/) — official guidance against unbounded label values.
+[^2]: Grafana, [What are cardinality spikes and why do they matter?](https://grafana.com/blog/2022/02/15/what-are-cardinality-spikes-and-why-do-they-matter/)
+[^3]: Prometheus, [Native histograms specification](https://prometheus.io/docs/specs/native_histograms/) — bucket schemas and the single-series data model.
+[^4]: Datadog, [Custom Metrics Billing](https://docs.datadoghq.com/account_management/billing/custom_metrics/) — how distinct timeseries are counted and averaged.
+[^5]: Prometheus, [HTTP API — TSDB Stats](https://prometheus.io/docs/prometheus/latest/querying/api/) — the `/api/v1/status/tsdb` cardinality endpoint.
+[^6]: OpenTelemetry Collector Contrib, [Filter Processor](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/processor/filterprocessor/README.md)
+[^7]: OpenTelemetry Collector Contrib, [Transform Processor](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/processor/transformprocessor/README.md) — `aggregate_on_attributes` and the identity-conflict warning.
+[^8]: Datadog, [Metrics without Limits](https://docs.datadoghq.com/metrics/metrics-without-limits/) — decoupling ingestion from indexing.
+[^9]: Prometheus, [Feature flags — exemplar storage](https://prometheus.io/docs/prometheus/latest/feature_flags/) — circular buffer sizing and per-exemplar memory.
+[^10]: OpenTelemetry, [Sampling](https://opentelemetry.io/docs/concepts/sampling/) — head vs tail sampling and the operational cost of the latter.

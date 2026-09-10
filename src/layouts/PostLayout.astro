@@ -17,7 +17,11 @@ const { title, description, pubDate, updatedDate, tags } = post.data;
 const minutes = readingTime(post.body);
 
 // Only h2/h3 belong in the contents list; deeper levels make it a wall.
-const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
+// `footnote-label` is the visually hidden heading GFM injects above the
+// footnote list — a real heading in the AST, but not a section of the post.
+const toc = headings.filter(
+  (h) => (h.depth === 2 || h.depth === 3) && h.slug !== 'footnote-label',
+);
 ---
 
 <BaseLayout
