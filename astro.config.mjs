@@ -7,7 +7,16 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   site: 'https://lleg.dev',
   trailingSlash: 'ignore',
-  integrations: [mdx(), sitemap()],
+  integrations: [
+    mdx(),
+    sitemap({
+      // Keep noindex pages out of the sitemap. Listing a page and then telling
+      // Google not to index it is not harmful, but it reports as "Excluded by
+      // noindex tag" in Search Console — a warning-shaped line for a page that
+      // is behaving exactly as intended.
+      filter: (page) => !new URL(page).pathname.startsWith('/search'),
+    }),
+  ],
   /*
    * Fonts are downloaded at build time and served from this origin. Readers
    * never contact a font CDN, so no visitor IP leaves the site to fetch a
