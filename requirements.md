@@ -185,14 +185,14 @@ linkedin  : https://www.linkedin.com/in/devnoh
 > 따라서 모든 내부 링크·이미지 경로는 `import.meta.env.BASE_URL` 기준 헬퍼(`withBase()`)를 통해 생성한다.
 > 하드코딩된 `/foo` 절대 경로는 404를 유발하므로 금지.
 
-### 8.1 셋업 진행 상태
+### 8.1 셋업 진행 상태 (완료)
 
 | # | 항목 | 상태 |
 |---|---|---|
 | 1 | GitHub 저장소 + Pages | ✅ 완료 — `sehyunnoh/techblog`, Actions 배포 |
 | 2 | 첫 번째 글 | ✅ 게시됨 — Observability 비용·카디널리티 |
 | 3 | Umami Cloud | ✅ 연동 완료 — 아래 참고 |
-| 4 | Search Console 등록 | ⬜ 소유권 확인 + sitemap 제출 (사용자 직접) |
+| 4 | Search Console | ✅ 소유권 확인 완료 — `public/google2a7f329f4ff23189.html` |
 
 #### 애널리틱스 배선
 
