@@ -16,7 +16,24 @@ const nav = [
 <header class="site-header">
   <div class="site-header__inner">
     <a class="brand" href={withBase('/')}>
-      <span class="brand__mark" aria-hidden="true"></span>
+      {/* Same mark as public/favicon.svg — keep the two in step if either changes. */}
+      <svg class="brand__mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+        <rect width="32" height="32" rx="7" fill="#0f766e" />
+        <path
+          d="M9 8v16h5"
+          stroke="#ffffff"
+          stroke-width="3.2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          fill="none"></path>
+        <path
+          d="M19 8v16h5"
+          stroke="#5eead4"
+          stroke-width="3.2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          fill="none"></path>
+      </svg>
       <span class="brand__name">{SITE.title}</span>
     </a>
 
@@ -68,12 +85,14 @@ const nav = [
     margin-right: auto;
   }
 
+  /*
+   * Fixed colours in both themes, unlike the rest of the UI. A brand mark that
+   * recolours per theme stops being the same mark as the one in the tab.
+   */
   .brand__mark {
-    width: 0.7rem;
-    height: 0.7rem;
-    border-radius: 2px;
-    background: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-soft);
+    width: 1.15rem;
+    height: 1.15rem;
+    flex-shrink: 0;
   }
 
   .nav {
