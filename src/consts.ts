@@ -1,9 +1,9 @@
 export const SITE = {
-  title: "lleg's study",
+  title: "Lleg's study",
   tagline: 'Notes on AI, web, and the systems underneath',
   description:
-    'A tech blog by lleg — deep dives on AI, web engineering, and infrastructure, with diagrams and data instead of hand-waving.',
-  author: 'lleg',
+    'A tech blog by Lleg — deep dives on AI, web engineering, and infrastructure, with diagrams and data instead of hand-waving.',
+  author: 'Lleg',
   locale: 'en',
   postsPerPage: 10,
 } as const;

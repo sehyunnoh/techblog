@@ -13,7 +13,7 @@ AI, Web, 인프라 등 다양한 기술 주제를 다루는 개인 기술 블로
 
 | 항목 | 내용 |
 |---|---|
-| 블로그 이름 | **lleg's study** |
+| 블로그 이름 | **Lleg's study** |
 | 작업 디렉터리 | `D:\workspace\TechBlog` |
 | GitHub 저장소 | `sehyunnoh/techblog` |
 | 배포 URL | **`https://lleg.dev`** (Cloudflare Registrar 등록, apex 서빙) |
@@ -197,8 +197,8 @@ readingTime: 11               # auto-calculated
 
 ```
 site      : https://lleg.dev      (apex, base 경로 없음)
-title     : lleg's study
-author    : lleg
+title     : Lleg's study
+author    : Lleg
 github    : https://github.com/sehyunnoh
 linkedin  : https://www.linkedin.com/in/devnoh
 ```
