@@ -1,4 +1,5 @@
 ---
+import { Font } from 'astro:assets';
 import '../styles/global.css';
 import { SITE, UMAMI_WEBSITE_ID, UMAMI_SCRIPT_URL } from '../consts';
 import { withBase } from '../utils/url';
@@ -63,12 +64,15 @@ const fullTitle = path === '/' ? `${SITE.title} — ${SITE.tagline}` : `${title}
 <meta name="twitter:title" content={title} />
 <meta name="twitter:description" content={description} />
 
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link
-  rel="stylesheet"
-  href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&family=JetBrains+Mono:wght@400;500&display=swap"
-/>
+{
+  /*
+    Self-hosted: these emit @font-face rules pointing at this origin, so no
+    visitor IP is sent to a font CDN. Only the body face is preloaded — the
+    monospace face is used by code blocks further down the page.
+  */
+}
+<Font cssVariable="--font-inter" preload />
+<Font cssVariable="--font-jetbrains-mono" />
 
 {
   /*

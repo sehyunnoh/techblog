@@ -26,9 +26,9 @@ const updated = new Intl.DateTimeFormat('en-US', {
     <p class="summary__title">The short version</p>
     <p>
       This is a static blog. There are no accounts, no cookies, no advertising and no cross-site
-      tracking. Three parties see something when you load a page: a privacy-focused analytics
-      service that records an anonymous page view, GitHub, which serves the files and logs your IP
-      for security, and Google, which serves the web fonts.
+      tracking. Two parties see anything when you load a page: a privacy-focused analytics service
+      that records an anonymous page view, and GitHub, which serves the files and logs your IP for
+      security. Nothing else — fonts included — is fetched from a third party.
     </p>
   </div>
 
@@ -60,11 +60,9 @@ const updated = new Intl.DateTimeFormat('en-US', {
 
     <h3>Fonts</h3>
     <p>
-      Pages load the Inter and JetBrains Mono typefaces from Google Fonts
-      (<code>fonts.googleapis.com</code> and <code>fonts.gstatic.com</code>). Fetching them sends
-      your IP address and browser details to Google, the way any request to a third-party server
-      does. No cookie is set by these requests. Google's handling of that data falls under the{' '}
-      <a href="https://policies.google.com/privacy" rel="noopener">Google Privacy Policy</a>.
+      The Inter and JetBrains Mono typefaces are served from this site, not from a font CDN. They
+      are downloaded once when the site is built and shipped alongside the pages, so loading a page
+      sends nothing to Google or anyone else in order to render text.
     </p>
 
     <h3>Search</h3>
