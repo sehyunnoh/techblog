@@ -1,0 +1,268 @@
+---
+title: "Hermes Agent's Learning Loop Is a Counter, a Critic and a Garbage Collector"
+description: 'Hermes Agent says it improves its own skills. In the source, that loop is a tool-call counter, a forked LLM review told to be active, and a curator that archives what nobody uses.'
+pubDate: 2026-09-11
+tags: ['ai', 'llm', 'python', 'architecture', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+import Figure from '../../components/Figure.astro';
+
+Hermes Agent, Nous Research's open-source personal agent, describes itself as "the only agent with a built-in learning loop — it creates skills from experience, improves them during use, nudges itself to persist knowledge."[^1] It has 244,071 GitHub stars and is on version 0.21.1.
+
+"Learning" is a loaded word in this field. It can mean gradient updates, or optimisation against a metric, or something much more modest. So instead of reading the marketing, this post reads the code — every claim below links to a line in the repository, pinned to the commit I read.
+
+The short version: the loop is real, it is well engineered, and it is not learning in the sense the word usually implies. It is three mechanisms stacked on top of each other — **a counter** that decides when to reflect, **a critic** that decides what to write, and **a garbage collector** that decides what to throw away. Once you see which part does what, the design's strengths and its blind spots are both obvious.
+
+## The whole loop on one page
+
+<Mermaid
+  caption="The three mechanisms. The counter and the critic run inside normal use; the curator runs separately, only after the machine has been idle. Nothing in the loop measures whether a skill made the next task go better."
+  label="Flowchart of Hermes Agent's learning loop: tool iterations increment a counter, a turn-end check spawns a background review fork that writes skills through guards, and an idle-triggered curator marks skills stale or archives them"
+  code={`
+flowchart LR
+  T["Tool call<br/>counter +1"] --> E{"Turn ends:<br/>count ≥ 15?"}
+  E -- "no" --> T
+  E -- "yes · reset" --> F["Review fork<br/>writes via guards"]
+  F --> L[("Skill<br/>library")]
+  L --> Q["Curator<br/>stale 30d · archive 90d"]
+`}
+/>
+
+## Part one: the counter
+
+The foreground agent — the one talking to you — gets exactly one sentence about skills in its system prompt: "When you work out a non-trivial workflow, record it with skill_manage for future reuse."[^2] It can act on that whenever it likes. But the loop does not rely on the agent remembering to. It relies on a counter.
+
+Every tool-calling iteration increments `_iters_since_skill`, as long as the `skill_manage` tool is available; the source comment notes that it "resets whenever skill_manage is used."[^3] At the end of each turn, the finalizer checks it:
+
+```python
+# agent/turn_finalizer.py
+_should_review_skills = (
+    agent._skill_nudge_interval > 0
+    and agent._iters_since_skill >= agent._skill_nudge_interval
+    and "skill_manage" in agent.valid_tool_names
+)
+if _should_review_skills:
+    agent._iters_since_skill = 0
+```
+
+When it fires, a background review is spawned — but only after the response has been delivered, only if the turn was not interrupted, and never for cron jobs, where the source explains the fork "costs ~30K tokens / event with no human-in-the-loop benefit."[^4]
+
+The interval itself has a quirk worth knowing. The code falls back to **10** iterations if nothing is configured.[^5] The shipped example config sets **15**,[^6] and the installers copy that file verbatim into `~/.hermes/config.yaml`.[^7] So a normally installed agent reflects every 15 tool calls, and the number in the code is the one almost nobody runs.
+
+<Figure
+  caption="The trigger is a count of tool calls, not a judgement about the task. A session that makes 16 quick calls to list files reaches the threshold; a hard one-shot answer with no tools never does. The check happens only at the end of a turn, so a long turn can run well past the interval before the review starts."
+  label="Timeline showing tool-calling iterations accumulating across turns, the counter reaching 15, and a review spawning after the turn's response is delivered"
+>
+  <svg viewBox="0 0 700 190" width="100%" role="img" aria-labelledby="counter-title">
+    <title id="counter-title">Counter accumulating tool iterations and triggering a review at the end of a turn</title>
+
+    <text x="0" y="14" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">TOOL-CALLING ITERATIONS</text>
+
+    {[...Array(17)].map((_, i) => (
+      <rect
+        x={i * 34}
+        y="26"
+        width="28"
+        height="26"
+        rx="4"
+        fill={i < 15 ? 'var(--series-1)' : 'var(--series-2)'}
+        opacity={i < 15 ? 0.18 : 0.22}
+        stroke={i < 15 ? 'var(--series-1)' : 'var(--series-2)'}
+        stroke-width="1.2"
+      />
+    ))}
+    {[...Array(17)].map((_, i) => (
+      <text x={i * 34 + 14} y="43" text-anchor="middle" fill="var(--fg-muted)" font-size="10" font-family="var(--font-mono)">{i + 1}</text>
+    ))}
+
+    <path d="M0 64 H370" stroke="var(--fg-faint)" stroke-width="1.2" />
+    <path d="M0 60 v8 M370 60 v8" stroke="var(--fg-faint)" stroke-width="1.2" />
+    <text x="185" y="82" text-anchor="middle" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">turn 1 — below the interval, nothing happens</text>
+
+    <path d="M374 64 H574" stroke="var(--series-2)" stroke-width="1.4" />
+    <path d="M374 60 v8 M574 60 v8" stroke="var(--series-2)" stroke-width="1.4" />
+    <text x="474" y="82" text-anchor="middle" fill="var(--series-2)" font-size="11" font-family="var(--font-sans)" font-weight="600">turn 2 crosses 15</text>
+
+    <line x1="0" y1="104" x2="700" y2="104" stroke="var(--line)" stroke-width="1" />
+
+    <rect x="0" y="118" width="210" height="58" rx="6" fill="var(--bg-subtle)" stroke="var(--line)" stroke-width="1" />
+    <text x="105" y="142" text-anchor="middle" fill="var(--fg)" font-size="12" font-family="var(--font-sans)" font-weight="600">turn ends</text>
+    <text x="105" y="160" text-anchor="middle" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">response delivered first</text>
+
+    <path d="M218 147 H250" stroke="var(--fg-faint)" stroke-width="1.4" />
+    <path d="M244 143 l6 4 -6 4" fill="var(--fg-faint)" />
+
+    <rect x="258" y="118" width="210" height="58" rx="6" fill="var(--bg-subtle)" stroke="var(--line)" stroke-width="1" />
+    <text x="363" y="142" text-anchor="middle" fill="var(--fg)" font-size="12" font-family="var(--font-sans)" font-weight="600">counter reset to 0</text>
+    <text x="363" y="160" text-anchor="middle" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">interval met at turn end</text>
+
+    <path d="M476 147 H508" stroke="var(--fg-faint)" stroke-width="1.4" />
+    <path d="M502 143 l6 4 -6 4" fill="var(--fg-faint)" />
+
+    <rect x="516" y="118" width="184" height="58" rx="6" fill="var(--series-2)" opacity="0.14" stroke="var(--series-2)" stroke-width="1.3" />
+    <text x="608" y="142" text-anchor="middle" fill="var(--fg)" font-size="12" font-family="var(--font-sans)" font-weight="600">review fork spawns</text>
+    <text x="608" y="160" text-anchor="middle" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">~30K tokens per event</text>
+  </svg>
+</Figure>
+
+## Part two: the critic
+
+The review is a forked copy of the agent with a narrowed toolset — just `skills`, plus `memory` when memory is also due for review.[^8] It receives the conversation snapshot and a long instruction. The opening lines set the tone:
+
+> "Review the conversation above and update the skill library. Be ACTIVE — most sessions produce at least one skill update, even if small. A pass that does nothing is a missed learning opportunity, not a neutral outcome."[^9]
+
+That is a deliberate thumb on the scale. The prompt lists what counts as evidence — the user corrected your style or tone, the user corrected your workflow, a non-trivial technique or workaround emerged, or a skill consulted this session turned out to be wrong or outdated — and then gives an order of preference: patch a skill that was loaded this session, then patch an existing umbrella skill, then add a support file, and only then create a new class-level skill.[^9] "Nothing to save." is allowed, but the prompt says it "should NOT be the default."[^9]
+
+It also enforces taste on naming. A new skill "MUST NOT be a specific PR number, error string, feature codename … or 'fix-X / debug-Y / audit-Z-today' session artifact."[^9] That rule exists because the obvious failure mode of an agent that writes its own notes is a library of a thousand one-off post-mortems.
+
+### What the critic is not allowed to touch
+
+The fork runs with no user present, so its writes pass through guards that refuse anything it does not own.[^10] Ownership is decided at creation time, and the rule is stricter than you might expect: **only a skill created by the background review is marked as agent-created**. A skill the foreground agent creates — even unprompted — "belongs to the user."[^11]
+
+<Figure
+  caption="What the background review may write. It can only modify skills that it — the unattended review — created itself. Everything else is refused, including skills that were loaded in the very session being reviewed. Every edit to an existing skill also requires a fresh read of that exact file inside the review."
+  label="Matrix of skill categories and whether the background review fork may modify them: curator-managed yes; pinned, user-owned, bundled, hub-installed and external skills refused"
+>
+  <svg viewBox="0 0 700 250" width="100%" role="img" aria-labelledby="guard-title">
+    <title id="guard-title">Only curator-managed skills are writable by the unattended review</title>
+
+    <text x="0" y="14" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">SKILL ORIGIN</text>
+    <text x="560" y="14" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">REVIEW MAY WRITE?</text>
+
+    {[
+      { label: 'Created by a previous background review', note: 'curator-managed', ok: true },
+      { label: 'Created by the foreground agent or the user', note: 'user-owned', ok: false },
+      { label: 'Pinned with hermes curator pin', note: 'any origin', ok: false },
+      { label: 'Bundled with Hermes / installed from the hub', note: 'shipped', ok: false },
+      { label: 'In skills.external_dirs', note: 'externally owned', ok: false },
+    ].map((row, i) => (
+      <g>
+        <rect x="0" y={26 + i * 44} width="540" height="36" rx="6" fill="var(--bg-subtle)" stroke="var(--line)" stroke-width="1" />
+        <text x="14" y={49 + i * 44} fill="var(--fg)" font-size="12" font-family="var(--font-sans)">{row.label}</text>
+        <text x="526" y={49 + i * 44} text-anchor="end" fill="var(--fg-faint)" font-size="11" font-family="var(--font-sans)">{row.note}</text>
+        <rect x="560" y={26 + i * 44} width="140" height="36" rx="6" fill={row.ok ? 'var(--series-3)' : 'var(--series-2)'} opacity="0.16" stroke={row.ok ? 'var(--series-3)' : 'var(--series-2)'} stroke-width="1.3" />
+        <text x="630" y={49 + i * 44} text-anchor="middle" fill="var(--fg)" font-size="12" font-family="var(--font-sans)" font-weight="600">{row.ok ? 'yes' : 'refused'}</text>
+      </g>
+    ))}
+  </svg>
+</Figure>
+
+The read-before-write guard is the subtle one. Before patching an existing skill, the fork must call `skill_view` on it inside the review; content quoted earlier in the transcript does not count.[^10] That closes a real hole: without it, a review could "update" a skill from a stale copy in the conversation and silently revert someone's newer edit.
+
+## Part three: the garbage collector
+
+An agent told to be active will write a lot. The curator exists, in the docs' words, so that skills created by the loop "don't pile up forever … Without maintenance, you end up with dozens of narrow near-duplicates that pollute the catalog and waste tokens."[^12]
+
+It is not a cron job. It runs when two conditions hold: at least `interval_hours` since the last run (default **168**, one week) and at least `min_idle_hours` of inactivity (default **2**).[^12] A fresh install does not run it at all at first — the first observation seeds the timestamp and defers a full interval.[^13]
+
+A run has two phases, and only the first is on by default:
+
+- **Deterministic transitions.** A skill with no activity for 30 days becomes `stale`; after 90 days it is moved to an archive directory. Pinned skills and skills referenced by any cron job are skipped, and a never-used skill is not archived until it is at least 30 days old — "zero uses is absence of evidence, not proof the skill is disposable."[^12]
+- **LLM consolidation**, which merges overlapping skills into umbrellas. Off by default, because it "costs aux-model tokens on every run and makes broad structural changes"; a full sweep "typically takes 50–100 API calls."[^12]
+
+The curator never deletes. The worst outcome is an archive, which `hermes curator restore` reverses.[^12]
+
+<Figure
+  caption="The default lifecycle of an agent-created skill. The clock is reset by any view, use or patch — which is what the curator measures, and all it measures."
+  label="Timeline of a skill moving from active to stale after 30 days without activity and to archived after 90 days, with the curator checking at most weekly"
+>
+  <svg viewBox="0 0 700 150" width="100%" role="img" aria-labelledby="life-title">
+    <title id="life-title">Active for up to 30 days of inactivity, stale until 90, then archived</title>
+
+    <rect x="0" y="30" width="232" height="40" rx="6" fill="var(--series-3)" opacity="0.16" stroke="var(--series-3)" stroke-width="1.3" />
+    <text x="116" y="55" text-anchor="middle" fill="var(--fg)" font-size="12" font-family="var(--font-sans)" font-weight="600">active</text>
+
+    <rect x="236" y="30" width="232" height="40" rx="6" fill="var(--series-4)" opacity="0.18" stroke="var(--series-4)" stroke-width="1.3" />
+    <text x="352" y="55" text-anchor="middle" fill="var(--fg)" font-size="12" font-family="var(--font-sans)" font-weight="600">stale</text>
+
+    <rect x="472" y="30" width="228" height="40" rx="6" fill="var(--bg-subtle)" stroke="var(--line)" stroke-width="1.3" />
+    <text x="586" y="55" text-anchor="middle" fill="var(--fg)" font-size="12" font-family="var(--font-sans)" font-weight="600">archived · recoverable</text>
+
+    <text x="0" y="20" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">day 0</text>
+    <text x="236" y="20" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">30 days without activity</text>
+    <text x="472" y="20" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">90 days</text>
+
+    <path d="M352 76 C352 110, 116 110, 116 80" stroke="var(--fg-faint)" stroke-width="1.3" fill="none" stroke-dasharray="4 4" />
+    <path d="M111 86 L116 76 L121 86" stroke="var(--fg-faint)" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+    <text x="234" y="132" text-anchor="middle" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">any view, use or patch moves it back to active</text>
+  </svg>
+</Figure>
+
+Read that carefully, because it is the most important sentence in this post: **the curator removes skills that are unused, not skills that are wrong.** Activity is the sum of views, uses and patches.[^14] A skill that is loaded constantly and quietly steers the agent in the wrong direction is, by the curator's only measure, the healthiest skill in the library.
+
+## The 60-character bottleneck
+
+Skills follow the Agent Skills open standard: a directory with a `SKILL.md` whose frontmatter carries a `name` and a `description`. The standard allows descriptions up to 1,024 characters and explains the design as progressive disclosure — about 100 tokens of metadata per skill load at startup, and the full instructions load only when a task matches.[^15]
+
+Hermes is stricter. The skill index in its system prompt truncates every description to 60 characters — 57 plus an ellipsis.[^16] Hermes' own authoring prompt spells out the consequence: "anything past char 60 is silently cut and never routes."[^17]
+
+<Chart
+  type="bar"
+  horizontal
+  valueLabels
+  height={250}
+  caption="Published limits on text that is loaded into every session. The skill index is the entry point for all procedural knowledge, and it gets the smallest budget by far. Sources: Hermes source and docs, Agent Skills specification."
+  label="Horizontal bar chart of character limits: Hermes skill index description 60, Agent Skills description maximum 1024, USER.md 1375, MEMORY.md 2200"
+  labels={['Skill index description (Hermes)', 'Description limit (Agent Skills spec)', 'USER.md', 'MEMORY.md']}
+  series={[{ name: 'Characters', data: [60, 1024, 1375, 2200] }]}
+  xTitle="Characters"
+  format="plain"
+/>
+
+This is the real ceiling on how much the loop can "learn". Every skill the critic writes competes for recall on the strength of 60 characters of routing text. Write a hundred skills and the agent is choosing among a hundred short phrases each session — which is exactly the pressure the curator's consolidation pass exists to relieve, and exactly the pass that is off by default.
+
+Memory has the same shape. `MEMORY.md` is capped at 2,200 characters and `USER.md` at 1,375, both injected as a frozen snapshot at session start, and neither auto-compacts — a write that would exceed the limit returns an error.[^18]
+
+## Where the actual optimisation lives
+
+If "improves them during use" suggested measured improvement, the measured version does exist — in a separate repository. Hermes Agent Self-Evolution uses DSPy and GEPA to "evolve and optimize Hermes Agent's skills, tool descriptions, system prompts, and code," generating an eval dataset, evaluating candidate variants against constraint gates, and opening a pull request against the main repository.[^19]
+
+That is optimisation against a metric. It runs offline, on demand, and its output goes through code review. The runtime loop inside every installed agent is the other thing: an LLM reading one transcript and editing text.
+
+## What this design costs
+
+**There is no outcome signal.** Nothing in the runtime loop checks whether a patched skill made the next task succeed. The critic's evidence is the conversation: corrections, frustration, a technique that appeared. That works well for preferences — "stop being so verbose" is unambiguous — and badly for correctness, where a confident wrong approach produces no complaint in the transcript at all.
+
+**The bias toward writing is a bias toward growth.** Telling the reviewer that doing nothing is a missed opportunity is defensible; a timid reviewer never learns anything. But the counterweight is time-based archival that ignores correctness, and a consolidation pass that ships disabled. By default, the library grows by judgement and shrinks only by neglect.
+
+**One correction generalises.** The prompt asks that a user's complaint be embedded in the skill that "governs that class of task."[^9] A preference expressed once, in one context, becomes a rule for every future session of that class. That is the feature. It is also how a bad day becomes permanent behaviour.
+
+**The loop's writes outlive the session that caused them.** A skill body is text the agent wrote after reading a transcript — and transcripts contain tool output, web pages and messages from gateways like Telegram and Discord. The ownership guards stop the review from editing skills it did not create; they do not vet what goes into the ones it did. An optional security scan of agent-written skills exists, but `skills.guard_agent_created` defaults to off.[^11] If you want a human between the critic and the library, `skills.write_approval: true` stages every write for review under `~/.hermes/pending/skills/`.[^20]
+
+**Reflection is not free.** Each review event is a forked run on the full conversation snapshot — around 30K tokens by the source's own estimate.[^4] At an interval of 15 tool calls, a tool-heavy session pays that repeatedly.
+
+## Takeaways
+
+- **"Self-improving" in Hermes means: a counter triggers an LLM review that edits skill files.** No weights change, and no metric is optimised at runtime.
+- **The trigger is 15 tool calls in a normal install**, checked at the end of a turn — the code's default of 10 is overridden by the config the installer copies.
+- **The critic is told that doing nothing is a missed opportunity**, so the library is designed to grow, and preferences expressed once become rules for a whole class of task.
+- **Ownership is strict and well guarded.** The unattended review can only edit skills it created itself, and must re-read a file before changing it.
+- **The curator removes skills that go unused, not skills that are wrong.** A frequently loaded bad skill is the one it protects most.
+- **60 characters of description decide whether a skill is ever found.** That, not the number of skills, is the practical limit on what the loop can accumulate.
+- **Turn on `write_approval` if the agent reads untrusted content.** Whatever the review writes is loaded into future sessions.
+
+## References
+
+[^1]: NousResearch/hermes-agent, [README](https://github.com/NousResearch/hermes-agent/blob/8226c2f6a283c48fb97c1750a0ec2907739146d0/README.md). Star count and version from the GitHub API on 2026-09-10.
+[^2]: `agent/prompt_builder.py`, [SKILLS_GUIDANCE](https://github.com/NousResearch/hermes-agent/blob/8226c2f6a283c48fb97c1750a0ec2907739146d0/agent/prompt_builder.py#L227-L233).
+[^3]: `agent/turn_iteration_prep.py`, [skill nudge counter](https://github.com/NousResearch/hermes-agent/blob/8226c2f6a283c48fb97c1750a0ec2907739146d0/agent/turn_iteration_prep.py#L118-L120).
+[^4]: `agent/turn_finalizer.py`, [turn-end trigger and review spawn](https://github.com/NousResearch/hermes-agent/blob/8226c2f6a283c48fb97c1750a0ec2907739146d0/agent/turn_finalizer.py#L594-L623).
+[^5]: `agent/agent_init.py`, [skill nudge interval default](https://github.com/NousResearch/hermes-agent/blob/8226c2f6a283c48fb97c1750a0ec2907739146d0/agent/agent_init.py#L1302-L1304).
+[^6]: `cli-config.yaml.example`, [creation_nudge_interval](https://github.com/NousResearch/hermes-agent/blob/8226c2f6a283c48fb97c1750a0ec2907739146d0/cli-config.yaml.example#L1047-L1050).
+[^7]: `scripts/install.sh`, [copies the example config into ~/.hermes/config.yaml](https://github.com/NousResearch/hermes-agent/blob/8226c2f6a283c48fb97c1750a0ec2907739146d0/scripts/install.sh).
+[^8]: `agent/background_review.py`, [review toolset restriction](https://github.com/NousResearch/hermes-agent/blob/8226c2f6a283c48fb97c1750a0ec2907739146d0/agent/background_review.py#L967-L968).
+[^9]: `agent/background_review.py`, [_SKILL_REVIEW_PROMPT](https://github.com/NousResearch/hermes-agent/blob/8226c2f6a283c48fb97c1750a0ec2907739146d0/agent/background_review.py#L368).
+[^10]: `tools/skill_manager_guards.py`, [background-review write and read-before-write guards](https://github.com/NousResearch/hermes-agent/blob/8226c2f6a283c48fb97c1750a0ec2907739146d0/tools/skill_manager_guards.py#L164-L238).
+[^11]: `tools/skill_manager_tool.py`, [agent-created provenance](https://github.com/NousResearch/hermes-agent/blob/8226c2f6a283c48fb97c1750a0ec2907739146d0/tools/skill_manager_tool.py#L712-L725) and [opt-in security scan](https://github.com/NousResearch/hermes-agent/blob/8226c2f6a283c48fb97c1750a0ec2907739146d0/tools/skill_manager_tool.py#L40-L46).
+[^12]: Hermes Agent docs, [Curator](https://hermes-agent.nousresearch.com/docs/user-guide/features/curator) — schedule, defaults, phases and recovery.
+[^13]: `agent/curator.py`, [should_run_now and automatic transitions](https://github.com/NousResearch/hermes-agent/blob/8226c2f6a283c48fb97c1750a0ec2907739146d0/agent/curator.py#L142-L239).
+[^14]: `tools/skill_usage.py`, [activity definition](https://github.com/NousResearch/hermes-agent/blob/8226c2f6a283c48fb97c1750a0ec2907739146d0/tools/skill_usage.py#L106-L128).
+[^15]: Agent Skills, [Specification](https://agentskills.io/specification) — frontmatter limits and progressive disclosure.
+[^16]: `agent/skill_utils.py`, [SKILL_PROMPT_DESC_LIMIT](https://github.com/NousResearch/hermes-agent/blob/8226c2f6a283c48fb97c1750a0ec2907739146d0/agent/skill_utils.py#L743-L760).
+[^17]: `agent/learn_prompt.py`, [authoring standards](https://github.com/NousResearch/hermes-agent/blob/8226c2f6a283c48fb97c1750a0ec2907739146d0/agent/learn_prompt.py).
+[^18]: Hermes Agent docs, [Memory](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory) — limits, frozen snapshot, no auto-compaction.
+[^19]: NousResearch/hermes-agent-self-evolution, [README](https://github.com/NousResearch/hermes-agent-self-evolution).
+[^20]: Hermes Agent docs, [Skills](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills) — autonomous creation, background review and the write-approval gate.
