@@ -28,6 +28,7 @@ export const TAGS = {
   docker: { label: 'Docker', group: 'Technology', description: 'Container images and runtimes.' },
   kubernetes: { label: 'Kubernetes', group: 'Technology', description: 'Kubernetes and the operators around it.' },
   postgres: { label: 'Postgres', group: 'Technology', description: 'PostgreSQL internals and operations.' },
+  prometheus: { label: 'Prometheus', group: 'Technology', description: 'Prometheus, PromQL and its storage engine.' },
   opentelemetry: { label: 'OpenTelemetry', group: 'Technology', description: 'The OpenTelemetry standard, SDKs and Collector.' },
 
   // ---- Format -------------------------------------------------------------

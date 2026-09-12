@@ -1,0 +1,215 @@
+---
+title: 'Why increase() Returns 27.5'
+description: 'Prometheus reports fractional counts for counters that only ever increment by one. The reason is a specific extrapolation rule, and knowing it tells you exactly when the number can be trusted.'
+pubDate: 2026-09-12
+tags: ['observability', 'prometheus', 'devops', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+import Figure from '../../components/Figure.astro';
+
+A counter that only ever goes up by whole requests. A query asking how many requests arrived in the last minute. An answer of **27.5**.
+
+Every Prometheus user meets this eventually, usually while trying to reconcile a dashboard with a log count, and the usual reaction is to assume something is broken. Nothing is. The docs say so plainly: "it is possible to get a non-integer result even if a counter increases only by integer increments."[^1]
+
+That sentence explains *that* it happens. This post is about *when* — because the same mechanism that produces 27.5 also produces an exactly correct answer most of the time, and the difference between those two cases is something you can predict.
+
+## What rate() is actually computing
+
+`rate()`, `increase()` and `delta()` are the same function with different switches: `extrapolatedRate` in the PromQL engine.[^2] Given a range like `[1m]`, it does not look at "the last minute" as a continuous thing. It looks at the samples that happen to fall inside that window — and samples land wherever the scrape interval puts them, which is almost never exactly on the window edges.
+
+So the function measures what it can see, then scales that up to the width of the window:
+
+```go
+// promql/functions.go
+sampledInterval = float64(lastT-firstT) / 1000
+durationToStart = float64(firstT-rangeStart) / 1000
+durationToEnd   = float64(rangeEnd-lastT) / 1000
+
+factor := (sampledInterval + durationToStart + durationToEnd) / sampledInterval
+```
+
+<Figure
+  caption="The window as the function sees it. It can only measure between the first and last sample; the gaps at each end are unobserved, and the factor scales the observed change to cover them. That scaling is what makes the result fractional."
+  label="Diagram of a one-minute range window showing four samples, the sampled interval between first and last sample, and the unobserved gaps at the start and end of the range"
+>
+  <svg viewBox="0 0 700 200" width="100%" role="img" aria-labelledby="window-title">
+    <title id="window-title">A rate window with unobserved gaps at both ends</title>
+
+    <rect x="0" y="26" width="700" height="46" rx="6" fill="var(--bg-subtle)" stroke="var(--line)" stroke-width="1" />
+    <text x="4" y="88" fill="var(--fg-faint)" font-size="11" font-family="var(--font-mono)">rangeStart</text>
+    <text x="696" y="88" text-anchor="end" fill="var(--fg-faint)" font-size="11" font-family="var(--font-mono)">rangeEnd</text>
+
+    {[80, 250, 420, 590].map((x, i) => (
+      <g>
+        <line x1={x} y1="30" x2={x} y2="68" stroke="var(--series-1)" stroke-width="2" />
+        <circle cx={x} cy="49" r="5" fill="var(--series-1)" />
+        <text x={x} y="20" text-anchor="middle" fill="var(--series-1)" font-size="10" font-family="var(--font-mono)">s{i + 1}</text>
+      </g>
+    ))}
+
+    <rect x="0" y="26" width="80" height="46" fill="var(--series-2)" opacity="0.16" />
+    <rect x="590" y="26" width="110" height="46" fill="var(--series-2)" opacity="0.16" />
+
+    <path d="M80 110 H590" stroke="var(--series-1)" stroke-width="1.4" />
+    <path d="M80 106 v8 M590 106 v8" stroke="var(--series-1)" stroke-width="1.4" />
+    <text x="335" y="128" text-anchor="middle" fill="var(--series-1)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">sampledInterval — the only part actually measured</text>
+
+    <path d="M0 150 H80 M590 150 H700" stroke="var(--series-2)" stroke-width="1.4" />
+    <path d="M0 146 v8 M80 146 v8 M590 146 v8 M700 146 v8" stroke="var(--series-2)" stroke-width="1.4" />
+    <text x="40" y="170" text-anchor="middle" fill="var(--series-2)" font-size="10.5" font-family="var(--font-sans)" font-weight="600">toStart</text>
+    <text x="645" y="170" text-anchor="middle" fill="var(--series-2)" font-size="10.5" font-family="var(--font-sans)" font-weight="600">toEnd</text>
+    <text x="335" y="170" text-anchor="middle" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">both gaps unobserved — the factor covers them</text>
+
+    <text x="0" y="194" fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-mono)">factor = (sampledInterval + toStart + toEnd) / sampledInterval</text>
+  </svg>
+</Figure>
+
+Extrapolating is the right default. A scrape landing 12 seconds before your window ends does not mean traffic stopped 12 seconds ago. But extrapolation is a guess, and the guess is only as good as the assumption behind it: that the series covers the whole window at a roughly constant rate.
+
+## Four windows, one counter
+
+Take a counter incrementing exactly once per second, a 15-second scrape interval, and `increase(...[1m])`. I ran the published algorithm by hand for four situations — the arithmetic below is the engine's, not an estimate.
+
+<Chart
+  type="bar"
+  height={320}
+  caption="Same counter, same query, four alignments. Extrapolation is <b>exactly right</b> in the first three, including when a scrape is missed. It overshoots by 37.5% only in the last one. <b>Illustrative arithmetic</b>, computed from the algorithm in the source, not measured from a running server."
+  label="Grouped bar chart comparing the true increase in the window against the value increase() reports, for four sampling scenarios"
+  labels={['Regular', 'Missed scrape', 'New, from 0', 'New, at 100']}
+  series={[
+    { name: 'True increase in window', data: [60, 60, 20, 20] },
+    { name: 'increase() reports', data: [60, 60, 20, 27.5] },
+  ]}
+  yTitle="Increase over [1m]"
+  format="plain"
+/>
+
+The first two cases are the reassuring ones. With four samples spread across the window, the factor works out to `(45 + 3 + 12) / 45 = 1.333`, and `45 × 1.333 = 60` — the exact truth. Dropping a scrape from the middle changes the average spacing but not the endpoints, so the answer is still exactly 60. **Missing scrapes do not by themselves corrupt the number.**
+
+The interesting cases are the last two, which are physically identical: a target that started 20 seconds ago, scraped twice. The only difference is what the counter read at the first scrape.
+
+- **From zero.** The first sample is `0`. The engine notices that a counter cannot have been negative before that, computes where the zero point must have been, and clamps the left-hand extrapolation to it.[^2] The result is exactly 20 — correct.
+- **Already at 100.** The first sample is `100`, so the zero-point logic does not apply; the counter plainly existed before the window. The engine assumes the series extends past the first sample and extrapolates left by half the average sample spacing. Result: **27.5** for a window in which the counter demonstrably rose by 15.
+
+That is the whole trick. `increase()` is not counting; it is estimating a slope and multiplying it by the window. When the series genuinely spans the window, the estimate is right. When the series begins inside the window — a new pod, a restarted target, a label value that only just appeared — the estimate has to invent the missing part, and it invents it at the rate it can see.
+
+## The clamps that stop it being worse
+
+Two guards keep the extrapolation from running away, and both are worth knowing because they explain otherwise-baffling numbers.
+
+<Mermaid
+  caption="The decision path for a counter. Note the order: reset correction happens on the raw samples first, then the boundary logic decides how far to extrapolate."
+  label="Flowchart of the extrapolation decision: correct counter resets, compare the gap to the extrapolation threshold, clamp to half the average spacing, then clamp again at the counter zero point"
+  code={`
+flowchart TD
+  A["last − first<br/>+ reset correction"] --> B{"gap to boundary<br/>≥ 1.1 × avg spacing?"}
+  B -- "no" --> C["extrapolate to<br/>the boundary"]
+  B -- "yes" --> D["extrapolate only<br/>½ × avg spacing"]
+  D --> E{"counter, and<br/>zero point nearer?"}
+  E -- "yes" --> F["stop at the<br/>zero point"]
+  E -- "no" --> C
+  C --> G["× factor"]
+  F --> G
+`}
+/>
+
+The first is the **extrapolation threshold**. If the gap between the window edge and the nearest sample is at least 1.1 times the average spacing between samples, the engine concludes the series does not cover the whole window and extrapolates only half the average spacing instead.[^2] The source explains the reasoning: "we are assuming a more or less regular spacing between samples, and if we don't see a sample where we would expect one, we assume the series does not cover the whole range."[^2] This is why case D extrapolated 7.5 seconds rather than the full 40.
+
+The second is the **zero-point clamp**, which produced the correct answer in case C. Its comment is unusually direct about the motivation: "Counters cannot be negative … thereby avoiding extrapolation to negative counter values."[^2]
+
+There is also a floor: with only one sample in the window and no start-timestamp information, the function returns nothing at all.[^2] A range shorter than two scrape intervals does not produce a small number — it produces an empty result, and a panel that renders as a gap.
+
+## Counter resets, and the order that matters
+
+Counters restart at zero when a process restarts. `rate()` handles that by walking the samples and adding the pre-reset value back whenever the series goes down:[^2]
+
+```go
+if currPoint.F < prevPoint.F {
+    resultFloat += prevPoint.F
+}
+```
+
+This only works while the individual series is still visible. Once you sum across series, a restart in one of them looks like a dip in the total — indistinguishable from traffic falling. The docs give the rule without hedging: "always take a rate() first, then aggregate. Otherwise rate() cannot detect counter resets."[^1]
+
+<Figure
+  caption="Why the order is not a style preference. After summing, the reset is just a downward step in one series; the correction that would have recovered it has already been lost."
+  label="Diagram contrasting rate-then-aggregate, where each series reset is corrected before summing, with aggregate-then-rate, where summing hides the reset"
+>
+  <svg viewBox="0 0 700 216" width="100%" role="img" aria-labelledby="order-title">
+    <title id="order-title">Rate before aggregation preserves counter resets; aggregation first loses them</title>
+
+    <text x="0" y="14" fill="var(--series-3)" font-size="11" font-family="var(--font-sans)" font-weight="600">sum(rate(x[5m])) — correct</text>
+    <rect x="0" y="24" width="150" height="34" rx="6" fill="var(--bg-subtle)" stroke="var(--line)" stroke-width="1" />
+    <text x="75" y="45" text-anchor="middle" fill="var(--fg)" font-size="11" font-family="var(--font-mono)">per-series</text>
+    <path d="M156 41 h26" stroke="var(--fg-faint)" stroke-width="1.3" /><path d="M176 37 l6 4 -6 4" fill="var(--fg-faint)" />
+    <rect x="188" y="24" width="186" height="34" rx="6" fill="var(--series-3)" opacity="0.16" stroke="var(--series-3)" stroke-width="1.3" />
+    <text x="281" y="45" text-anchor="middle" fill="var(--fg)" font-size="11" font-family="var(--font-sans)">reset corrected here</text>
+    <path d="M380 41 h26" stroke="var(--fg-faint)" stroke-width="1.3" /><path d="M400 37 l6 4 -6 4" fill="var(--fg-faint)" />
+    <rect x="412" y="24" width="150" height="34" rx="6" fill="var(--bg-subtle)" stroke="var(--line)" stroke-width="1" />
+    <text x="487" y="45" text-anchor="middle" fill="var(--fg)" font-size="11" font-family="var(--font-sans)">then sum</text>
+    <text x="578" y="45" fill="var(--series-3)" font-size="12" font-family="var(--font-sans)" font-weight="600">rate is whole</text>
+
+    <line x1="0" y1="86" x2="700" y2="86" stroke="var(--line)" stroke-width="1" />
+
+    <text x="0" y="110" fill="var(--series-2)" font-size="11" font-family="var(--font-sans)" font-weight="600">rate(sum(x)[5m]) — wrong</text>
+    <rect x="0" y="120" width="150" height="34" rx="6" fill="var(--bg-subtle)" stroke="var(--line)" stroke-width="1" />
+    <text x="75" y="141" text-anchor="middle" fill="var(--fg)" font-size="11" font-family="var(--font-mono)">per-series</text>
+    <path d="M156 137 h26" stroke="var(--fg-faint)" stroke-width="1.3" /><path d="M176 133 l6 4 -6 4" fill="var(--fg-faint)" />
+    <rect x="188" y="120" width="186" height="34" rx="6" fill="var(--bg-subtle)" stroke="var(--line)" stroke-width="1" />
+    <text x="281" y="141" text-anchor="middle" fill="var(--fg)" font-size="11" font-family="var(--font-sans)">sum first</text>
+    <path d="M380 137 h26" stroke="var(--fg-faint)" stroke-width="1.3" /><path d="M400 133 l6 4 -6 4" fill="var(--fg-faint)" />
+    <rect x="412" y="120" width="186" height="34" rx="6" fill="var(--series-2)" opacity="0.16" stroke="var(--series-2)" stroke-width="1.3" />
+    <text x="505" y="141" text-anchor="middle" fill="var(--fg)" font-size="11" font-family="var(--font-sans)">reset now looks like a dip</text>
+
+    <text x="0" y="186" fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-sans)">A restart in one of twenty series subtracts that series' whole counter from the total —</text>
+    <text x="0" y="204" fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-sans)">and the result is a plausible-looking drop in traffic rather than an obvious error.</text>
+  </svg>
+</Figure>
+
+## Two edges worth knowing
+
+**`irate()` is not a smoother `rate()`.** It uses only the last two samples in the range, which makes it responsive and makes it noisy: a single slow scrape moves it a long way. The docs are blunt about where it belongs — "irate should only be used when graphing volatile, fast-moving counters. Use rate for alerts and slow-moving counters."[^1] An alert on `irate()` fires on sampling jitter, then resolves before anyone opens the dashboard.
+
+**A window containing both classic and native histogram samples returns nothing.** During a migration a series can carry float samples before the cutover and histogram samples after, and for any window spanning that moment the engine drops the element entirely and attaches a warning rather than mixing the two.[^2] The panel goes blank for exactly one range-width after the switch — not a broken exporter, just the one window that straddles both formats.
+
+## Why the line keeps going after the data stops
+
+The other half of "the graph disagrees with reality" is staleness. When a query asks for a value at some instant, Prometheus looks backwards for the most recent sample within a lookback window — **5 minutes by default**, set by `--query.lookback-delta`.[^3] The default lives in the engine as `defaultLookbackDelta = 5 * time.Minute`.[^4]
+
+Two consequences follow. A series whose target has gone away does not linger for five minutes, because Prometheus writes an explicit stale marker: "If a target scrape or rule evaluation no longer returns a sample for a time series that was previously present, this time series will be marked as stale."[^3] After that, "no value is returned for that time series."[^3]
+
+But a series that stops for a *different* reason — a pushgateway entry with its own timestamps, a metric that simply stops being incremented and then stops being exposed without the target disappearing — behaves the way people expect stale data to behave: it takes "the last value for (by default) 5 minutes before disappearing."[^3]
+
+So a flat line at the right edge of a dashboard has two completely different meanings, and the graph looks the same either way.
+
+## What to do with this
+
+**Do not sum `increase()` for anything that has to balance.** Billing, invoices, SLA credits, anything a person will reconcile against another system. Every window extrapolates independently, and windows containing new or vanishing series overshoot. Count events with logs or an exactly-once pipeline; use Prometheus to watch rates and trends.
+
+**Expect fractional answers when series are short-lived.** Autoscaled pods, per-deployment labels, ephemeral job names — these produce series that begin and end inside your windows, which is exactly the condition under which extrapolation has to guess.
+
+**Keep the range at least four scrape intervals wide.** Two samples is the minimum for any answer at all, and with exactly two the extrapolation has almost nothing to work with. Wider ranges make the measured portion dominate the guessed portion.
+
+**Rate first, then aggregate. Always.** This one has no trade-off; the other order is simply wrong.
+
+**Remember which clamp saved you.** The zero-point clamp only fires when the first sample in the window is `0`. A counter you reset to zero on deploy will be extrapolated correctly. One that persists across restarts, or one whose series appears mid-window with a value already on it, will not.
+
+## Takeaways
+
+- **`increase()` estimates a slope and multiplies it by the window.** It does not count. Fractional results are the expected output of that design.
+- **Extrapolation is exact when the series spans the whole window**, including when scrapes are missed — the endpoints matter, not the gaps.
+- **It overshoots when a series starts inside the window with a non-zero value**: in the worked example, 27.5 against a true 20.
+- **Two clamps limit the damage**: extrapolate only half the average spacing when a sample is missing near the edge, and never past a counter's zero point.
+- **One sample in the range returns nothing**, not a small number — check your range against your scrape interval.
+- **Aggregating before `rate()` destroys counter-reset correction** and turns a restart into an apparent traffic drop.
+- **A flat line at the edge of a graph is ambiguous**: either a stale marker ended the series, or the last value is being carried for up to five minutes.
+
+## References
+
+[^1]: Prometheus, [Query functions](https://prometheus.io/docs/prometheus/latest/querying/functions/) — `rate()`, `increase()`, `irate()`, counter-reset handling, non-integer results, and the rate-before-aggregation rule.
+[^2]: `promql/functions.go`, [extrapolatedRate](https://github.com/prometheus/prometheus/blob/46ef3704189798f58af5dd4ac7d2f87ac8880f30/promql/functions.go) — the extrapolation factor, the 1.1× threshold, the zero-point clamp, reset correction, and the single-sample case. Read at commit `46ef370`.
+[^3]: Prometheus, [Querying basics — staleness](https://prometheus.io/docs/prometheus/latest/querying/basics/) — lookback delta, stale markers, and series that carry their last value.
+[^4]: `promql/engine.go`, [defaultLookbackDelta](https://github.com/prometheus/prometheus/blob/46ef3704189798f58af5dd4ac7d2f87ac8880f30/promql/engine.go) — the five-minute default.
