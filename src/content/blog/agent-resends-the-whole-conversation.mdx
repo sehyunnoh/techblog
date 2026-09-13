@@ -1,0 +1,241 @@
+---
+title: 'Your Agent Re-Sends the Whole Conversation Every Turn'
+description: 'A multi-turn agent replays its entire history on every request. Caching, context editing and compaction each attack a different part of that bill — and one of them, at its defaults, made it worse.'
+pubDate: 2026-09-13
+tags: ['ai', 'llm', 'cost-engineering', 'architecture', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+import Figure from '../../components/Figure.astro';
+
+Here is a number from Anthropic's own documentation that is worth sitting with. A request containing the system prompt `"You are a scientist"` and the message `"Hello, Claude"` counts **14 input tokens**. The same endpoint, given a one-line message and a single trivial `get_weather` tool, returns **403**.[^1]
+
+Nothing about the conversation got longer. A tool definition arrived, and with it the system prompt the API adds whenever any tool is present — 286 tokens on Claude Opus 5.[^2] That is the smallest possible version of the thing that dominates agent bills: **you are billed for the shape of the request, not for the part you typed.**
+
+The Messages API is stateless. There is no session on the server holding your conversation. Every turn, your client sends the tools, the system prompt, and every message so far, and the model reads all of it again. A 20-step agent session is not 20 small requests. It is 20 requests of steadily increasing size, and the total grows quadratically.
+
+This post is about where those tokens actually sit, and about the three server-side mechanisms that attack them. They do genuinely different things, and the most interesting result below is that one of them, left at its defaults, made a realistic workload **75% more expensive**.
+
+I covered how prompt caching works mechanically in [an earlier post on prefill and decode](/posts/llm-inference-two-machines) — prefix hashing, breakpoints, the 1.25× write premium. This one assumes that and looks at what happens across turns.
+
+## What one request actually contains
+
+A request is rendered in a fixed order — `tools`, then `system`, then `messages` — and splits cleanly into two parts with opposite behaviour.[^5]
+
+The **prefix** (tools plus system prompt) is byte-identical on every turn. The **tail** (messages) grows monotonically: each user message, each assistant reply, each tool result is appended and never removed.
+
+<Figure
+  caption="One agent session, three of its requests, drawn to scale. The prefix is the same 8,000 tokens every time; the message tail is what grows. By step 12 the request is <b>36× larger</b> than the first one, and the model re-reads all of it. Worked example defined below."
+  label="Three horizontal bars showing request size at steps 1, 6 and 12, each split into a constant prefix and a growing message tail"
+>
+  <svg viewBox="0 0 700 214" width="100%" role="img" aria-labelledby="replay-title">
+    <title id="replay-title">Request size at steps 1, 6 and 12, split into a constant prefix and a growing tail</title>
+
+    <text x="0" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">INPUT TOKENS SENT, PER REQUEST</text>
+
+    {[
+      { step: 1, prefix: 8000, tail: 0, total: 8000, y: 32 },
+      { step: 6, prefix: 8000, tail: 127250, total: 135250, y: 86 },
+      { step: 12, prefix: 8000, tail: 279950, total: 287950, y: 140 },
+    ].map((r) => (
+      <g>
+        <text x="0" y={r.y + 20} fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-sans)">step {r.step}</text>
+        <rect x="52" y={r.y} width={Math.max(r.prefix * 0.0018753, 3)} height="30" rx="3" fill="var(--series-1)" opacity="0.85" />
+        {r.tail > 0 && (
+          <rect x={52 + r.prefix * 0.0018753} y={r.y} width={r.tail * 0.0018753} height="30" rx="3" fill="var(--series-2)" opacity="0.3" stroke="var(--series-2)" stroke-width="1.5" />
+        )}
+        <text x={58 + r.total * 0.0018753} y={r.y + 20} fill="var(--fg)" font-size="11.5" font-family="var(--font-mono)">{r.total.toLocaleString('en-US')}</text>
+      </g>
+    ))}
+
+    <line x1="0" y1="184" x2="700" y2="184" stroke="var(--line)" stroke-width="1" />
+
+    <rect x="0" y="196" width="11" height="11" rx="2" fill="var(--series-1)" opacity="0.85" />
+    <text x="18" y="205" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">prefix — tools + system, constant</text>
+
+    <rect x="250" y="196" width="11" height="11" rx="2" fill="var(--series-2)" opacity="0.3" stroke="var(--series-2)" stroke-width="1.5" />
+    <text x="268" y="205" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">tail — messages and tool results, grows every step</text>
+  </svg>
+</Figure>
+
+That split is the whole map. Caching attacks the prefix and the already-seen part of the tail. Context editing attacks specific blocks inside the tail. Compaction replaces the tail wholesale.
+
+## The prefix tax: what tools cost before anyone says anything
+
+Tool definitions are pure prefix. You pay for them on turn 1 and on turn 200, whether or not the model calls a single one.
+
+<Chart
+  type="bar"
+  horizontal
+  valueLabels
+  height={300}
+  caption="Documented input-token overhead on <b>Claude Opus 5</b>. The first two rows are the tool-use system prompt the API inserts whenever any tool is present; bash and text editor are per-tool definitions added on top of it. The two toolset rows are approximate figures that already include the system prompt and all default member tools."
+  label="Horizontal bar chart of tool overhead in input tokens on Claude Opus 5: tool system prompt 286 and 406, bash 325, text editor 700, computer toolset 4520, browser toolset 6610"
+  labels={[
+    'Tool system prompt (auto/none)',
+    'Tool system prompt (any/tool)',
+    'Bash tool definition',
+    'Text editor definition',
+    'Computer toolset (all-in)',
+    'Browser toolset (all-in)',
+  ]}
+  series={[{ name: 'Input tokens per request', data: [286, 406, 325, 700, 4520, 6610] }]}
+  xTitle="Input tokens added to every request"
+/>
+
+Two things are worth pulling out of that chart.
+
+The first is that `tool_choice` is not free. Switching from `auto` to `any` costs 120 extra tokens on Opus 5, every request, forever.[^2]
+
+The second is the gap between the top rows and the bottom ones. A handful of hand-written tools costs a few hundred tokens. Declaring the browser toolset costs about **6,610** — and enabling all four optional members adds roughly 880 more.[^2] Over a 40-step session that one decision is over 264,000 billed input tokens before the agent does anything.
+
+This is the cheapest optimisation available and almost nobody does it: **stop shipping tools the agent will not use in this session.** Both toolsets accept a `configs` field to disable members, and the docs note that turning off `zoom` alone removes about 410 tokens from every request.[^2]
+
+## What replay costs
+
+Now the tail. Here is the worked example used for the rest of this post — a research agent that reads documentation.
+
+| Component | Tokens | Source |
+|---|---|---|
+| Prefix (browser toolset + system prompt) | 8,000 | 6,610 documented,[^2] ~1,390 assumed |
+| Per step: one large documentation page | 25,000 | documented: 100 kB page ≈ 25,000 tokens[^2] |
+| Per step: message and tool-call overhead | 450 | assumed |
+| Output per step | 300 | assumed |
+
+One request per step, Claude Opus 5 rates: $5.00/MTok base input, $6.25 for a 5-minute cache write, $0.50 for a cache read, $25.00 output.[^2] Everything below is arithmetic on those published numbers — it is an illustration of the shape, not a measurement of your workload.
+
+<Chart
+  type="line"
+  height={340}
+  caption="Cumulative cost of the same 12-step session with and without prompt caching. Note step 1: caching is <b>more expensive</b> there, because you pay the 1.25× write premium before any hit exists. It breaks even at step 3. By step 12 the session has billed 1,775,700 input tokens for 287,950 unique ones — a <b>6.2× replay multiplier</b>."
+  label="Line chart of cumulative cost over 12 steps, uncached rising to 8.97 dollars, cached rising to 2.63 dollars"
+  labels={['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']}
+  series={[
+    { name: 'No caching', data: [0.05, 0.22, 0.52, 0.95, 1.51, 2.19, 3.0, 3.94, 5.01, 6.2, 7.52, 8.97] },
+    { name: 'Prompt caching', data: [0.06, 0.23, 0.41, 0.61, 0.82, 1.04, 1.27, 1.52, 1.78, 2.05, 2.34, 2.63] },
+  ]}
+  xTitle="Agent step"
+  yTitle="Cumulative cost"
+  format="usd"
+/>
+
+The uncached line is not a straight line, and that is the entire point. Each step is bigger than the last, so cost per step keeps rising: step 1 costs $0.05, step 12 costs $1.45. Caching flattens it to roughly constant per-step cost, because the only thing paid at full rate is the new material.
+
+## Three mechanisms, three different targets
+
+Caching does not make the context smaller. The tokens are still there, still counted against the context window, still read by the model — they are just cheaper. Two other mechanisms actually remove content.
+
+<Mermaid
+  caption="Where each mechanism acts. Caching changes the price of the request; context editing and compaction change its contents. Only the latter two shrink what the model reads."
+  label="Diagram showing a request splitting into prefix and tail, with prompt caching acting on both, context editing removing old tool results, and compaction replacing the tail with a summary"
+  code={`
+flowchart TD
+  R["One request"] --> A["Prefix<br/>tools + system"]
+  R --> B["Tail<br/>messages + tool results"]
+  A --> C["Prompt caching<br/>0.1x on a hit"]
+  B --> C
+  B --> D["Context editing<br/>drops old tool results"]
+  B --> E["Compaction<br/>replaces history with a summary"]
+`}
+/>
+
+**Context editing** is surgical. The `clear_tool_uses_20250919` strategy removes old tool *results* from the conversation once input crosses a threshold, keeping the most recent few. Its defaults: `trigger` at **100,000 input tokens**, `keep` at **3 tool uses**, `clear_at_least` unset, `clear_tool_inputs` false — so by default the model still sees what it asked for, just not what came back.[^3] A companion strategy, `clear_thinking_20251015`, drops thinking blocks from earlier turns; when you combine the two it "must be listed first in the `edits` array."[^3]
+
+**Compaction** is wholesale. At its default trigger of **150,000 input tokens** (minimum allowed: 50,000), the API summarises the conversation and returns a `compaction` block. You pass that block back, and "the API automatically drops all content blocks prior to the `compaction` block, continuing the conversation from the summary."[^4]
+
+The rationale the docs give for editing is not primarily financial: "Context is a finite resource with diminishing returns, and irrelevant content degrades model focus."[^3] Worth remembering when the cost numbers below look unflattering.
+
+## The bill context editing hands you
+
+The context-editing docs contain one sentence that turns out to be the most expensive thing on the page: tool-result clearing "invalidates cached prompt prefixes when content is cleared."[^3]
+
+Of course it does. Caching is a prefix hash. Delete a tool result sitting near the front of the message list and every byte after it has moved, so the cached prefix ends where the deletion starts. What used to be a cache read at $0.50/MTok becomes a cache write at $6.25/MTok — **12.5× more per token**.
+
+So I ran the worked example three ways: no editing, editing at the documented defaults, and editing with `clear_at_least` set to 100,000.
+
+<Chart
+  type="line"
+  height={360}
+  caption="Cumulative cost over 20 steps, all three with prompt caching on. At its defaults context editing fires <b>every single step</b> once the trigger is crossed, paying a full cache write each time — 75% more than not editing at all by step 12. Setting <code>clear_at_least</code> makes it fire every fourth step instead, and it overtakes at step 18. Modelled on published rates; cache invalidation assumed to end the cached prefix at the deletion point."
+  label="Line chart of cumulative cost over 20 steps for three configurations: no context editing, defaults, and clear_at_least set to 100,000"
+  labels={['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20']}
+  series={[
+    { name: 'No context editing', data: [0.06, 0.23, 0.41, 0.61, 0.82, 1.04, 1.27, 1.52, 1.78, 2.05, 2.34, 2.63, 2.94, 3.27, 3.6, 3.95, 4.31, 4.69, 5.07, 5.47] },
+    { name: 'Editing at defaults', data: [0.06, 0.23, 0.41, 0.61, 1.1, 1.59, 2.09, 2.59, 3.09, 3.6, 4.11, 4.62, 5.13, 5.65, 6.17, 6.69, 7.22, 7.74, 8.28, 8.81] },
+    { name: 'clear_at_least 100k', data: [0.06, 0.23, 0.41, 0.61, 0.82, 1.04, 1.27, 1.77, 1.98, 2.2, 2.44, 2.95, 3.16, 3.38, 3.62, 4.14, 4.35, 4.58, 4.81, 5.35] },
+  ]}
+  xTitle="Agent step"
+  yTitle="Cumulative cost"
+  format="usd"
+/>
+
+The defaults line never catches up, even extending the simulation to 60 steps. The mechanism is simple: once the context sits just above the trigger, *every* step pushes it over again, so every step clears one result and pays a full cache write on everything after it. You have swapped a $0.04 read for a $0.50 write, permanently.
+
+This is precisely what the docs advise against, in a sentence easy to read past: "clear enough tokens to make the cache invalidation worthwhile. Use the `clear_at_least` parameter to ensure a minimum number of tokens is cleared each time."[^3] The trigger decides *when* clearing is allowed. `clear_at_least` decides *how often it actually happens*, and that is the parameter that moves the bill.
+
+But cost is not the only axis, and on the other one the defaults look very different. Without editing, this session's context reaches **287,950 tokens** by step 12 and passes a million around step 40. With editing at defaults it plateaus at about **88,000 tokens** and stays there — one cleared result per step, forever. That configuration is not trying to save money. It is keeping the session alive and the model focused, and it succeeds completely.
+
+Notice also what the plateau does to the third mechanism: context held below 100,000 never reaches compaction's 150,000 trigger. The two features are not additive. Tune the first and you may have decided you will never use the second.
+
+## The compaction cost that isn't in `input_tokens`
+
+Compaction has a trap of its own, and it is a reporting one.
+
+Summarising a 180,000-token conversation requires a model call over those 180,000 tokens. That call is billed. But the top-level usage fields do not include it — they "reflect the sum of all non-compaction iterations," and to get the real number you must "sum across all entries in the `usage.iterations` array."[^4]
+
+So a dashboard reading `usage.input_tokens` will show compaction as a dramatic saving, because the expensive part has been moved into a field nobody is summing. In the documented example the top-level report is 23,000 input tokens while the compaction iteration alone consumed 180,000 input and 3,500 output.[^4]
+
+## Measuring instead of guessing
+
+Every claim above is visible in your own responses. Four fields, worth logging permanently:
+
+```python
+u = response.usage
+
+# Caching. If cache_read is 0 across requests that share a prefix,
+# something upstream is changing and you are paying full price.
+u.cache_read_input_tokens
+u.cache_creation_input_tokens
+
+# Context editing. Empty means your trigger never fired —
+# which, at a 100,000-token default, is most conversations.
+response.context_management.applied_edits
+# -> [{"type": "clear_tool_uses_20250919",
+#      "cleared_tool_uses": 8, "cleared_input_tokens": 50000}]
+
+# Compaction. The top-level totals EXCLUDE the summarisation pass.
+total = sum(i.input_tokens for i in u.iterations)
+```
+
+For anything you have not sent yet, `/v1/messages/count_tokens` accepts the same request shape — system prompts, tools, images, PDFs — and is "free to use," on rate limits independent of message creation.[^1] It is the right way to price a tool definition before committing to it: count the request with the tool and without, and subtract.
+
+Two caveats. The count "is an **estimate**" and may differ slightly from what you are billed, and it deliberately ignores `cache_control`, since "prompt caching only occurs during actual message creation."[^1] It tells you how big a request is, not what it will cost.
+
+## What this costs you
+
+**Caching loses money on short conversations.** The write premium is real and paid upfront; in the model above, turn 1 with caching costs more than turn 1 without. Break-even came at step 3 for a 5-minute write and would come later for the 2× one-hour write. A one-shot classifier should not have caching on.
+
+**Context editing trades cache hits for context space, and the exchange rate is 12.5:1.** Configured carelessly it is a straightforward cost increase. That can still be the right call — if the alternative is a session that dies at the context limit or a model distracted by forty stale page dumps, paying more per step is the cheap option. Just know which one you bought.
+
+**Clearing tool results is lossy in a way summarisation is not.** With `clear_tool_inputs` false, the model keeps seeing that it fetched a page and no longer sees what the page said. For a search-and-synthesise agent that is fine. For one that must reconcile details across many documents, it silently removes the evidence while leaving the impression that the work was done.
+
+**Compaction is lossy too, and it costs a full pass over the context to be so.** Every compaction is another inference over your longest prompt. Trigger it often and the summarisation bill can exceed what you saved — and by default you will not see it in the field you are watching.
+
+**Trimming the prefix is the only lever with no downside.** Fewer tools is fewer tokens on every request, cached or not, plus a smaller decision space for the model. It is the first thing to try and usually the last thing anyone does.
+
+## Takeaways
+
+- **Statelessness is the cost model.** Every turn re-sends everything; a session's billed input grows quadratically with its length. In the example above, 287,950 unique tokens were billed as 1,775,700.
+- **Caching changes the price, editing and compaction change the contents.** They are not alternatives — and tuning the second one hard enough means the third never runs.
+- **`clear_at_least` matters more than `trigger`.** The trigger says when clearing is permitted; `clear_at_least` says how often you pay the cache-write penalty. At defaults, this workload got 75% more expensive.
+- **Read `usage.iterations`, not `usage.input_tokens`.** With compaction on, the top-level totals omit the most expensive call in the request.
+
+## References
+
+[^1]: Anthropic, [Token counting](https://platform.claude.com/docs/en/build-with-claude/token-counting) — the `/v1/messages/count_tokens` endpoint, the 14- and 403-token worked examples, free pricing with independent rate limits, the estimate caveat, and why it ignores `cache_control`.
+[^2]: Anthropic, [Pricing](https://platform.claude.com/docs/en/about-claude/pricing) — Claude Opus 5 rates, the prompt-caching multiplier table, tool-use system prompt counts per model and `tool_choice`, bash and text editor definition sizes, computer and browser toolset overheads, and web-fetch token estimates by page size.
+[^3]: Anthropic, [Context editing](https://platform.claude.com/docs/en/build-with-claude/context-editing) — `clear_tool_uses_20250919` defaults, `clear_at_least`, the cache-invalidation warning, `clear_thinking_20251015` and its ordering rule, and the `context_management.applied_edits` response field.
+[^4]: Anthropic, [Compaction](https://platform.claude.com/docs/en/build-with-claude/compaction) — the 150,000-token default trigger and 50,000 minimum, the `compaction` block contract, dropping prior content blocks, and `usage.iterations` excluding compaction from the top-level totals.
+[^5]: Anthropic, [Prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) — the `tools` → `system` → `messages` prefix order, cache breakpoints, and the `cache_read_input_tokens` / `cache_creation_input_tokens` usage fields.
