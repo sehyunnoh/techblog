@@ -18,7 +18,7 @@ The short version: a unique visitor is a SHA-512 hash that expires on the first 
 
 ## Why cookieless moves the question rather than answering it
 
-Cookie-based analytics stores an identifier on the client and reads it back. Identity is an assertion made by the browser, and it persists until something clears it. The failure modes are familiar: the user wipes storage, uses two browsers, or blocks the cookie outright.
+Cookie-based analytics stores an identifier on the client and reads it back.[^3] Identity is an assertion made by the browser, and it persists until something clears it. The failure modes are familiar: the user wipes storage, uses two browsers, or blocks the cookie outright.
 
 Cookieless analytics computes the identifier server-side from attributes of the request. Nothing is written to the client, so nothing can be cleared — which sounds strictly better until you notice that the identifier is now a *pure function* of inputs the visitor does not control and cannot see. That swaps one set of failure modes for another, and the new set is entirely determined by which inputs the function takes and how often they change.
 
@@ -113,7 +113,7 @@ Every derived identifier in the system is a UUIDv5 over a SHA-512 that ends with
   </svg>
 </Figure>
 
-The consequence falls out of the rotation. With the default `SALT_ROTATION=month`, the salt changes at local midnight on the first of every month. The same person, on the same machine, on the same network, hashes to a different session ID on 1 October than they did on 30 September.
+The consequence falls out of the rotation. With the default `SALT_ROTATION=month`,[^4] the salt changes at local midnight on the first of every month. The same person, on the same machine, on the same network, hashes to a different session ID on 1 October than they did on 30 September.
 
 So when the dashboard reports unique visitors for a month, that number is internally consistent. Compare it across a month boundary, or sum two months to get a quarter, and you are counting each returning person once per month. **A returning visitor is structurally indistinguishable from a new one the moment the calendar flips.** Setting `SALT_ROTATION=day` — which the code supports — makes that happen every midnight instead.
 
@@ -169,7 +169,7 @@ Two things are worth pulling out.
 
 First, the MaxMind lookup is a **local file read** — `geo/GeoLite2-City.mmdb`, opened once and cached on `globalThis`. There is no outbound call to a geolocation API. For a self-hosted deployment that is a genuine privacy property: visitor IPs never leave the box, not even to a lookup service.
 
-Second, and less comfortable: the quality of your location data depends on your hosting topology, not on the analytics software. Put Cloudflare in front and you get Cloudflare's answer. Deploy on Vercel and you get Vercel's. Run it on a bare VPS with no CDN and you get whatever a GeoLite2 file — the free tier of MaxMind's data — happens to contain, and `null` for anything it misses. The same software produces materially different geographic data on two different deployments, and the dashboard renders all of it with equal confidence.
+Second, and less comfortable: the quality of your location data depends on your hosting topology, not on the analytics software. Put Cloudflare in front and you get Cloudflare's answer. Deploy on Vercel and you get Vercel's. Run it on a bare VPS with no CDN and you get whatever a GeoLite2 file — the free tier of MaxMind's data — happens to contain, and `null` for anything it misses.[^5] The same software produces materially different geographic data on two different deployments, and the dashboard renders all of it with equal confidence.
 
 If you are comparing your numbers against someone else's, or against a previous deployment, this is the first thing to check and the last thing anyone thinks of.
 
@@ -248,7 +248,7 @@ Which way does this bias the numbers? It undercounts visits, and therefore infla
 
 ## Trade-offs and pitfalls
 
-**Pseudonymous is not anonymous, and the margin is one environment variable.** Work out the input space for `sessionId`: the website ID is public, the salt is a hash of a date anyone can compute, User-Agent strings cluster into a few thousand realistic candidates, and IPv4 is 2^32. Given `APP_SECRET`, inverting a session ID back to an IP is a brute-force problem small enough to be uninteresting. The pseudonymity rests entirely on that secret staying secret — which also means `APP_SECRET` belongs in your incident response plan next to your database credentials, and that rotating it silently renumbers every visitor in your history.
+**Pseudonymous is not anonymous, and the margin is one environment variable.**[^7] Work out the input space for `sessionId`: the website ID is public, the salt is a hash of a date anyone can compute, User-Agent strings cluster into a few thousand realistic candidates, and IPv4 is 2^32. Given `APP_SECRET`, inverting a session ID back to an IP is a brute-force problem small enough to be uninteresting. The pseudonymity rests entirely on that secret staying secret — which also means `APP_SECRET` belongs in your incident response plan next to your database credentials, and that rotating it silently renumbers every visitor in your history.
 
 **The collection endpoint is unauthenticated, and it answers questions.** `POST /api/send` is called with `{ skipAuth: true }`, which it has to be — it is hit by anonymous browsers. But the payload schema also accepts `ip` and `userAgent` as optional string fields, and `getClientInfo` prefers them over the real request:
 
@@ -257,7 +257,7 @@ const userAgent = payload?.userAgent || request.headers.get('user-agent');
 const ip = payload?.ip || getIpAddress(request.headers);
 ```
 
-Those two fields are in the Zod schema in the source, but they are not in the documented payload — the API reference lists eleven fields and neither of these is among them.[^4] Presumably they exist for server-side collection, where the real client is upstream. The consequence either way is that the endpoint computes a session ID from caller-chosen inputs — and then hands it back: `json({ cache: token, sessionId, visitId })`.
+Those two fields are in the Zod schema in the source, but they are not in the documented payload — the API reference lists eleven fields and neither of these is among them.[^6] Presumably they exist for server-side collection, where the real client is upstream. The consequence either way is that the endpoint computes a session ID from caller-chosen inputs — and then hands it back: `json({ cache: token, sessionId, visitId })`.
 
 That is an oracle. Anyone who can see a session ID (a read-only dashboard user, say, or anyone with access to an export) and who can guess a plausible address range can submit candidates and compare. A corporate `/24` is 256 addresses; with a handful of User-Agent guesses that is a few thousand requests to tie a row in the analytics table to one machine. No database access required, and no need to know `APP_SECRET` at all.
 
@@ -288,11 +288,10 @@ A desktop with a 1080p monitor is reported as a laptop. A laptop driving a 4K di
 - **Read the identification path of whatever you deploy.** None of the above is hidden or undocumented-by-malice; it is just in the code rather than on the marketing page, and every one of these tools has an equivalent set of decisions.
 
 ## References
-
 [^1]: [umami-software/umami](https://github.com/umami-software/umami), MIT licence — the source read throughout this post. The identification logic is in [`src/app/api/send/route.ts`](https://github.com/umami-software/umami/blob/v3.3.1/src/app/api/send/route.ts), [`src/lib/crypto.ts`](https://github.com/umami-software/umami/blob/v3.3.1/src/lib/crypto.ts) and [`src/lib/detect.ts`](https://github.com/umami-software/umami/blob/v3.3.1/src/lib/detect.ts).
 [^2]: [Umami v3.3.1](https://github.com/umami-software/umami/releases/tag/v3.3.1), released 20 August 2026 — the tag every quotation above is taken from. Line-level behaviour may differ in later releases.
-[^3]: Umami documentation, [Environment variables](https://docs.umami.is/docs/environment-variables) — `SALT_ROTATION`, `APP_SECRET`, `DISABLE_BOT_CHECK`, `IGNORE_IP` and `SKIP_LOCATION_HEADERS`.
-[^4]: Umami documentation, [Sending stats](https://docs.umami.is/docs/api/sending-stats) — the documented `/api/send` payload and the statement that the endpoint needs no authentication token. Note that `ip` and `userAgent`, both accepted by the schema in the source, do not appear in this reference; the [server-side events guide](https://docs.umami.is/docs/guides/send-server-side-events) does not mention them either.
+[^3]: A. Barth, [RFC 6265: HTTP State Management Mechanism](https://www.rfc-editor.org/rfc/rfc6265), IETF, April 2011 — the cookie mechanism that cookieless analytics avoids.
+[^4]: Umami documentation, [Environment variables](https://docs.umami.is/docs/environment-variables) — `SALT_ROTATION`, `APP_SECRET`, `DISABLE_BOT_CHECK`, `IGNORE_IP` and `SKIP_LOCATION_HEADERS`.
 [^5]: MaxMind, [GeoLite2 Free Geolocation Data](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data) — the free database used for the fallback lookup, and its stated accuracy limits.
-[^6]: A. Barth, [RFC 6265: HTTP State Management Mechanism](https://www.rfc-editor.org/rfc/rfc6265), IETF, April 2011 — the cookie mechanism that cookieless analytics avoids.
+[^6]: Umami documentation, [Sending stats](https://docs.umami.is/docs/api/sending-stats) — the documented `/api/send` payload and the statement that the endpoint needs no authentication token. Note that `ip` and `userAgent`, both accepted by the schema in the source, do not appear in this reference; the [server-side events guide](https://docs.umami.is/docs/guides/send-server-side-events) does not mention them either.
 [^7]: European Data Protection Board, [Guidelines 01/2025 on Pseudonymisation](https://www.edpb.europa.eu/our-work-tools/documents/public-consultations/2025/guidelines-012025-pseudonymisation_en) — why pseudonymous data remains personal data when the re-identification key still exists.
