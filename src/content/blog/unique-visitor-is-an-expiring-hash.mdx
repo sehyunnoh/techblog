@@ -1,0 +1,298 @@
+---
+title: 'Your Unique Visitor Count Has a One-Month Shelf Life'
+description: "Umami is MIT-licensed, so the identification path is readable. Where, who and when turn out to be a CDN header, a hash that expires on the 1st, and a bucket quantized to the clock hour."
+pubDate: 2026-09-16
+tags: ['analytics', 'web', 'data', 'security', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+
+Your analytics dashboard has three columns that look like facts about people: where they were, who they were, and when they came.
+
+None of them are stored. All three are computed, at request time, from things the server throws away immediately afterwards. The interesting part is not that this is privacy-preserving — every cookieless analytics vendor says so on the landing page. The interesting part is what the derivations do to the numbers, and the fact that almost nobody writing about this software has opened it.
+
+Umami is MIT-licensed and the identification path is about two hundred lines.[^1] This post reads them. Everything below is from `v3.3.1`, the current release at time of writing.[^2]
+
+The short version: a unique visitor is a SHA-512 hash that expires on the first of the month, a location is whichever CDN sits in front of you, and a "visit" is closer to "a clock hour in which someone was active" than to any session timeout.
+
+## Why cookieless moves the question rather than answering it
+
+Cookie-based analytics stores an identifier on the client and reads it back. Identity is an assertion made by the browser, and it persists until something clears it. The failure modes are familiar: the user wipes storage, uses two browsers, or blocks the cookie outright.
+
+Cookieless analytics computes the identifier server-side from attributes of the request. Nothing is written to the client, so nothing can be cleared — which sounds strictly better until you notice that the identifier is now a *pure function* of inputs the visitor does not control and cannot see. That swaps one set of failure modes for another, and the new set is entirely determined by which inputs the function takes and how often they change.
+
+So the useful question isn't "does it use cookies." It's "what goes into the hash, and what makes the hash change."
+
+## Who: a hash with an expiry date
+
+Here is the whole of visitor identification, from `src/app/api/send/route.ts`:
+
+```ts
+const saltRotation = process.env.SALT_ROTATION || 'month';
+const sessionSalt = getSalt(saltRotation, createdAt);
+const visitSalt = hash(startOfHour(createdAt).toUTCString());
+
+const sessionId = uuid(sourceId, ip, userAgent, sessionSalt);
+```
+
+Four inputs. `sourceId` is the website ID, which is public — it appears verbatim in the HTML of every page that loads the tracker. `ip` and `userAgent` come from the request. And `sessionSalt` comes from `src/lib/crypto.ts`:
+
+```ts
+export function getSalt(saltRotation: string, createdAt: Date): string {
+  return hash(
+    (saltRotation === 'day' ? startOfDay : saltRotation === 'week' ? startOfWeek : startOfMonth)(
+      createdAt,
+    ).toUTCString(),
+  );
+}
+```
+
+Read that closely, because the name is misleading. **The salt is not a secret.** It is the SHA-512 of a date string — on a UTC server, `"Tue, 01 Sep 2026 00:00:00 GMT"` — and anyone with a calendar can compute it. It contributes no entropy whatsoever. Its job is rotation, not secrecy.
+
+(A detail worth noting if you self-host: `startOfMonth` truncates in the server's *local* timezone and `toUTCString` formats the result afterwards. On a box set to UTC+9 the same month yields `"Mon, 31 Aug 2026 15:00:00 GMT"`. The value is still one-per-month and still deterministic — but the instant at which every visitor is renumbered is your server's midnight, not UTC's.)
+
+The actual secret is one level down, in `uuid()`:
+
+```ts
+export function uuid(...args: any) {
+  if (args.length) {
+    return v5(hash(...args, secret()), v5.DNS);
+  }
+  return process.env.USE_UUIDV7 ? v7() : v4();
+}
+
+export function secret() {
+  return hash(process.env.APP_SECRET || process.env.DATABASE_URL);
+}
+```
+
+Every derived identifier in the system is a UUIDv5 over a SHA-512 that ends with `APP_SECRET`. That one environment variable is the entire basis for the claim that session IDs are not reversible. Hold onto that; it comes back later.
+
+<Figure
+  caption="The identification path. Two of the four inputs are public, one is a computable date hash, and the only secret is an environment variable. IP and User-Agent are consumed and discarded."
+  label="Diagram showing website ID, IP, User-Agent and a rotating date salt hashed with APP_SECRET into a UUIDv5 session ID, with IP and User-Agent marked as never persisted"
+>
+  <svg viewBox="0 0 700 306" width="100%" style="min-width:640px" role="img" aria-labelledby="ident-title">
+    <title id="ident-title">How a session ID is derived and which inputs are discarded</title>
+
+    <text x="0" y="13" fill="var(--fg-muted)" font-size="13.5" font-family="var(--font-sans)" font-weight="600">INPUTS</text>
+    <text x="350" y="13" fill="var(--fg-muted)" font-size="13.5" font-family="var(--font-sans)" font-weight="600">DERIVATION</text>
+    <text x="520" y="13" fill="var(--fg-muted)" font-size="13.5" font-family="var(--font-sans)" font-weight="600">RESULT</text>
+
+    {[
+      { y: 28, label: 'websiteId', note: 'public', c: 'var(--series-8)' },
+      { y: 78, label: 'ip', note: 'discarded', c: 'var(--series-4)' },
+      { y: 128, label: 'userAgent', note: 'discarded', c: 'var(--series-4)' },
+      { y: 178, label: 'sessionSalt', note: 'computable', c: 'var(--series-8)' },
+      { y: 228, label: 'APP_SECRET', note: 'the only secret', c: 'var(--series-3)' },
+    ].map((r) => (
+      <g>
+        <rect x="0" y={r.y} width="152" height="34" rx="5" fill={r.c} opacity="0.14" stroke={r.c} stroke-width="1.3" />
+        <text x="76" y={r.y + 22} text-anchor="middle" fill="var(--fg)" font-size="14.5" font-family="var(--font-mono)">{r.label}</text>
+        <text x="162" y={r.y + 22} fill="var(--fg-muted)" font-size="13.5" font-family="var(--font-sans)">{r.note}</text>
+        <line x1="290" y1={r.y + 17} x2="330" y2="155" stroke="var(--fg-faint)" stroke-width="1" opacity="0.5" />
+      </g>
+    ))}
+
+    <rect x="332" y="122" width="150" height="66" rx="6" fill="var(--series-1)" opacity="0.14" stroke="var(--series-1)" stroke-width="1.4" />
+    <text x="407" y="148" text-anchor="middle" fill="var(--fg)" font-size="14.5" font-family="var(--font-mono)">SHA-512</text>
+    <text x="407" y="172" text-anchor="middle" fill="var(--fg)" font-size="14.5" font-family="var(--font-mono)">→ UUIDv5</text>
+
+    <line x1="484" y1="155" x2="516" y2="155" stroke="var(--fg-faint)" stroke-width="1.2" />
+
+    <rect x="518" y="130" width="182" height="50" rx="6" fill="var(--series-3)" opacity="0.14" stroke="var(--series-3)" stroke-width="1.4" />
+    <text x="609" y="151" text-anchor="middle" fill="var(--fg)" font-size="14.5" font-family="var(--font-mono)">sessionId</text>
+    <text x="609" y="170" text-anchor="middle" fill="var(--fg-muted)" font-size="13.5" font-family="var(--font-sans)">stable until the 1st</text>
+
+    <text x="518" y="218" fill="var(--fg-muted)" font-size="13.5" font-family="var(--font-sans)" font-weight="600">PERSISTED</text>
+    <text x="518" y="238" fill="var(--fg)" font-size="13.5" font-family="var(--font-sans)">browser, os, device,</text>
+    <text x="518" y="256" fill="var(--fg)" font-size="13.5" font-family="var(--font-sans)">screen, language, country</text>
+    <text x="518" y="282" fill="var(--fg-muted)" font-size="13.5" font-family="var(--font-sans)" font-weight="600">NEVER PERSISTED</text>
+    <text x="518" y="302" fill="var(--fg)" font-size="13.5" font-family="var(--font-mono)">ip, userAgent</text>
+  </svg>
+</Figure>
+
+The consequence falls out of the rotation. With the default `SALT_ROTATION=month`, the salt changes at local midnight on the first of every month. The same person, on the same machine, on the same network, hashes to a different session ID on 1 October than they did on 30 September.
+
+So when the dashboard reports unique visitors for a month, that number is internally consistent. Compare it across a month boundary, or sum two months to get a quarter, and you are counting each returning person once per month. **A returning visitor is structurally indistinguishable from a new one the moment the calendar flips.** Setting `SALT_ROTATION=day` — which the code supports — makes that happen every midnight instead.
+
+This is not a bug. It is the mechanism that makes the pseudonymization defensible: identifiers that expire cannot build a long-term profile. But it means the retention and returning-visitor figures in a cookieless tool are bounded by the rotation window, and the tool will not tell you that on the chart.
+
+## Where: whichever CDN is in front of you
+
+Location resolution lives in `src/lib/detect.ts` and runs in a fixed priority order. Edge headers first, database file second. (Before any of it, local and syntactically invalid addresses short-circuit to `null` — which is why traffic from your own machine shows up with no country at all.)
+
+<Figure
+  caption="Location resolution is an ordered scan, not a branch. The first CDN header present wins outright; the local MaxMind file is consulted only when none of them are."
+  label="Priority ladder showing five CDN header sources checked in order, falling back to a local MaxMind database file and then to a null location"
+>
+  <svg viewBox="0 0 700 300" width="100%" style="min-width:640px" role="img" aria-labelledby="geo-title">
+    <title id="geo-title">The order in which Umami resolves a visitor location</title>
+
+    <text x="34" y="13" fill="var(--fg-muted)" font-size="13.5" font-family="var(--font-sans)" font-weight="600">SOURCE</text>
+    <text x="214" y="13" fill="var(--fg-muted)" font-size="13.5" font-family="var(--font-sans)" font-weight="600">READS</text>
+    <text x="520" y="13" fill="var(--fg-muted)" font-size="13.5" font-family="var(--font-sans)" font-weight="600">WHEN</text>
+
+    {[
+      { n: '1', y: 24, src: 'Umami Cloud', key: 'x-umami-client-country', cond: 'CLOUD_MODE' },
+      { n: '2', y: 60, src: 'Cloudflare', key: 'cf-ipcountry', cond: 'behind Cloudflare' },
+      { n: '3', y: 96, src: 'Vercel', key: 'x-vercel-ip-country', cond: 'on Vercel' },
+      { n: '4', y: 132, src: 'CloudFront', key: 'cloudfront-viewer-country', cond: 'behind CloudFront' },
+      { n: '5', y: 168, src: 'EdgeOne', key: 'eo-ipcountry', cond: 'rule set' },
+    ].map((r) => (
+      <g>
+        <circle cx="12" cy={r.y + 17} r="10" fill="var(--series-1)" opacity="0.2" stroke="var(--series-1)" stroke-width="1.2" />
+        <text x="12" y={r.y + 22} text-anchor="middle" fill="var(--fg)" font-size="13.5" font-family="var(--font-mono)">{r.n}</text>
+        <rect x="34" y={r.y} width="164" height="34" rx="5" fill="var(--series-1)" opacity="0.12" stroke="var(--series-1)" stroke-width="1.2" />
+        <text x="46" y={r.y + 22} fill="var(--fg)" font-size="14.5" font-family="var(--font-sans)">{r.src}</text>
+        <text x="214" y={r.y + 22} fill="var(--fg)" font-size="14" font-family="var(--font-mono)">{r.key}</text>
+        <text x="520" y={r.y + 22} fill="var(--fg-muted)" font-size="13.5" font-family="var(--font-sans)">{r.cond}</text>
+      </g>
+    ))}
+
+    <text x="34" y="222" fill="var(--fg-muted)" font-size="13.5" font-family="var(--font-sans)" font-weight="600">NO HEADER MATCHED</text>
+    <line x1="0" y1="230" x2="700" y2="230" stroke="var(--fg-faint)" stroke-width="1" stroke-dasharray="4 4" opacity="0.6" />
+
+    <rect x="34" y="240" width="164" height="34" rx="5" fill="var(--series-3)" opacity="0.12" stroke="var(--series-3)" stroke-width="1.2" />
+    <text x="46" y="262" fill="var(--fg)" font-size="14.5" font-family="var(--font-sans)">Local file</text>
+    <text x="214" y="262" fill="var(--fg)" font-size="14" font-family="var(--font-mono)">geo/GeoLite2-City.mmdb</text>
+    <text x="520" y="262" fill="var(--fg-muted)" font-size="13.5" font-family="var(--font-sans)">no outbound call</text>
+
+    <text x="214" y="294" fill="var(--fg)" font-size="14" font-family="var(--font-mono)">location = null</text>
+    <text x="34" y="294" fill="var(--fg-muted)" font-size="13.5" font-family="var(--font-sans)">otherwise</text>
+    <text x="520" y="294" fill="var(--fg-muted)" font-size="13.5" font-family="var(--font-sans)">IP not in the DB</text>
+  </svg>
+</Figure>
+
+Two things are worth pulling out.
+
+First, the MaxMind lookup is a **local file read** — `geo/GeoLite2-City.mmdb`, opened once and cached on `globalThis`. There is no outbound call to a geolocation API. For a self-hosted deployment that is a genuine privacy property: visitor IPs never leave the box, not even to a lookup service.
+
+Second, and less comfortable: the quality of your location data depends on your hosting topology, not on the analytics software. Put Cloudflare in front and you get Cloudflare's answer. Deploy on Vercel and you get Vercel's. Run it on a bare VPS with no CDN and you get whatever a GeoLite2 file — the free tier of MaxMind's data — happens to contain, and `null` for anything it misses. The same software produces materially different geographic data on two different deployments, and the dashboard renders all of it with equal confidence.
+
+If you are comparing your numbers against someone else's, or against a previous deployment, this is the first thing to check and the last thing anyone thinks of.
+
+## When: quantized to the clock hour
+
+This is the part that surprised me, and it is the one with real consequences for how you read a traffic chart.
+
+A *session* is a person (for the month). A *visit* is supposed to be a sitting — a contiguous period of activity, ended by a timeout. Umami documents a 30-minute inactivity window, and the code appears to implement exactly that:
+
+```ts
+let visitId = cache?.visitId || uuid(sessionId, visitSalt);
+let iat = cache?.iat || now;
+
+// Expire visit after 30 minutes
+if (!timestamp && now - iat > 1800) {
+  visitId = uuid(sessionId, visitSalt);
+  iat = now;
+}
+```
+
+Now look at what the recomputation actually recomputes. `visitId` is `uuid(sessionId, visitSalt)`, and `visitSalt` was set at the top of the request to `hash(startOfHour(createdAt).toUTCString())`. Both the original and the "new" visit ID are derived from the same two values: the session ID, and the hash of the current clock hour.
+
+**If the 30-minute timer fires within the same clock hour, the new visit ID is byte-identical to the old one.** The branch runs, the assignment happens, and nothing changes. The visit does not split.
+
+<Figure
+  caption="Two identical 35-minute gaps. Only the one that crosses an hour boundary produces a second visit, because the visit ID is derived from startOfHour."
+  label="Timeline comparison showing a 35-minute idle gap inside one clock hour yielding one visit, and the same gap across an hour boundary yielding two visits"
+>
+  <svg viewBox="0 0 700 272" width="100%" style="min-width:640px" role="img" aria-labelledby="visit-title">
+    <title id="visit-title">A 35-minute gap splits a visit only when it crosses a clock hour</title>
+
+    <text x="0" y="14" fill="var(--fg)" font-size="14.5" font-family="var(--font-sans)" font-weight="600">Case A — gap inside one hour</text>
+
+    <line x1="0" y1="56" x2="470" y2="56" stroke="var(--fg-faint)" stroke-width="1.2" />
+    <line x1="300" y1="44" x2="300" y2="68" stroke="var(--fg-faint)" stroke-width="1.2" stroke-dasharray="3 3" />
+    <text x="300" y="86" text-anchor="middle" fill="var(--fg-muted)" font-size="13.5" font-family="var(--font-mono)">11:00</text>
+
+    <circle cx="56" cy="56" r="5" fill="var(--series-3)" />
+    <text x="56" y="40" text-anchor="middle" fill="var(--fg)" font-size="13.5" font-family="var(--font-mono)">10:05</text>
+    <circle cx="232" cy="56" r="5" fill="var(--series-3)" />
+    <text x="232" y="40" text-anchor="middle" fill="var(--fg)" font-size="13.5" font-family="var(--font-mono)">10:40</text>
+
+    <path d="M 62 64 Q 144 84 226 64" fill="none" stroke="var(--series-8)" stroke-width="1.2" stroke-dasharray="4 3" />
+    <text x="144" y="104" text-anchor="middle" fill="var(--fg-muted)" font-size="13.5" font-family="var(--font-sans)">35 min idle</text>
+
+    <rect x="490" y="32" width="210" height="48" rx="5" fill="var(--series-8)" opacity="0.14" stroke="var(--series-8)" stroke-width="1.3" />
+    <text x="595" y="52" text-anchor="middle" fill="var(--fg)" font-size="14.5" font-family="var(--font-sans)" font-weight="600">1 visit</text>
+    <text x="595" y="70" text-anchor="middle" fill="var(--fg-muted)" font-size="13.5" font-family="var(--font-mono)">same hour, same id</text>
+
+    <line x1="0" y1="134" x2="700" y2="134" stroke="var(--fg-faint)" stroke-width="0.8" opacity="0.4" />
+
+    <text x="0" y="166" fill="var(--fg)" font-size="14.5" font-family="var(--font-sans)" font-weight="600">Case B — gap crosses the hour</text>
+
+    <line x1="0" y1="208" x2="470" y2="208" stroke="var(--fg-faint)" stroke-width="1.2" />
+    <line x1="300" y1="196" x2="300" y2="220" stroke="var(--fg-faint)" stroke-width="1.2" stroke-dasharray="3 3" />
+    <text x="300" y="254" text-anchor="middle" fill="var(--fg-muted)" font-size="13.5" font-family="var(--font-mono)">11:00</text>
+
+    <circle cx="232" cy="208" r="5" fill="var(--series-3)" />
+    <text x="232" y="192" text-anchor="middle" fill="var(--fg)" font-size="13.5" font-family="var(--font-mono)">10:50</text>
+    <circle cx="408" cy="208" r="5" fill="var(--series-1)" />
+    <text x="408" y="192" text-anchor="middle" fill="var(--fg)" font-size="13.5" font-family="var(--font-mono)">11:25</text>
+
+    <path d="M 238 216 Q 320 236 402 216" fill="none" stroke="var(--series-1)" stroke-width="1.2" stroke-dasharray="4 3" />
+
+    <rect x="490" y="184" width="210" height="48" rx="5" fill="var(--series-3)" opacity="0.14" stroke="var(--series-3)" stroke-width="1.3" />
+    <text x="595" y="204" text-anchor="middle" fill="var(--fg)" font-size="14.5" font-family="var(--font-sans)" font-weight="600">2 visits</text>
+    <text x="595" y="222" text-anchor="middle" fill="var(--fg-muted)" font-size="13.5" font-family="var(--font-mono)">hour rolled, new id</text>
+  </svg>
+</Figure>
+
+The same logic works in the other direction. The `cache` token that carries `visitId` and `iat` between requests is held in a closure variable in the tracker — `let cache` in `src/tracker/index.ts` — and never written to `localStorage` or a cookie. A full page reload drops it. The next request arrives with no cache header, so the server recomputes `visitId` from `(sessionId, currentHour)` and gets the same value back. Close the tab, come back twenty minutes later, and you rejoin the visit you were already in.
+
+Put those together and a "visit" is, in practice, **a distinct clock hour in which a session was active**. The 30-minute rule only has an observable effect when the idle period happens to straddle an hour boundary — roughly speaking, on a random 35-minute gap, about half the time.
+
+Which way does this bias the numbers? It undercounts visits, and therefore inflates any per-visit average. Pageviews per visit, time on site, bounce rate — all of them are computed against a denominator that merges sittings which a timeout-based tool would have separated. If you have ever wondered why a cookieless tool reports better engagement than GA4 on the same traffic, session definition is a large part of the answer, and it is not a rounding difference.
+
+## Trade-offs and pitfalls
+
+**Pseudonymous is not anonymous, and the margin is one environment variable.** Work out the input space for `sessionId`: the website ID is public, the salt is a hash of a date anyone can compute, User-Agent strings cluster into a few thousand realistic candidates, and IPv4 is 2^32. Given `APP_SECRET`, inverting a session ID back to an IP is a brute-force problem small enough to be uninteresting. The pseudonymity rests entirely on that secret staying secret — which also means `APP_SECRET` belongs in your incident response plan next to your database credentials, and that rotating it silently renumbers every visitor in your history.
+
+**The collection endpoint is unauthenticated, and it answers questions.** `POST /api/send` is called with `{ skipAuth: true }`, which it has to be — it is hit by anonymous browsers. But the payload schema also accepts `ip` and `userAgent` as optional string fields, and `getClientInfo` prefers them over the real request:
+
+```ts
+const userAgent = payload?.userAgent || request.headers.get('user-agent');
+const ip = payload?.ip || getIpAddress(request.headers);
+```
+
+Those two fields are in the Zod schema in the source, but they are not in the documented payload — the API reference lists eleven fields and neither of these is among them.[^4] Presumably they exist for server-side collection, where the real client is upstream. The consequence either way is that the endpoint computes a session ID from caller-chosen inputs — and then hands it back: `json({ cache: token, sessionId, visitId })`.
+
+That is an oracle. Anyone who can see a session ID (a read-only dashboard user, say, or anyone with access to an export) and who can guess a plausible address range can submit candidates and compare. A corporate `/24` is 256 addresses; with a handful of User-Agent guesses that is a few thousand requests to tie a row in the analytics table to one machine. No database access required, and no need to know `APP_SECRET` at all.
+
+This is inherent to hash-based identification rather than unique to Umami — any scheme that derives a stable ID from request attributes and hands it back to the caller has the same shape. The practical mitigations are ordinary: rate-limit `/api/send`, treat dashboard access as access to pseudonymous personal data rather than to aggregates, and shorten `SALT_ROTATION` if the threat model warrants it.
+
+**Bot filtering is a User-Agent list.** The check is `isbot(userAgent)`, and it can be turned off wholesale with `DISABLE_BOT_CHECK`. Anything that sets a browser-shaped User-Agent is counted as a person. Headless automation with a default UA gets filtered; headless automation with a copied UA does not.
+
+**"Laptop" is a screen-width threshold.** From `getDevice`:
+
+```ts
+if (type === 'desktop' && screen && +width <= 1920) {
+  return 'laptop';
+}
+```
+
+A desktop with a 1080p monitor is reported as a laptop. A laptop driving a 4K display is reported as a desktop. The device breakdown is a statement about reported screen width, not about hardware — worth remembering before anyone makes a product decision from that pie chart.
+
+**The client sends with `fetch`, not `sendBeacon`.** Events dispatched as the page unloads can be cancelled by navigation. Only the Web Vitals payload is sent on `pagehide` and `visibilitychange`. Exit-heavy pages lose a fraction of their events, and that fraction is not measurable from inside the tool.
+
+## Takeaways
+
+- **Cookieless does not mean identifier-less.** It means the identifier is computed server-side from request attributes instead of stored on the client. That changes the failure modes; it does not remove them.
+- **The "salt" is a rotation token, not a secret.** It is `hash(startOfMonth(date))` — publicly computable, zero entropy. All unguessability comes from `APP_SECRET`.
+- **Unique visitors do not survive the rotation window.** On the default monthly setting, every returning visitor is reborn as a new one at the server's local midnight on the 1st. Do not sum months to get a quarter.
+- **Location quality is a property of your hosting, not your analytics.** Edge headers win over the local MaxMind file, so the same software yields different data behind Cloudflare, Vercel, CloudFront or nothing at all.
+- **A "visit" is closer to a clock hour than to a 30-minute timeout.** The expiry branch recomputes the visit ID from the same hour salt, so it is a no-op unless the gap crosses an hour boundary. Per-visit averages are inflated accordingly.
+- **IP and User-Agent are genuinely never persisted** — they are hash inputs and nothing else. That part of the privacy claim holds up in the source.
+- **Read the identification path of whatever you deploy.** None of the above is hidden or undocumented-by-malice; it is just in the code rather than on the marketing page, and every one of these tools has an equivalent set of decisions.
+
+## References
+
+[^1]: [umami-software/umami](https://github.com/umami-software/umami), MIT licence — the source read throughout this post. The identification logic is in [`src/app/api/send/route.ts`](https://github.com/umami-software/umami/blob/v3.3.1/src/app/api/send/route.ts), [`src/lib/crypto.ts`](https://github.com/umami-software/umami/blob/v3.3.1/src/lib/crypto.ts) and [`src/lib/detect.ts`](https://github.com/umami-software/umami/blob/v3.3.1/src/lib/detect.ts).
+[^2]: [Umami v3.3.1](https://github.com/umami-software/umami/releases/tag/v3.3.1), released 20 August 2026 — the tag every quotation above is taken from. Line-level behaviour may differ in later releases.
+[^3]: Umami documentation, [Environment variables](https://docs.umami.is/docs/environment-variables) — `SALT_ROTATION`, `APP_SECRET`, `DISABLE_BOT_CHECK`, `IGNORE_IP` and `SKIP_LOCATION_HEADERS`.
+[^4]: Umami documentation, [Sending stats](https://docs.umami.is/docs/api/sending-stats) — the documented `/api/send` payload and the statement that the endpoint needs no authentication token. Note that `ip` and `userAgent`, both accepted by the schema in the source, do not appear in this reference; the [server-side events guide](https://docs.umami.is/docs/guides/send-server-side-events) does not mention them either.
+[^5]: MaxMind, [GeoLite2 Free Geolocation Data](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data) — the free database used for the fallback lookup, and its stated accuracy limits.
+[^6]: A. Barth, [RFC 6265: HTTP State Management Mechanism](https://www.rfc-editor.org/rfc/rfc6265), IETF, April 2011 — the cookie mechanism that cookieless analytics avoids.
+[^7]: European Data Protection Board, [Guidelines 01/2025 on Pseudonymisation](https://www.edpb.europa.eu/our-work-tools/documents/public-consultations/2025/guidelines-012025-pseudonymisation_en) — why pseudonymous data remains personal data when the re-identification key still exists.
