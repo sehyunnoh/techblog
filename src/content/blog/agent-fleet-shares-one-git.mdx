@@ -1,0 +1,291 @@
+---
+title: 'Your Agent Fleet Shares One .git'
+description: "An ADE gives every agent its own git worktree. Here that isolates 44 files and leaves 23,199 shared — and the usual fix is a symlink, which is the opposite of isolation."
+pubDate: 2026-09-17
+tags: ['ai', 'llm', 'devops', 'architecture', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+`git worktree add` finished in 132 milliseconds and wrote 44 files.
+
+That is this blog's repository, and those 44 files are everything git tracks in it — 626 KB of Astro components, MDX posts and config. To actually build the site you need 23,199 more files weighing 405 MB, and `git worktree add` did not create a single one of them.
+
+This matters because the worktree is now load-bearing infrastructure. The tool category that grew up around coding agents in 2026 — the ADE, agent development environment — is built on it. Orca, the one with the most traction, is explicit: "every task gets its own on-disk copy of the repo via `git worktree`. This is what makes parallel agents safe — they never step on each other's files."[^1] Run six agents, get six worktrees, no collisions.
+
+For tracked files that is exactly true. This post is about the boundary: what `git worktree` isolates, what it quietly shares, and what the ADE has to build on top to cover the difference. The last part is where it gets interesting, because the standard fix for the gap is a symlink — and a symlink is the opposite of isolation.
+
+## Where the term comes from, and what it is claiming
+
+"Agent development environment" was coined by Letta for something else entirely: a workbench for building and debugging *agents themselves*, making context windows and reasoning visible.[^2] The coding world borrowed the acronym for a different object — a workspace for directing a fleet of agents that write code. Both meanings are in active use, which is worth knowing before you read a comparison page.
+
+This post is about the second kind, and specifically about `stablyai/orca`: MIT-licensed, TypeScript, first commit 2026-03-17, 70,598 stars at the time of writing.[^3] Its repository topics include `worktrees` and `parallel-agents`, which is a fair summary of the architecture. Every claim below about Orca is from its source or its documentation at tag `v1.4.205`.
+
+The claim under test is the one in the quote above: parallel agents are safe because they never step on each other's files.
+
+## What a worktree actually splits
+
+Git's own layout documentation states the rule without much ceremony:
+
+> "When multiple working trees are used, most of files in `$GIT_DIR` are per-worktree with a few known exceptions. All files under _common_ however will be shared between all working trees."[^4]
+
+The mechanism is a pointer. A linked worktree's `.git` is a file, not a directory, containing a path into the main repository:
+
+```bash
+$ git worktree add ../w1 -b agent1
+$ cat ../w1/.git
+gitdir: /tmp/r/.git/worktrees/w1
+
+$ ls /tmp/r/.git/worktrees/w1
+commondir  gitdir  HEAD  index  logs  ORIG_HEAD  refs
+
+$ cat /tmp/r/.git/worktrees/w1/commondir
+../..
+```
+
+Seven entries are private to the worktree. Everything else resolves back through `commondir` to the one shared repository. You can ask git directly which side of the line any given path falls on:
+
+```bash
+# run from inside ../w1
+$ git rev-parse --git-path index
+/tmp/r/.git/worktrees/w1/index     # private
+
+$ git rev-parse --git-path objects
+/tmp/r/.git/objects                # shared
+$ git rev-parse --git-path config
+/tmp/r/.git/config                 # shared
+$ git rev-parse --git-path hooks
+/tmp/r/.git/hooks                  # shared
+```
+
+<Figure
+  caption="Measured on git 2.55.0. The seven entries on the left are created per worktree; everything on the right is reached through <code>commondir</code> and is common to the whole fleet."
+  label="Diagram showing the per-worktree files HEAD, index, logs, ORIG_HEAD, refs, commondir and gitdir on one side, and the shared objects, refs, config, hooks and packed-refs on the other"
+>
+  <svg viewBox="0 0 700 250" width="100%" role="img" aria-labelledby="split-title">
+    <title id="split-title">A linked worktree owns seven administrative files and shares the rest of the repository</title>
+
+    <text x="0" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">PER WORKTREE · .git/worktrees/w1/</text>
+    <text x="392" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">SHARED · .git/ (commondir)</text>
+
+    {[
+      { y: 24, a: 'HEAD', ad: 'which commit this agent is on', b: 'objects/', bd: 'every commit, tree and blob' },
+      { y: 68, a: 'index', ad: 'this agent’s staging area', b: 'refs/heads/', bd: 'every branch, and its .lock' },
+      { y: 112, a: 'logs/HEAD', ad: 'this agent’s reflog', b: 'config', bd: 'user, remotes, aliases' },
+      { y: 156, a: 'refs/bisect', ad: 'plus refs/worktree, ORIG_HEAD', b: 'hooks/', bd: 'pre-commit, pre-push, all of them' },
+      { y: 200, a: 'commondir', ad: 'the pointer to the right-hand side', b: 'packed-refs', bd: 'and the stash, and gc state' },
+    ].map((row) => (
+      <g>
+        <rect x="0" y={row.y} width="330" height="36" rx="6" fill="var(--series-1)" opacity="0.13" stroke="var(--series-1)" stroke-width="1.3" />
+        <text x="12" y={row.y + 15} fill="var(--fg)" font-size="12" font-family="var(--font-mono)" font-weight="600">{row.a}</text>
+        <text x="12" y={row.y + 29} fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">{row.ad}</text>
+
+        <rect x="392" y={row.y} width="308" height="36" rx="6" fill="var(--series-2)" opacity="0.13" stroke="var(--series-2)" stroke-width="1.3" />
+        <text x="404" y={row.y + 15} fill="var(--fg)" font-size="12" font-family="var(--font-mono)" font-weight="600">{row.b}</text>
+        <text x="404" y={row.y + 29} fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">{row.bd}</text>
+      </g>
+    ))}
+
+    <path d="M340 208 H382" stroke="var(--fg-faint)" stroke-width="1.3" stroke-dasharray="4 3" />
+    <path d="M374 204 l8 4 -8 4" fill="var(--fg-faint)" />
+  </svg>
+</Figure>
+
+The private index is the real win, and it is not a small one. Two agents can stage and commit simultaneously because `index.lock` is a different file for each of them. On a single shared checkout that is exactly the collision you cannot avoid.
+
+## What stays shared, and what it costs
+
+Three consequences follow from the right-hand column. Each one is reproducible in about thirty seconds.
+
+**A branch belongs to one worktree.** Git refuses the second checkout outright:
+
+```bash
+$ git worktree add ../w2 agent1
+Preparing worktree (checking out 'agent1')
+fatal: 'agent1' is already used by worktree at '/tmp/w1'
+```
+
+The documentation confirms this is deliberate and that `--force` overrides it.[^5] In practice it shapes the workflow more than it looks. Orca's own "race three agents on the same task" recipe instructs you to create three worktrees named `fix-bug`, `fix-bug-2`, `fix-bug-3` — three branches, because three agents cannot share one.[^6] A supervisor-and-worker split on a single branch is not expressible at this layer.
+
+**Hooks are global.** Install a `pre-commit` hook in the main checkout and it fires everywhere:
+
+```bash
+# written once, in the main checkout
+$ printf '#!/bin/sh\necho "[hook fired in $(git rev-parse --show-toplevel)]" >&2\n' \
+    > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+# committed from a different agent's worktree
+$ cd ../w2 && git commit -m "from agent2"
+[hook fired in /tmp/w2]
+[agent2 879b535] from agent2
+```
+
+This is the sharp edge. An agent that runs `npm install` in a repository using husky, lefthook or pre-commit rewrites the commit path for every other agent in the fleet, mid-run, with no signal that anything changed. The same applies to `.git/config`: remotes, aliases and `core.*` settings are one file. Git does offer per-worktree config behind `extensions.worktreeConfig`, but it is opt-in and the documentation scopes it narrowly — `core.worktree`, `core.bare`, `core.sparseCheckout`.[^5]
+
+**Ref updates contend.** Branch locks live in the common directory, so concurrent `fetch` or `commit` across worktrees serialises on the same files:
+
+```bash
+$ git update-ref refs/heads/agent1 HEAD
+fatal: update_ref failed for ref 'refs/heads/agent1':
+  cannot lock ref 'refs/heads/agent1': Unable to create
+  '/tmp/r/.git/refs/heads/agent1.lock': File exists.
+```
+
+At six agents this is usually invisible — lock windows are milliseconds. It stops being invisible when something long-running holds one: a `git gc` triggered by one agent's commit rewrites the shared object store and packed-refs for all of them.
+
+None of this is a bug. It is the design: a worktree is a second *working tree*, not a second repository. The word is doing exactly what it says.
+
+## The other 405 megabytes
+
+Everything above concerns files git knows about. The larger problem is the ones it does not.
+
+<Figure
+  caption="Measured on this blog's repository, 2026-09-17. Left: what <code>git worktree add</code> creates, timed end to end. Right: what the repository needs to build and what git has never seen."
+  label="Comparison showing 44 tracked files at 626 kilobytes created in 132 milliseconds versus 23,199 gitignored files at 405 megabytes that a worktree does not create"
+>
+  <svg viewBox="0 0 700 214" width="100%" role="img" aria-labelledby="gap-title">
+    <title id="gap-title">A worktree creates 44 tracked files and none of the 23,199 gitignored ones</title>
+
+    <text x="0" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">WHAT THE WORKTREE CREATES</text>
+    <text x="360" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">WHAT IT DOES NOT</text>
+
+    <rect x="0" y="24" width="330" height="120" rx="7" fill="var(--series-3)" opacity="0.13" stroke="var(--series-3)" stroke-width="1.3" />
+    <text x="16" y="58" fill="var(--fg)" font-size="30" font-family="var(--font-mono)" font-weight="700">44</text>
+    <text x="16" y="76" fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-sans)">tracked files · 626 KB</text>
+    <text x="16" y="106" fill="var(--fg)" font-size="13" font-family="var(--font-mono)" font-weight="600">132 ms</text>
+    <text x="16" y="124" fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-sans)">git worktree add, end to end</text>
+
+    <rect x="360" y="24" width="340" height="120" rx="7" fill="var(--series-2)" opacity="0.13" stroke="var(--series-2)" stroke-width="1.3" />
+    <text x="376" y="58" fill="var(--fg)" font-size="30" font-family="var(--font-mono)" font-weight="700">23,199</text>
+    <text x="376" y="76" fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-sans)">gitignored files · 405 MB in node_modules</text>
+    <text x="376" y="106" fill="var(--fg)" font-size="13" font-family="var(--font-mono)" font-weight="600">.env · caches · dist · ports · databases</text>
+    <text x="376" y="124" fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-sans)">none of it carried over, by design</text>
+
+    <text x="0" y="176" fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-sans)">The repository git manages is 626 KB. The directory the agent needs in order to run a build is 647&#215; larger,</text>
+    <text x="0" y="194" fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-sans)">and the isolation guarantee says nothing about it.</text>
+  </svg>
+</Figure>
+
+Orca's documentation states the gap plainly rather than papering over it:
+
+> "A brand-new worktree is a clean checkout. Dependencies, caches, and local secrets that live in gitignored paths are missing until you recreate them."[^1]
+
+It then offers three ways to fill it: per-user shared paths, `worktree.sharedDirectories` in a checked-in `orca.yaml`, and a `.worktreeinclude` file at the repository root. What makes this worth reading closely is that the three are not variations on one idea. They implement two *opposed* policies, and the source says why:
+
+```ts
+// 'link': symlink when APFS clone is unavailable (user-configured shared paths).
+// 'copy': real copy when APFS clone is unavailable (.worktreeinclude paths, which
+// are per-worktree copies by cross-tool convention — edits must not leak back).
+// 'share': always symlink (orca.yaml sharedDirectories). An APFS clone would give
+// each worktree an independent node_modules, defeating one-install-serves-all.
+```
+
+That is from `worktree-symlinks.ts`.[^7] Read the last comment again. For `.env` and local editor config the requirement is that **edits must not leak back** — each worktree owns its copy. For `node_modules` the requirement is the exact opposite: an independent copy per worktree would *defeat* the goal, which is stated as **one-install-serves-all**.
+
+<Mermaid
+  caption="The three materialisation modes in Orca v1.4.205 and the guarantee each one provides. Only the copy path preserves the isolation that the worktree itself provides for tracked files."
+  label="Flowchart showing a gitignored path routed to copy, link or share mode, with copy producing an independent per-worktree file and share producing one shared tree"
+  code={`
+flowchart TD
+  P["A gitignored path<br/>git will not carry over"] --> C[".worktreeinclude<br/>mode: copy"]
+  P --> L["Shared Paths setting<br/>mode: link"]
+  P --> S["orca.yaml sharedDirectories<br/>mode: share"]
+  C --> C2["APFS clone, else fs.cp<br/>each worktree owns its copy"]
+  L --> L2["APFS clone if available,<br/>else symlink"]
+  S --> S2["always symlink or junction<br/>one tree, N worktrees"]
+  C2 --> OK["isolated"]
+  L2 --> MAY["isolated only on APFS"]
+  S2 --> NO["not isolated, deliberately"]
+`}
+/>
+
+There is a size guard on the copy path, and its comment is candid about what drove it: a repository that lists `node_modules` in `.worktreeinclude` "freezes worktree creation for minutes behind an inline copy." The limits are 2 GiB and 50,000 entries, cumulative across the run, and an over-budget entry is skipped with a warning rather than failing the create.[^8]
+
+Worth checking against your own repository rather than assuming. This blog's `node_modules` — 23,199 entries, 405 MB — sits under *both* limits. Listing it in `.worktreeinclude` here would produce a genuine per-worktree copy; on a repository a little larger the same line silently does nothing, and the difference surfaces as a build failure in one worktree and not another.
+
+## The share mode is the un-isolation
+
+The interesting mode is `share`, because it is the one you will reach for. Nobody wants to pay 405 MB and a full install per agent. So `node_modules` gets symlinked — a directory junction on Windows, since Orca's source notes that a plain symlink there needs Developer Mode or admin and otherwise fails with `EPERM`.[^7]
+
+Here is what that buys, measured:
+
+```bash
+# node_modules shared into two worktrees, Orca 'share' mode
+$ cmd //c mklink //J w1/node_modules "$PWD/node_modules"
+$ cmd //c mklink //J w2/node_modules "$PWD/node_modules"
+
+# agent1 upgrades a dependency, inside its own isolated worktree
+$ echo 'v2-installed-by-agent1' > ../w1/node_modules/left-pad/version
+
+  agent2 now reads : v2-installed-by-agent1
+  primary now reads: v2-installed-by-agent1
+  agent2 'git status' changed files: 0
+```
+
+Four lines, and they contain the whole problem. agent1 changed a build input. agent2's build inputs changed with it. And `git status` in agent2's worktree reports a clean tree, because git was never looking at that directory in the first place.
+
+The realistic version of this is not a contrived `echo`. It is an agent handed a task like "upgrade the router to v7 and make the tests pass." That agent will run a package manager. The lockfile it edits is tracked, so the lockfile is isolated. The installed tree it rewrites is shared, so it is not. The two now disagree — per worktree, invisibly — and the first symptom is another agent's test suite failing for a reason that is nowhere in its own diff.
+
+This is not a flaw in Orca specifically. It is the only available trade for a category built on `git worktree`: you can have one install serving the fleet, or you can have isolation, and the mechanism cannot give you both. What Orca does do, to its credit, is put the choice in the repository as checked-in configuration rather than burying it — `sharedDirectories` is a decision someone made on purpose, visible in code review.
+
+## Where the boundary actually belongs
+
+The useful question is not whether worktrees are good. It is which layer your tasks need, given what they do.
+
+<Figure
+  caption="Each level isolates strictly more and costs strictly more. The measured floor is 132 ms for a worktree on this repository; a container image build for the same project is three orders of magnitude slower."
+  label="Table comparing worktree, worktree with copied gitignored paths, container and virtual machine by what each isolates and what each leaves shared"
+>
+  <svg viewBox="0 0 700 250" width="100%" role="img" aria-labelledby="ladder-title">
+    <title id="ladder-title">Four isolation levels ordered by what each one leaves shared</title>
+
+    <text x="12" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">LEVEL</text>
+    <text x="176" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">ADDS ISOLATION FOR</text>
+    <text x="418" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">STILL SHARED</text>
+
+    {[
+      { y: 24, n: 'git worktree', c: 'var(--series-1)', a: 'tracked files, index, HEAD', b: 'objects, refs, hooks, config, gitignored paths' },
+      { y: 80, n: '+ .worktreeinclude', c: 'var(--series-3)', a: '.env, editor config, caches', b: 'node_modules if shared, ports, databases, hooks' },
+      { y: 136, n: 'container', c: 'var(--series-2)', a: 'dependencies, ports, filesystem', b: 'host services, cloud credentials, remote state' },
+      { y: 192, n: 'VM or remote host', c: 'var(--series-4)', a: 'kernel, network namespace', b: 'whatever the task is authorised to reach' },
+    ].map((row) => (
+      <g>
+        <rect x="0" y={row.y} width="700" height="46" rx="6" fill={row.c} opacity="0.1" stroke={row.c} stroke-width="1.3" />
+        <text x="12" y={row.y + 29} fill="var(--fg)" font-size="12.5" font-family="var(--font-mono)" font-weight="600">{row.n}</text>
+        <text x="176" y={row.y + 29} fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">{row.a}</text>
+        <text x="418" y={row.y + 29} fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-sans)">{row.b}</text>
+      </g>
+    ))}
+  </svg>
+</Figure>
+
+The practical test is a single question: **does the task run a package manager, bind a port, or write to a database?**
+
+If the answer is no — review a diff, write documentation, refactor within existing dependencies, add tests to an existing suite — worktrees are the right layer and the 132 ms matters. Six of those in parallel is genuinely the cheapest isolation available, and the shared object store is a feature: every agent's commits are immediately readable from every other worktree without a fetch.
+
+If the answer is yes for even one agent in the fleet, the worktree is not the boundary you think it is. A dependency upgrade, a migration that touches a local database, a dev server on port 3000 — each of those escapes the worktree, and the escape is silent because git does not track the thing that escaped.
+
+The uncomfortable part is that these two categories look identical when you queue the work. "Fix the failing test" is in the first category until the fix turns out to require a version bump.
+
+## Takeaways
+
+- **A worktree isolates the working tree, not the repository.** Objects, refs, config and hooks live in the common directory and belong to the whole fleet. Verify with `git rev-parse --git-path <name>` rather than assuming.
+- **Hooks are the sharpest shared edge.** One agent running `npm install` in a husky repository rewrites the commit path for every other agent, mid-run, with no signal.
+- **One branch, one worktree.** Git refuses the second checkout. Any workflow needing two agents on one branch has to be expressed some other way.
+- **The isolation guarantee stops at `.gitignore`.** On this repository that is 44 files isolated and 23,199 not — a 647× gap by size, and the larger side is the side builds depend on.[^9]
+- **`share` mode is not isolation, and is not pretending to be.** Orca's own source says a per-worktree `node_modules` would defeat one-install-serves-all. That is a deliberate trade, and it means a dependency change by one agent is a dependency change for all of them.
+- **Match the layer to the task.** Package manager, port, or database in play means the boundary has to move up to a container. Otherwise worktrees are the cheapest thing that works, and 132 ms is hard to beat.
+- **Check the copy budget against your own tree.** 2 GiB and 50,000 entries, and going over is a skipped path with a warning — not an error you will notice at create time.
+
+## References
+[^1]: Orca documentation, [Worktrees](https://www.onorca.dev/docs/model/worktrees) — the model page quoted for "this is what makes parallel agents safe", the clean-checkout statement and the three shared-path mechanisms. Source at [`docs/site/content/docs/model/worktrees.mdx`](https://github.com/stablyai/orca/blob/v1.4.205/docs/site/content/docs/model/worktrees.mdx).
+[^2]: Letta, [Introducing the Agent Development Environment](https://www.letta.com/blog/introducing-the-agent-development-environment/) — the original coinage, for a tool that builds and debugs agents rather than one that orchestrates them. See also the [ADE overview](https://docs.letta.com/guides/ade/overview/) in Letta's docs.
+[^3]: [stablyai/orca](https://github.com/stablyai/orca), MIT licence. Repository metadata read from the GitHub API on 2026-09-17: 70,598 stars, 4,621 forks, 6,193 open issues, first commit 2026-03-17. All source quoted in this post is from tag [`v1.4.205`](https://github.com/stablyai/orca/releases/tag/v1.4.205), published 2026-09-17.
+[^4]: Git documentation, [gitrepository-layout](https://git-scm.com/docs/gitrepository-layout) — the per-worktree versus common rule, and the `refs/bisect`, `refs/rewritten`, `refs/worktree` and `logs/HEAD` exceptions.
+[^5]: Git documentation, [git-worktree](https://git-scm.com/docs/git-worktree) — linked worktrees, the branch-exclusivity rule and `--force`, `extensions.worktreeConfig`, `git worktree prune` and `gc.worktreePruneExpire`. The BUGS section also notes that submodule support in multiple checkouts is incomplete.
+[^6]: Orca documentation, [Race three agents on the same task](https://www.onorca.dev/docs/recipes/parallel-agents) — three worktrees, three branches, three agents.
+[^7]: [`src/main/ipc/worktree-symlinks.ts`](https://github.com/stablyai/orca/blob/v1.4.205/src/main/ipc/worktree-symlinks.ts) — the `link` / `copy` / `share` mode comment quoted above, and `worktreeSymlinkTypeCandidates`, which tries a directory junction before a symlink on Windows. The copy-on-write path is in [`worktree-apfs-clone.ts`](https://github.com/stablyai/orca/blob/v1.4.205/src/main/ipc/worktree-apfs-clone.ts).
+[^8]: [`src/main/ipc/worktree-include-copy-budget.ts`](https://github.com/stablyai/orca/blob/v1.4.205/src/main/ipc/worktree-include-copy-budget.ts) — `DEFAULT_WORKTREE_COPY_BUDGET` at 2 GiB and 50,000 entries, cumulative, with the over-budget path returning a skip reason rather than throwing.
+[^9]: Measurements in this post were taken on git 2.55.0 (Windows) against this blog's own repository and against scratch repositories created for the purpose. File counts are `git ls-files` and a recursive file walk; sizes are summed file lengths, not allocated blocks.
