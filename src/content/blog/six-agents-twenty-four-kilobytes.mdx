@@ -1,0 +1,238 @@
+---
+title: 'Six Isolated Agents Cost 24 Kilobytes'
+description: "Container isolation for a fleet of agents costs 48 seconds once and 4.1 kB per agent after — until the bind mount that makes it convenient costs 465 MB each and hands the sharing back."
+pubDate: 2026-09-18
+tags: ['ai', 'llm', 'devops', 'docker', 'architecture', 'deep-dive']
+draft: true
+---
+
+import Figure from '../../components/Figure.astro';
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+Six containers, each with its own fully isolated 465 MB dependency tree, added **24.6 kB** of disk between them.
+
+That is not a typo, and it is the number that makes the whole argument. In [the previous post](/posts/agent-fleet-shares-one-git) I measured what `git worktree` gives a fleet of coding agents: 44 tracked files isolated in 132 ms, and 23,199 gitignored ones left out in the cold. The escape hatch every ADE offers for that gap — symlink `node_modules` from the primary checkout — is not isolation at all, and its own source says so.
+
+That post ended by pointing at the container and never priced it. This one does.
+
+First, a correction. That post's last figure claimed a container image build is "three orders of magnitude slower" than a worktree. Measured, it is **364×** — 48.1 seconds against 132 milliseconds. Between two and three orders, not three. The caption has been fixed; the number I should have had before writing it is below.
+
+## What the up-front bill actually is
+
+The workspace image is the obvious one: a Node base,[^4] the lockfile, `npm ci`, then the source on top.
+
+```dockerfile
+FROM node:24-bookworm-slim
+WORKDIR /w
+
+# Dependency layer. Rebuilt only when the lockfile changes.
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# Source layer. Rebuilt on every edit; cheap because it is 44 files.
+COPY . .
+```
+
+Ordering `COPY` before `RUN npm ci` would be the same image and a completely different cost curve, which is the entire point of what follows.[^1] Here is where the 48.1 seconds goes, with the base image already pulled:[^6]
+
+<Figure
+  caption="A cold build of the workspace image, measured on Docker 28.0.4. Two steps account for 47.3 of the 48.1 seconds, and neither of them is the source copy."
+  label="Breakdown of a 48.1 second image build: npm ci 28.0 seconds, image export and unpack 19.3 seconds, source copy 0.1 seconds, remaining steps 0.7 seconds"
+>
+  <svg viewBox="0 0 700 196" width="100%" role="img" aria-labelledby="build-title">
+    <title id="build-title">npm ci and image export account for nearly all of a cold build</title>
+
+    <text x="0" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">COLD BUILD · 48.1 s TOTAL</text>
+
+    {[
+      { x: 0, w: 392, c: 'var(--series-2)' },
+      { x: 396, w: 270, c: 'var(--series-1)' },
+      { x: 670, w: 30, c: 'var(--series-3)' },
+    ].map((b) => (
+      <rect x={b.x} y="22" width={b.w} height="34" rx="4" fill={b.c} opacity="0.85" />
+    ))}
+
+    <text x="12" y="44" fill="var(--bg-surface)" font-size="12.5" font-family="var(--font-sans)" font-weight="600">RUN npm ci — 28.0 s</text>
+    <text x="408" y="44" fill="var(--bg-surface)" font-size="12.5" font-family="var(--font-sans)" font-weight="600">export + unpack — 19.3 s</text>
+    <text x="700" y="70" text-anchor="end" fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)">rest · 0.8 s</text>
+
+    <text x="0" y="104" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">WHAT A REBUILD COSTS, BY WHAT CHANGED</text>
+
+    {[
+      { y: 114, n: 'one source file edited', v: '1,124 ms', w: 10, c: 'var(--series-3)' },
+      { y: 154, n: 'package-lock.json changed', v: '48,172 ms', w: 430, c: 'var(--series-2)' },
+    ].map((r) => (
+      <g>
+        <rect x="0" y={r.y} width={r.w} height="28" rx="3" fill={r.c} opacity="0.85" />
+        <text x="446" y={r.y + 19} fill="var(--fg)" font-size="12" font-family="var(--font-sans)">{r.n} — <tspan font-family="var(--font-mono)" font-weight="600">{r.v}</tspan></text>
+      </g>
+    ))}
+  </svg>
+</Figure>
+
+`npm ci` is 28.0 s of it and the image export is another 19.3 s. Copying the 44 source files takes 0.1 s.
+
+The consequence is the second half of that figure. Edit a source file and the rebuild is **1,124 ms**, because the dependency layer is a cache hit. Touch `package-lock.json` and it is **48,172 ms** — the whole thing again. The cost is not "building an image"; it is "invalidating the dependency layer", and an agent doing ordinary work does not invalidate it.
+
+That asymmetry is the product. A fleet of agents editing source pays about a second each; a fleet of agents upgrading dependencies pays 48.
+
+## What each additional agent costs
+
+Once the image exists, an agent workspace is a `docker run`:
+
+```bash
+$ for i in 1 2 3 4 5 6; do docker run -d --name agent$i agentws:1 sleep 600; done
+```
+
+<Chart
+  type="bar"
+  valueLabels
+  height={300}
+  caption="Wall-clock time for <code>docker run -d</code> to return, for six containers started back to back from the same image. The first pays a cold penalty; the rest settle into a 359–436 ms band. Total for the fleet: 2,635 ms."
+  label="Bar chart of container start times in milliseconds: agent 1 at 672, then 359, 388, 436, 383 and 397"
+  labels={['agent 1', 'agent 2', 'agent 3', 'agent 4', 'agent 5', 'agent 6']}
+  series={[{ name: 'docker run to running container', data: [672, 359, 388, 436, 383, 397] }]}
+  yTitle="Milliseconds"
+/>
+
+Against the worktree's 132 ms, a warm container start is about **3×**, not 364×. The 364× is a one-time cost that six agents amortise to 8 seconds each and sixty agents amortise to under a second.
+
+Dispatching work into a container that is already up costs less still — `docker exec` into a running container measured **251 ms**.
+
+Then the disk:
+
+```bash
+$ docker ps -a --format '{{.Names}}\t{{.Size}}'
+agent6    4.1kB
+agent5    4.1kB
+agent4    4.1kB
+agent3    4.1kB
+agent2    4.1kB
+agent1    19.2MB     # this one actually ran `npm run build`
+```
+
+Each container's writable layer starts at 4.1 kB and grows only by what the task actually writes. agent1 ran the site build and is 19.2 MB — the `dist/` it produced. The 465 MB of `node_modules` underneath all six is one read-only set of layers, shared by copy-on-write, counted once.
+
+That is the structural answer to the problem the previous post ended on. An ADE that symlinks `node_modules` into every worktree gets one copy on disk and loses isolation, because a symlink is writable from every side.[^5] An image layer gets one copy on disk and **keeps** isolation, because the layer is read-only and each container's writes land in its own overlay. Same disk, opposite guarantee.
+
+Scale that to the fleet and the three strategies separate by five orders of magnitude. Six worktrees that each run their own install is 405.9 MB apiece — **2,436 MB**. Six containers is **24.6 kB**. And the arrangement most people actually reach for, which the next section measures, is 465 MB apiece — **2,790 MB**, worse than the worktrees it was supposed to improve on.
+
+Only the middle figure is a measurement rather than a multiplication, and it is the one that sounds made up.
+
+## Does the box slow the work down?
+
+This is the question that usually kills the idea, so it is worth measuring rather than assuming. The same `npm run build`, three ways:
+
+| Where | Time |
+|---|---|
+| Host, directly | 5,309 ms |
+| Container, dependencies from the image layer | **4,712 ms** |
+| Container, host repo bind-mounted in | 11,546 ms |
+
+The isolated container is **faster than the host** — about 11% — and the bind-mounted one is **2.45× slower than the isolated one**.
+
+The first result is less surprising than it looks: the container runs on a Linux filesystem in the VM, the host build runs on NTFS, and a build that touches twenty thousand small files is dominated by filesystem calls. On a Linux host the gap would close. The point is not that containers are fast; it is that **isolation is not what costs you the runtime**.
+
+## The mount undoes both wins
+
+The third row is where this goes wrong, and it goes wrong in a way that will look familiar.
+
+Nobody wants a 48-second rebuild in their edit loop, so the standard move is to bind-mount the working tree into the container and overlay `node_modules` with a volume so the host's platform binaries do not leak in:
+
+```bash
+$ docker run -v "D:/workspace/TechBlog:/w" \n      -v /w/node_modules -w /w agentws:1 npm run build
+```
+
+That one line costs three things. The build goes from 4,712 ms to **11,546 ms**. The anonymous volume Docker creates to hold `node_modules` — seeded from the image path it covers[^3] — measures **465 MB and 22,939 files — per container**, which is *worse* than giving every agent its own worktree install and 113,000× the 4.1 kB it replaced.
+
+And the third cost is the one the previous post was about:
+
+```bash
+$ docker run -d --name m1 -v "D:/workspace/TechBlog:/w" ... agentws:1 sleep 300
+$ docker run -d --name m2 -v "D:/workspace/TechBlog:/w" ... agentws:1 sleep 300
+
+$ docker exec m1 sh -c 'echo "written by m1" > /w/dist/agent-marker.txt'
+$ docker exec m2 cat /w/dist/agent-marker.txt
+written by m1
+$ cat dist/agent-marker.txt          # on the host
+written by m1
+```
+
+<Mermaid
+  caption="Measured. Two containers, each with its own PID space, network namespace and writable layer, both bind-mounting one host directory. The isolation holds everywhere except the directory the agents actually work in."
+  label="Diagram showing container m1 writing a file through a bind mount into the host repository, where container m2 and the host both read it"
+  code={`
+flowchart LR
+  M1["container m1<br/>own namespaces, own layer"] -- "write /w/dist/x" --> H["host directory<br/>D:/workspace/TechBlog"]
+  H -- "read /w/dist/x" --> M2["container m2<br/>own namespaces, own layer"]
+  H -- "read dist/x" --> HOST["the host itself"]
+  M1 -. "isolated: PIDs, network,<br/>installed packages, writable layer" .-> M2
+`}
+/>
+
+Two containers. Separate PID spaces, separate network namespaces, separate writable layers — and one shared directory, which is the only directory either agent cares about. This is the symlinked `node_modules` from the previous post wearing a different hat: the isolation boundary is real everywhere except across the thing being worked on.
+
+The failure mode is the same too. Two agents told to "fix the failing test" will both write `dist/`, both run the formatter across the tree, and neither one's `git status` will explain what the other did.
+
+## What this buys, and where it stops
+
+The honest summary is that a container is not a faster worktree or a slower one. It changes the *shape* of the cost.
+
+<Figure
+  caption="Measured costs for the same repository. A worktree is cheap to create and expensive to make usable; an image is the reverse. The bind mount is the option that looks like it combines them and does not."
+  label="Table comparing worktree, image-baked container and bind-mounted container by creation cost, per-agent disk, build time and whether agents are isolated"
+>
+  <svg viewBox="0 0 700 218" width="100%" role="img" aria-labelledby="shape-title">
+    <title id="shape-title">Three strategies compared by setup cost, per-agent disk, build time and isolation</title>
+
+    <text x="12" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">STRATEGY</text>
+    <text x="238" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">SETUP</text>
+    <text x="350" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">PER AGENT</text>
+    <text x="468" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">BUILD</text>
+    <text x="576" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">ISOLATED?</text>
+
+    {[
+      { y: 24, c: 'var(--series-3)', n: 'worktree, shared deps', s: '132 ms', p: '626 KB', b: '5,309 ms', i: 'no', ic: 'var(--series-2)' },
+      { y: 72, c: 'var(--series-3)', n: 'worktree, own install', s: '132 ms + install', p: '405.9 MB', b: '5,309 ms', i: 'yes', ic: 'var(--series-6)' },
+      { y: 120, c: 'var(--series-1)', n: 'container, image-baked', s: '48.1 s once', p: '4.1 kB', b: '4,712 ms', i: 'yes', ic: 'var(--series-6)' },
+      { y: 168, c: 'var(--series-2)', n: 'container + bind mount', s: '48.1 s once', p: '465 MB', b: '11,546 ms', i: 'no', ic: 'var(--series-2)' },
+    ].map((r) => (
+      <g>
+        <rect x="0" y={r.y} width="700" height="40" rx="6" fill={r.c} opacity="0.1" stroke={r.c} stroke-width="1.3" />
+        <text x="12" y={r.y + 25} fill="var(--fg)" font-size="12" font-family="var(--font-mono)" font-weight="600">{r.n}</text>
+        <text x="238" y={r.y + 25} fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-sans)">{r.s}</text>
+        <text x="350" y={r.y + 25} fill="var(--fg)" font-size="11.5" font-family="var(--font-mono)">{r.p}</text>
+        <text x="468" y={r.y + 25} fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-mono)">{r.b}</text>
+        <text x="576" y={r.y + 25} fill={r.ic} font-size="11.5" font-family="var(--font-sans)" font-weight="600">{r.i}</text>
+      </g>
+    ))}
+  </svg>
+</Figure>
+
+Three things this does not solve, which matter before anyone treats it as the answer.
+
+**The image is a snapshot, and snapshots go stale.** Every agent in the fleet is working against the dependency tree that existed when the image was built. That is a feature while the work is source-only and a trap the moment it is not — the agent's `node_modules` and the repository's lockfile can disagree, silently, exactly as they could with a shared symlink. The difference is that here the disagreement is pinned to a tag you can print, rather than to whatever the primary checkout happened to contain.
+
+**Per-agent disk is 4.1 kB only while agents write little.** The one container that ran a real build was 19.2 MB. Six agents each producing a full `dist/` is ~115 MB, not 25 kB. The chart's bottom line is the floor, not the steady state.
+
+**Ports and external services are still shared.** A container gets its own network namespace, which is a genuine improvement over six worktrees fighting over port 3000. It does not give each agent its own Postgres, its own S3 bucket, or its own third-party API quota. The previous post's ladder still has a rung above this one.
+
+And one caveat about the numbers themselves: `docker images` reports this image at 1.28 GB while `docker image inspect` reports 363.4 MB for the same image — those two are not measuring the same thing, and this host runs the containerd snapshotter.[^2] Neither figure is the one that matters for a fleet. The one that matters is what each *additional* container adds, and that is measured directly above.
+
+## Takeaways
+
+- **The container's cost is up-front, not per-agent.** 48.1 s once, then ~390 ms and 4.1 kB per agent. At six agents the setup amortises to 8 s each; the previous post's "three orders of magnitude" was wrong, and the measured figure is 364×.
+- **Layer cache invalidation is the real cost driver.** A source edit rebuilds in 1,124 ms; a lockfile change rebuilds in 48,172 ms. Put `COPY package*.json` and `RUN npm ci` above `COPY . .` or the ratio inverts.
+- **An image layer is the shared `node_modules` done correctly.** One copy on disk, read-only, with each container's writes in its own overlay — the same disk saving as a symlink, with the opposite guarantee.
+- **Isolation is not what costs you runtime.** The isolated container built this site in 4,712 ms against the host's 5,309 ms.
+- **The bind mount costs all three wins at once.** 2.45× slower builds, 465 MB per agent instead of 4.1 kB, and one shared directory that every agent can write — which is the exact problem containers were brought in to solve.
+- **Price the floor, not the marketing.** Every number above came from `docker build`, `docker ps` and `du` on one ordinary repository, and took about ten minutes to collect. Do it on yours before choosing a layer.
+
+## References
+[^1]: Docker documentation, [Cache invalidation](https://docs.docker.com/build/cache/invalidation/) and [Optimize cache usage](https://docs.docker.com/build/cache/optimize/) — why instruction order determines which edits invalidate the dependency layer.
+[^2]: Docker documentation, [containerd image store](https://docs.docker.com/engine/storage/containerd/) — the image store in use on the host these measurements were taken on.
+[^3]: Docker documentation, [Bind mounts](https://docs.docker.com/engine/storage/bind-mounts/) and [Volumes](https://docs.docker.com/engine/storage/volumes/) — the two mount types used above, and the rule that mounting a volume over a populated image path seeds it from that path.
+[^4]: [`node:24-bookworm-slim`](https://hub.docker.com/_/node) — the base image every measurement here is built on.
+[^5]: Orca documentation, [Worktrees](https://www.onorca.dev/docs/model/worktrees) — the `worktree.sharedDirectories` mechanism the image layer is being compared against, covered in detail in the previous post.
+[^6]: Measurements were taken on 2026-09-17 against this blog's own repository: Docker 28.0.4, Docker Desktop on Windows 11, overlayfs with the containerd snapshotter, 8 CPUs and 16.5 GB available to the engine. Times are wall clock around the CLI invocation, so they include client overhead; disk figures are `docker ps --size`, `docker history`, and `du` inside the container. The base image pull is excluded throughout — it failed twice against the registry CDN before succeeding, so any figure for it would describe the network rather than the tool.

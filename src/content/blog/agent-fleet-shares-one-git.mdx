@@ -2,6 +2,7 @@
 title: 'Your Agent Fleet Shares One .git'
 description: "An ADE gives every agent its own git worktree. Here that isolates 44 files and leaves 23,199 shared — and the usual fix is a symlink, which is the opposite of isolation."
 pubDate: 2026-09-17
+updatedDate: 2026-09-17
 tags: ['ai', 'llm', 'devops', 'architecture', 'deep-dive']
 draft: false
 ---
@@ -235,7 +236,7 @@ This is not a flaw in Orca specifically. It is the only available trade for a ca
 The useful question is not whether worktrees are good. It is which layer your tasks need, given what they do.
 
 <Figure
-  caption="Each level isolates strictly more and costs strictly more. The measured floor is 132 ms for a worktree on this repository; a container image build for the same project is three orders of magnitude slower."
+  caption="Each level isolates strictly more and costs strictly more. The measured floor is 132 ms for a worktree on this repository; a container image build for the same project is <b>364× slower</b> — 48.1 s, measured in the follow-up post. An earlier version of this caption said three orders of magnitude, which was an estimate and was wrong."
   label="Table comparing worktree, worktree with copied gitignored paths, container and virtual machine by what each isolates and what each leaves shared"
 >
   <svg viewBox="0 0 700 250" width="100%" role="img" aria-labelledby="ladder-title">
