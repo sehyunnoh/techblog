@@ -1,0 +1,216 @@
+---
+title: "Your Agent's Identity Costs 104 Tokens"
+description: "Two subagents with identical toolboxes and different system prompts boot 104 tokens apart. Add four tools and the gap is 17,252. The boot bill is the toolbox, and two tools are most of it."
+pubDate: 2026-09-20
+tags: ['ai', 'llm', 'architecture', 'cost-engineering', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+`Plan` and `Explore` are different agents. Different names, different system prompts, different jobs — one designs implementations, the other searches code. They are permitted exactly the same tools.
+
+Booted on the same task, they cost **14,336** and **14,232** tokens. A difference of **104**.
+
+[The previous post](/posts/subagent-costs-34000-tokens) measured that a subagent costs about 34,000 tokens before it reads a file, and left that number whole. This one takes it apart. The short version: almost none of it is the agent, and most of what is left is two tools.
+
+## First, a correction
+
+That post decomposed a set of one-tool-call runs into "34,040 fixed plus 132 per file" and called 34,040 *a fixed charge for existing*. Extrapolating to zero **files** is not the same as measuring zero **work**, and the difference is now measurable. A `general-purpose` subagent asked only to reply `OK`, using no tool at all, costs **31,484 tokens**.
+
+So the real split is 31,484 to boot and **2,688** for the first tool-calling turn. The earlier figure was boot plus one turn wearing a label that said boot. Every number below is a zero-tool-call measurement.[^6]
+
+## How you decompose a number you can only read as one integer
+
+The harness reports `subagent_tokens` as a single aggregate — no split into input, output, cache read or cache creation. You cannot inspect it. You can only vary one thing and subtract.
+
+The built-in agent types turn out to be a ready-made factorial design, because two pairs of them differ in exactly one variable:
+
+<Mermaid
+  caption="The two controls that make the decomposition possible. Within each pair the tool set is identical and only the system prompt differs; across pairs the tool set changes. Subtracting within a pair isolates the prompt; subtracting across pairs isolates the tools."
+  label="Diagram showing Explore and Plan sharing seven resident tools, general-purpose and claude sharing eleven, with the within-pair difference isolating system prompt and the across-pair difference isolating tool schemas"
+  code={`
+flowchart TB
+  subgraph P1["7 resident tools — identical"]
+    E["Explore"]
+    PL["Plan"]
+  end
+  subgraph P2["11 resident tools — identical"]
+    G["general-purpose"]
+    C["claude"]
+  end
+  P1 -->|"subtract across:<br/>isolates 4 tool schemas"| P2
+  E -.->|"subtract within:<br/>isolates system prompt"| PL
+  G -.->|"subtract within:<br/>isolates system prompt"| C
+`}
+/>
+
+Every run below is the same prompt — *reply with exactly the two characters: OK, do not use any tool* — on Haiku 4.5, in background mode, against this repository.[^6] `CLAUDE.md` drops out of the accounting entirely on this machine, because the user-level file is **0 bytes** and the project has none.
+
+<Chart
+  type="bar"
+  horizontal
+  valueLabels
+  height={300}
+  format="compact"
+  caption="Boot cost by agent type, measured with zero tool calls. The pairs that share a tool set land on top of each other; the step between pairs is four tool schemas."
+  label="Horizontal bar chart of boot tokens: statusline-setup 6,467 with 2 tools; claude-code-guide 12,570 with 5; Explore 14,232 and Plan 14,336 with 7; general-purpose 31,484 and claude 31,614 with 11"
+  labels={['statusline-setup · 2 tools', 'claude-code-guide · 5 tools', 'Explore · 7 tools', 'Plan · 7 tools', 'general-purpose · 11 tools', 'claude · 11 tools']}
+  series={[{ name: 'Boot tokens, zero tool calls', data: [6467, 12570, 14232, 14336, 31484, 31614] }]}
+  xTitle="Tokens"
+/>
+
+Run twice, the same type lands in the same place: `Explore` measured 14,232 and 14,230, `general-purpose` 31,484 and 31,499. Spreads of **2 and 15 tokens** — 0.01% and 0.05%. This meter is effectively deterministic, which is what makes subtraction legitimate.
+
+## The agent is not the cost
+
+`Plan` and `Explore` differ by **104 tokens**, 0.73%. `claude` and `general-purpose` differ by **130**, 0.41%.
+
+Those are the entire measurable cost of being a different agent — a different name, a different description, a different system prompt telling the model what it is for. Whatever else the choice of agent type does for output quality, it is not what you are paying for at boot.
+
+Move across the pairs instead and the picture inverts. `general-purpose` boots **17,252 tokens** heavier than `Explore`.
+
+`Explore` is documented as "all tools except" a list of nine. But five of those nine — `ArtifactComments`, `ArtifactData`, `ArtifactCheck`, `ExitPlanMode`, `NotebookEdit` — are not resident in `general-purpose` either, so excluding them costs nothing. I asked each type to enumerate what it could actually call without loading anything first:
+
+| Agent type | Resident tools | Deferred | Boot |
+|---|---|---|---|
+| `statusline-setup` | `Read`, `Edit` | 1 | 6,467 |
+| `claude-code-guide` | `Glob`, `Grep`, `Read`, `WebFetch`, `WebSearch` | 30 | 12,570 |
+| `Explore` | `Bash`, `Glob`, `Grep`, `PowerShell`, `Read`, `Skill`, `ToolSearch` | 117 | 14,232 |
+| `general-purpose` | those seven plus `Agent`, `Artifact`, `Edit`, `Write` | 117 | 31,484 |
+
+So the 17,252 is not nine tools. It is **four**: `Agent`, `Artifact`, `Edit`, `Write`. An average of **4,313 tokens each**, which is three times what a tool costs at the other end of the table.
+
+## Tools are not priced alike
+
+Two points fix a line. `statusline-setup` carries 2 resident tools for 6,467 tokens; `Explore` carries 7 for 14,232. That is **1,553 tokens per tool** with an intercept of **3,361** — the part that is neither tools nor agent identity: the harness scaffolding, the environment block, the git status, the names of the deferred tools.
+
+Extend that line to 11 tools and it predicts 20,444. `general-purpose` actually costs 31,484.
+
+<Figure
+  caption="The linear fit through the two-tool and seven-tool measurements. The five-tool type was not used to build the line and lands close to it; the eleven-tool type does not. That gap is what two unusually large schemas contribute on their own."
+  label="Diagram showing a linear prediction of 20,444 tokens for eleven tools against a measured 31,484, an excess of 11,040 tokens attributed to the Agent and Artifact schemas"
+>
+  <svg viewBox="0 0 700 254" width="100%" role="img" aria-labelledby="fit-title">
+    <title id="fit-title">Measured boot exceeds the linear tool-count prediction by 11,040 tokens</title>
+
+    <text x="0" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">FIT FROM THE TWO SMALL TYPES — 1,553 TOKENS / TOOL, INTERCEPT 3,361</text>
+
+    {[
+      { y: 24, w: 88, v: '6,467', n: '2 tools · measured', c: 'var(--series-6)' },
+      { y: 60, w: 172, v: '12,570', n: '5 tools · measured, not fitted', c: 'var(--series-1)' },
+      { y: 96, w: 194, v: '14,232', n: '7 tools · measured', c: 'var(--series-6)' },
+      { y: 132, w: 279, v: '20,444', n: '11 tools · predicted', c: 'var(--series-3)' },
+      { y: 168, w: 430, v: '31,484', n: '11 tools · measured', c: 'var(--series-2)' },
+    ].map((r) => (
+      <g>
+        <rect x="0" y={r.y} width={r.w} height="26" rx="3" fill={r.c} opacity="0.85" />
+        <text x={r.w + 10} y={r.y + 18} fill="var(--fg)" font-size="12" font-family="var(--font-mono)" font-weight="600">{r.v}</text>
+        <text x="520" y={r.y + 18} fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-sans)">{r.n}</text>
+      </g>
+    ))}
+
+    <line x1="279" y1="158" x2="279" y2="200" stroke="var(--fg-muted)" stroke-width="1" stroke-dasharray="3 3" opacity="0.6" />
+    <line x1="430" y1="194" x2="430" y2="200" stroke="var(--fg-muted)" stroke-width="1" stroke-dasharray="3 3" opacity="0.6" />
+    <line x1="279" y1="206" x2="430" y2="206" stroke="var(--series-2)" stroke-width="1.5" />
+
+    <text x="354" y="228" text-anchor="middle" fill="var(--fg)" font-size="12" font-family="var(--font-sans)">excess — <tspan font-family="var(--font-mono)" font-weight="600">11,040 tokens</tspan></text>
+    <text x="354" y="246" text-anchor="middle" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">carried by two schemas, not four</text>
+  </svg>
+</Figure>
+
+An excess of **11,040 tokens** over four tools that the line says should have cost 6,212. `Edit` and `Write` are ordinary file-editing tools and there is no reason to think they are outliers. `Agent` and `Artifact` are the two with long, prose-heavy descriptions — the ones that document a whole subsystem rather than a function signature.
+
+I can bound them as a pair and not separate them, because no built-in agent type on this machine carries one without the other. That limit is real and I am not going to paper over it. What the measurement does establish is that **tool schemas are not fungible**, and that a per-tool average is the wrong unit for budgeting a fleet.
+
+## What the harness already does about this
+
+The same enumeration returns a second number: `general-purpose` and `Explore` each reported **117 deferred tools** — 8 built-in and **109 MCP tools**, from seven servers connected to this session. Deferred means the agent knows the name and must call `ToolSearch` to fetch the schema before it can call the tool.
+
+<Figure
+  caption="Resident against deferred for a general-purpose subagent on this machine. The deferred set is ten times larger than the resident one, and costs its names rather than its schemas."
+  label="Comparison showing 11 resident tools costing 31,484 tokens against 117 deferred tools, of which 109 are MCP, which would cost roughly 169,000 tokens at the measured average if they were resident"
+>
+  <svg viewBox="0 0 700 190" width="100%" role="img" aria-labelledby="def-title">
+    <title id="def-title">Deferred tools outnumber resident tools ten to one</title>
+
+    <text x="0" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">A general-purpose SUBAGENT, THIS MACHINE</text>
+
+    <rect x="0" y="24" width="60" height="30" rx="4" fill="var(--series-2)" opacity="0.9" />
+    <text x="72" y="44" fill="var(--fg)" font-size="12.5" font-family="var(--font-sans)"><tspan font-family="var(--font-mono)" font-weight="600">11</tspan> resident — schemas in context, <tspan font-family="var(--font-mono)" font-weight="600">31,484</tspan> tokens</text>
+
+    <rect x="0" y="66" width="638" height="30" rx="4" fill="var(--series-1)" opacity="0.35" stroke="var(--series-1)" stroke-width="1.3" />
+    <text x="12" y="86" fill="var(--fg)" font-size="12.5" font-family="var(--font-sans)"><tspan font-family="var(--font-mono)" font-weight="600">117</tspan> deferred — names only (8 built-in + <tspan font-family="var(--font-mono)" font-weight="600">109</tspan> MCP, 7 servers)</text>
+
+    <line x1="0" y1="116" x2="700" y2="116" stroke="var(--fg-muted)" stroke-width="1" opacity="0.3" />
+
+    <text x="0" y="140" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">IF THE 109 MCP SCHEMAS WERE RESIDENT, AT THE MEASURED 1,553 / TOOL</text>
+    <rect x="0" y="150" width="280" height="30" rx="4" fill="var(--series-5)" opacity="0.85" />
+    <text x="292" y="170" fill="var(--fg)" font-size="12.5" font-family="var(--font-mono)" font-weight="600">≈ 169,000 tokens</text>
+    <text x="417" y="170" fill="var(--fg-muted)" font-size="12" font-family="var(--font-sans)">— 5.4× the entire boot, per agent</text>
+  </svg>
+</Figure>
+
+At the measured 1,553 tokens per tool, 109 resident MCP schemas would be roughly **169,000 tokens** — more than five times the whole boot, per agent, on every fan-out. That is the bullet the deferral mechanism is dodging, and it is why connecting a seventh MCP server did not quietly quintuple the cost of every subagent.
+
+It also reframes the previous post's headline. A `general-purpose` subagent is not expensive because the harness is careless with context. It is expensive despite the harness having already moved 91% of its tools out of the boot.
+
+## Narrowing the toolbox can make it heavier
+
+`claude-code-guide` is the type with the shortest allowlist that still does real work: `Glob`, `Grep`, `Read`, `WebFetch`, `WebSearch`. Five tools, and it boots at 12,570 — between the two-tool and seven-tool anchors, roughly where the line says it should be.
+
+Roughly, but 1,444 tokens over. And the enumeration says why. Two of its five resident tools are `WebFetch` and `WebSearch` — which are **deferred** in both `Explore` and `general-purpose`. Naming a tool in an allowlist does not merely permit it; it promotes it out of the deferred roster and into the boot.
+
+The deferred count moves too, and hard: 117 for `Explore` and `general-purpose`, **30** for `claude-code-guide`. A narrow allowlist shrinks both lists — but it pulls whatever it names to the expensive side of the line.
+
+So "restrict the tools to save context" is not reliably true. It was true for `Explore`, which drops four resident schemas and keeps the same 117 deferred. It would be false for an allowlist of three tools that happened to name three deferred ones, which would *add* to the boot while looking like a restriction. The rule that actually holds is narrower: **you save only by removing tools that were resident to begin with**, and the only way to know which those are is to ask the agent.
+
+## Turns are cheap once you have paid to exist
+
+One more curve, on `Explore`, varying only how many tool calls the task forces:
+
+<Chart
+  type="bar"
+  valueLabels
+  height={280}
+  format="compact"
+  caption="The same agent type asked to make zero, one and three tool calls. The first call costs 1,821; the two after it cost about 201 each."
+  label="Bar chart showing 14,232 tokens for zero tool calls, 16,053 for one and 16,455 for three"
+  labels={['0 tool calls', '1 tool call', '3 tool calls']}
+  series={[{ name: 'Total subagent tokens', data: [14232, 16053, 16455] }]}
+  yTitle="Tokens"
+/>
+
+Zero calls, 14,232. One call, 16,053. Three calls, 16,455. The first tool-using turn costs **1,821**; each additional call costs about **201**.
+
+At three tool calls the boot is still **86%** of the bill. This is the same asymmetry the previous post found across files, measured across turns instead, and it says the same thing: a subagent you have already paid for is cheap to keep working, and a subagent you spawn to do one small thing is nearly all overhead.
+
+## What this does not settle
+
+**`Agent` and `Artifact` are bounded as a pair.** No built-in type here carries one without the other, so 11,040 is their joint excess and I cannot split it. Defining a custom agent with `tools: Bash, Artifact` would separate them in one run.
+
+**Which brings up the thing that cost me an hour.** I wrote exactly those custom agent definitions into `.claude/agents/` and every spawn failed with `Agent type 'probe-floor' not found`. The registry is read at session start; files added mid-session are invisible until you restart. The documented `tools` and `disallowedTools` fields are the right lever for this — they are simply not a lever you can pull in the session you are measuring. Relatedly, an agent whose allowlist resolves to nothing refuses to launch, so there is no zero-tool floor to measure; 2 tools and 6,467 tokens is as close as this machine gets.
+
+**One model, one machine, background mode.** Everything here is Haiku 4.5 in background subagents, and the documentation says background agents receive a smaller built-in tool set than foreground ones. The intercept of 3,361 includes a git status block and an environment block that will differ on your repository.
+
+**The aggregate is still opaque.** `subagent_tokens` does not split into input, output and cache classes, so none of this converts to money. Every figure here is a token count and a ratio, deliberately.
+
+## Takeaways
+
+- **Agent identity is ~0.5% of boot.** Same tools, different system prompt: `Plan` − `Explore` = 104 tokens; `claude` − `general-purpose` = 130. Pick agent types for behaviour, never to save context.
+- **The toolbox is the bill.** `general-purpose` boots 17,252 tokens heavier than `Explore`, and that gap is four resident tools, not the nine the exclusion list names. Check what an agent type actually loads before assuming a restriction saves anything.
+- **Tools are not priced alike.** A linear fit says 1,553 tokens per tool; `Agent` and `Artifact` carry 11,040 tokens of excess between them. Budget by schema weight, not tool count.
+- **An allowlist promotes as well as restricts.** `claude-code-guide` names `WebFetch` and `WebSearch`, which are deferred everywhere else, and pays for them at boot. You save context only by dropping tools that were resident already.
+- **Deferral is doing the heavy lifting.** 11 tools resident, 117 deferred, 109 of them MCP. Resident, those would add roughly 169,000 tokens per agent — 5.4× the entire boot.
+- **Boot dominates until the work does.** Zero, one and three tool calls cost 14,232 / 16,053 / 16,455. Even at three calls, 86% of the bill was paid before the first one.
+- **Part one's 34,040 was boot plus one turn.** Measured at zero tool calls, the boot is 31,484 and the first tool-using turn is 2,688.
+
+## References
+[^1]: Anthropic, [Subagents](https://code.claude.com/docs/en/sub-agents) — "Each subagent runs in its own context window with a custom system prompt, specific tool access, and independent permissions"; the frontmatter schema including `tools`, `disallowedTools`, `mcpServers` and `omitClaudeMd`; the enumeration of what loads into a fresh subagent context; the note that background subagents receive a smaller built-in tool set; and the rule that an agent resolving to zero tools fails to launch.
+[^2]: Anthropic, [Agent Skills](https://code.claude.com/docs/en/skills) — the progressive-disclosure model that the deferred-tool mechanism mirrors: names and descriptions resident, full content fetched on demand.
+[^3]: Anthropic Engineering, [How we built our multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system) — the 4× and 15× token multipliers that the previous post reduced to a per-agent boot charge.
+[^4]: Anthropic, [When to use multi-agent systems (and when not to)](https://claude.com/blog/building-multi-agent-systems-when-and-how-to-use-them) — the 3–10× band for multi-agent against single-agent on equivalent tasks, and the tool-overload failure mode that the resident/deferred split addresses.
+[^5]: Anthropic, [Model Context Protocol](https://modelcontextprotocol.io/) — the protocol behind the 109 deferred MCP tools counted above, served by seven servers connected to this session.
+[^6]: Measurements were taken on 2026-09-19 against this blog's own repository, on Claude Code 2.1.261 with Node v24.14.1 on Windows 11. Every run used Haiku 4.5 in a background subagent. Boot figures are the harness's `subagent_tokens` aggregate for the prompt *"Reply with exactly the two characters: OK. Do not use any tool at all. Do not explain."*, which completes in one turn with `tool_uses: 0`. Resident and deferred tool counts come from asking each agent type to enumerate its own callable tools, in a run that consumed additional output tokens and is therefore not used as a boot figure. The user-level `CLAUDE.md` on this machine is 0 bytes and the project has none, so CLAUDE.md contributes nothing to any number above.

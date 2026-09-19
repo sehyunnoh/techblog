@@ -2,6 +2,7 @@
 title: 'Your Subagent Costs 34,000 Tokens Before It Reads a File'
 description: "A subagent that runs one wc -w burns 34,172 tokens. Split the work across five and the bill is 4.85x for a 1.79x speedup - the multiplier is a boot sequence, paid again every time you fan out."
 pubDate: 2026-09-19
+updatedDate: 2026-09-20
 tags: ['ai', 'llm', 'architecture', 'cost-engineering', 'deep-dive']
 draft: false
 ---
@@ -104,6 +105,8 @@ Three data points fix the curve. One file cost 34,172 tokens. Two files cost 34,
 
 Nine extra files added 1,192 tokens. **132 tokens per file.** Extrapolate back to zero files and the agent still costs **34,040 tokens** — a fixed charge for existing, 258 times the cost of the work it was sent to do.
 
+> **Correction, 2026-09-20.** Zero *files* is not zero *work*: every run in this section still made one tool call. Measured directly at zero tool calls, the boot is **31,484 tokens** and the first tool-calling turn is **2,688**. The 34,040 above is boot plus one turn. [The follow-up post](/posts/agent-identity-costs-104-tokens) decomposes the 31,484 and finds that almost none of it is the agent.
+
 This is the whole multiplier, and it makes the published bands predictable rather than mysterious. Fan-out does not divide the work; it divides the *marginal* cost and multiplies the *fixed* one. So the token multiplier for splitting a job across N agents is bounded above by N, and it approaches N exactly as the per-shard work shrinks toward nothing. My shards did almost nothing, so I measured 4.85 out of a possible 5.00.
 
 Anthropic's 3–10× is the same law with real work in it. Their subagents actually search, so their marginal costs are large enough to pull the ratio below N. The number to carry is not "multi-agent costs 3–10×" but "**each agent you spawn costs a boot sequence, and the boot sequence does not shrink when you give the agent less to do**."
@@ -199,7 +202,7 @@ Three things this measurement does not tell you.
 
 ## Takeaways
 
-- **A subagent costs ~34,000 tokens before it does anything.** Measured floor on this harness: 34,172 tokens for a single `wc -w`, decomposing to 34,040 fixed plus 132 per file — a fixed-to-marginal ratio of 258:1.
+- **A subagent costs ~34,000 tokens before it does anything.** Measured floor on this harness: 34,172 tokens for a single `wc -w`, decomposing to 34,040 plus 132 per file — a fixed-to-marginal ratio of 258:1. Measured again at *zero* tool calls, the boot alone is 31,484 and the first turn is 2,688; see the correction above.
 - **Fan-out multiplies the fixed cost, not the work.** Five agents on one tenth of the job each cost 4.85× a single agent and returned the answer 1.79× sooner. The multiplier is bounded by N and approaches N as per-shard work shrinks — which is why Anthropic's 3–10× band is a range rather than a constant.
 - **Agent type is the free 53%.** The same task run as `Explore` instead of `general-purpose` cost 16,080 instead of 34,172. You are paying resident context for every tool the shard is permitted to call, on every turn, in every agent.
 - **Writes stay single-threaded.** The Anthropic/Cognition disagreement dissolves along the read–write axis, and both parties now say so. Parallel readers converge; parallel writers make conflicting implicit decisions and hand a coordinator the job of reconciling them.
