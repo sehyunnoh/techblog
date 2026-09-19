@@ -1,0 +1,216 @@
+---
+title: 'Your Subagent Costs 34,000 Tokens Before It Reads a File'
+description: "A subagent that runs one wc -w burns 34,172 tokens. Split the work across five and the bill is 4.85x for a 1.79x speedup - the multiplier is a boot sequence, paid again every time you fan out."
+pubDate: 2026-09-19
+tags: ['ai', 'llm', 'architecture', 'cost-engineering', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+I asked a subagent to run one command. `wc -w` on a single file. It reported back seventy-four characters — a number and a path — and the harness billed the run at **34,172 tokens**.[^7]
+
+Nothing went wrong. That is the floor.
+
+The two previous posts in this series measured what it costs to give a fleet of coding agents their own workspace: [132 ms for a `git worktree`](/posts/agent-fleet-shares-one-git), [48 seconds once and 4.1 kB per agent for a container](/posts/six-agents-twenty-four-kilobytes). Both answered *how do you isolate them*. Neither answered the question that actually decides whether to run a fleet at all: what does the isolation cost in the only currency an agent spends, and what do you get back for it.
+
+## Two published positions, and the rule that reconciles them
+
+The public record on multi-agent systems looks like a contradiction.
+
+Anthropic reports that a multi-agent research system — Claude Opus 4 as lead, Claude Sonnet 4 as subagents — **outperformed single-agent Opus 4 by 90.2%** on their internal research eval.[^1] Cognition published a post titled, flatly, **"Don't Build Multi-Agents"**, whose worked example is a Flappy Bird clone that came back with a Super Mario background attached to a bird drawn in a different style.[^3]
+
+Both are primary sources. Both are right, and the thing that separates them is not quality of engineering.
+
+Research *reads*. Coding *writes*. Anthropic's own post says so directly — "most coding tasks involve fewer truly parallelizable tasks than research" — and Cognition has since published a follow-up conceding a narrower class of multi-agent patterns that do work.[^4] The rule they land on is one sentence:
+
+> Multiple agents contribute intelligence to a task while **writes stay single-threaded**.
+
+Every pattern Cognition now endorses obeys it. A review agent that reads a PR and reports — and works best when it has *no* access to the coder's context, catching around two bugs per PR. A stronger model consulted for an opinion. A manager that decomposes and coordinates through a structured protocol rather than a free-form agent mesh.
+
+So the architectural question has a published answer. The cost question does not, beyond two multipliers: agents use about **4× the tokens of a chat**, multi-agent systems about **15×**,[^1] and Anthropic's own guidance puts multi-agent at **3–10× a single agent for equivalent tasks**.[^2] Those are wide bands with no mechanism attached. I wanted the mechanism.
+
+## The experiment
+
+One task, decomposable, read-only, deterministic: report the word count of each of the ten posts on this blog.
+
+- **Arm A** — one subagent, all ten files.
+- **Arm B** — five subagents, two files each.
+
+Same model (Haiku 4.5), same agent type, same prompt template, same harness.[^7] Both arms returned byte-identical numbers, so correctness is not in play — only cost.
+
+<Chart
+  type="bar"
+  stacked
+  height={340}
+  format="compact"
+  caption="Tokens consumed to produce the same ten word counts. Arm B's five shards are stacked: each did one fifth of the work and cost what the whole job cost in Arm A. The five slabs sit within 107 tokens of one another."
+  label="Stacked bar chart comparing 35,364 tokens for one agent against 171,542 tokens for five agents doing the same work, the five contributions being 34,325, 34,342, 34,236, 34,343 and 34,296"
+  labels={['Arm A · 1 agent, 10 files', 'Arm B · 5 agents, 2 files each']}
+  series={[
+    { name: 'agent 1', data: [35364, 34325] },
+    { name: 'agent 2', data: [null, 34342] },
+    { name: 'agent 3', data: [null, 34236] },
+    { name: 'agent 4', data: [null, 34343] },
+    { name: 'agent 5', data: [null, 34296] },
+  ]}
+  yTitle="Tokens"
+/>
+
+Arm A: **35,364 tokens**, 11,957 ms. Arm B: **171,542 tokens**, and because the five ran concurrently, 6,666 ms wall clock.
+
+That is **4.85× the tokens for a 1.79× speedup**.
+
+The shape of that chart is the finding. Five agents doing one fifth of the work each did not cost one fifth as much. They each cost essentially what the whole job cost.
+
+## The multiplier is a boot sequence
+
+Three data points fix the curve. One file cost 34,172 tokens. Two files cost 34,308 on average across five independent runs. Ten files cost 35,364.
+
+<Figure
+  caption="Decomposing the subagent bill. The marginal cost of another file is 132 tokens; the fixed cost of the agent existing at all is 34,040. Fan-out replicates the left-hand bar, not the right-hand one."
+  label="Diagram showing a fixed cost of 34,040 tokens per subagent against a marginal cost of 132 tokens per file, a ratio of 258 to 1"
+>
+  <svg viewBox="0 0 700 214" width="100%" role="img" aria-labelledby="fixed-title">
+    <title id="fixed-title">Per-agent fixed cost dwarfs per-file marginal cost</title>
+
+    <text x="0" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">WHAT ONE SUBAGENT IS BILLED, BY FILES ASSIGNED</text>
+
+    {[
+      { y: 22, n: '1 file', v: '34,172', w: 604 },
+      { y: 56, n: '2 files', v: '34,308', w: 606 },
+      { y: 90, n: '10 files', v: '35,364', w: 625 },
+    ].map((r) => (
+      <g>
+        <text x="0" y={r.y + 19} fill="var(--fg)" font-size="12" font-family="var(--font-sans)">{r.n}</text>
+        <rect x="62" y={r.y} width={r.w} height="26" rx="3" fill="var(--series-1)" opacity="0.85" />
+        <text x={62 + r.w - 10} y={r.y + 18} text-anchor="end" fill="var(--bg-surface)" font-size="12" font-family="var(--font-mono)" font-weight="600">{r.v}</text>
+      </g>
+    ))}
+
+    <line x1="62" y1="126" x2="700" y2="126" stroke="var(--fg-muted)" stroke-width="1" opacity="0.3" />
+
+    <text x="0" y="150" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">DECOMPOSED</text>
+    <text x="700" y="150" text-anchor="end" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">marginal, 132 / file ↓</text>
+
+    <rect x="62" y="160" width="596" height="34" rx="4" fill="var(--series-2)" opacity="0.85" />
+    <rect x="666" y="160" width="6" height="34" rx="2" fill="var(--series-3)" />
+    <text x="74" y="182" fill="var(--bg-surface)" font-size="12.5" font-family="var(--font-sans)" font-weight="600">fixed — 34,040 tokens to exist</text>
+    <text x="62" y="210" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">ratio of fixed to marginal — <tspan font-family="var(--font-mono)" font-weight="600" fill="var(--fg)">258 : 1</tspan></text>
+  </svg>
+</Figure>
+
+Nine extra files added 1,192 tokens. **132 tokens per file.** Extrapolate back to zero files and the agent still costs **34,040 tokens** — a fixed charge for existing, 258 times the cost of the work it was sent to do.
+
+This is the whole multiplier, and it makes the published bands predictable rather than mysterious. Fan-out does not divide the work; it divides the *marginal* cost and multiplies the *fixed* one. So the token multiplier for splitting a job across N agents is bounded above by N, and it approaches N exactly as the per-shard work shrinks toward nothing. My shards did almost nothing, so I measured 4.85 out of a possible 5.00.
+
+Anthropic's 3–10× is the same law with real work in it. Their subagents actually search, so their marginal costs are large enough to pull the ratio below N. The number to carry is not "multi-agent costs 3–10×" but "**each agent you spawn costs a boot sequence, and the boot sequence does not shrink when you give the agent less to do**."
+
+## Half the boot is tools the task never touched
+
+If 34,040 tokens buy nothing but existence, what is in them? The documentation is specific: a subagent starts with a system prompt, the task message, `CLAUDE.md` files, git status, preloaded skills, a roster of its siblings — and its tool schemas.[^6]
+
+Only the last of those changes with the agent type, so that is the one to vary. I ran the identical one-file task again, changing exactly one thing: `general-purpose`, which carries every tool in the harness, became `Explore`, the read-only search agent — the same tools minus nine it is not permitted to use, most of them writers.[^7]
+
+<Figure
+  caption="The same command, the same model, the same prompt — billed at less than half. The 18,092 token difference is the schema weight of nine tools neither run invoked."
+  label="Comparison showing general-purpose agent at 34,172 tokens versus Explore agent at 16,080 tokens for an identical task, a difference of 18,092 tokens or 53 percent"
+>
+  <svg viewBox="0 0 700 168" width="100%" role="img" aria-labelledby="type-title">
+    <title id="type-title">Agent type changes the fixed cost by 53 percent</title>
+
+    <text x="0" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">IDENTICAL TASK · ONE wc -w · HAIKU 4.5</text>
+
+    <text x="0" y="40" fill="var(--fg)" font-size="12" font-family="var(--font-mono)" font-weight="600">general-purpose</text>
+    <rect x="0" y="48" width="700" height="30" rx="4" fill="var(--series-2)" opacity="0.85" />
+    <text x="690" y="68" text-anchor="end" fill="var(--bg-surface)" font-size="12.5" font-family="var(--font-mono)" font-weight="600">34,172 tokens</text>
+
+    <text x="0" y="104" fill="var(--fg)" font-size="12" font-family="var(--font-mono)" font-weight="600">Explore</text>
+    <rect x="0" y="112" width="329" height="30" rx="4" fill="var(--series-6)" opacity="0.85" />
+    <text x="319" y="132" text-anchor="end" fill="var(--bg-surface)" font-size="12.5" font-family="var(--font-mono)" font-weight="600">16,080</text>
+    <text x="341" y="132" fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-sans)">— 18,092 fewer, for nine tools the task never called</text>
+
+    <text x="0" y="162" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">53% of the bill was the toolbox, not the job</text>
+  </svg>
+</Figure>
+
+**16,080 tokens.** Less than half, for a task that called one tool.
+
+Tool definitions are resident context — they are sent with the request whether or not the model uses them, which is [the same mechanism that makes a long conversation expensive](/posts/agent-resends-the-whole-conversation). A subagent is a fresh context window, so it pays for the entire toolbox on turn one, and it pays again on every turn after that. Fan out to five and you have bought five copies of nine tools nobody called.
+
+This is the one lever in the whole system that costs nothing to pull. Picking the narrower agent type for a read-only shard cut the run by 53% and changed neither the answer nor the wall clock in any way I could measure.
+
+## What actually crosses the boundary
+
+The other half of the trade is what you get back. Here the measurement is blunt.
+
+<Mermaid
+  caption="What moves between an orchestrator and a subagent in Claude Code 2.1.261. The prompt crosses going in. A result string and one aggregate token count cross coming out. Everything the subagent read, tried, and discarded stays on the far side of the line and is not retained anywhere."
+  label="Flowchart showing an orchestrator sending a prompt to a subagent, the subagent's tool calls and reasoning enclosed in an isolated context, and only a result string and token count returning"
+  code={`
+flowchart TB
+  O["Orchestrator context window"]
+  O -->|"the prompt — crosses"| T1
+  subgraph S["Subagent · its own context window"]
+    T1["boot<br/>system prompt, CLAUDE.md, skills,<br/>sibling roster, tool schemas<br/><b>34,040 tokens</b>"]
+    T2["the work<br/>tool calls, retries, discarded branches"]
+    T1 --> T2
+  end
+  T2 -->|"416 characters + one token count — crosses"| O
+  T2 -.->|"everything else — never crosses<br/>transcript file: 0 bytes"| X["discarded"]
+`}
+/>
+
+Arm A's ten word counts arrived as **416 characters** — roughly 104 tokens. The run that produced them cost 35,364. Arm B delivered the same 416 characters for 171,542.
+
+And the intermediate work is not merely out of context; it is gone. The harness hands the orchestrator a path to what it calls the subagent's full JSONL transcript, along with a warning not to read it because doing so would overflow the orchestrator's context. After all eight subagents in this experiment finished, every one of those files was **0 bytes**. The parent session transcript contains **0 sidechain records**.[^7] The only durable trace of 171,542 tokens of work is one integer per agent.
+
+Cognition's first principle is "share context, and share **full agent traces**, not just individual messages."[^3] On this harness that is not a design choice you can make. The trace does not exist to be shared. Anthropic's name for the resulting failure — the "context telephone game", information lost at each handoff[^2] — is not a warning about sloppy prompting. It is a description of the wire.
+
+## When the boundary is worth 4.85×
+
+None of this makes fan-out wrong. It makes the conditions narrow and checkable.
+
+<Mermaid
+  caption="A decision path assembled from the published guidance and the costs measured above. The first question is the one that decides it; the others only set the price."
+  label="Decision flowchart: if the shards write, keep writes single-threaded; if the task fits one context window, stay single; otherwise fan out and choose the narrowest agent type"
+  code={`
+flowchart TD
+  A{"Do the shards<br/>write anything?"} -->|yes| B["Keep writes single-threaded.<br/>Agents may read, review, advise."]
+  A -->|no| C{"Does the reading fit<br/>one context window?"}
+  C -->|yes| D["Stay single.<br/>Fan-out buys speed, not capability."]
+  C -->|no| E{"Is the per-shard work<br/>bigger than 34,040 tokens?"}
+  E -->|no| F["Fan-out is mostly boot cost.<br/>Multiplier approaches N."]
+  E -->|yes| G["Fan out.<br/>Pick the narrowest agent type."]
+`}
+/>
+
+The first branch is the one the two camps actually disagreed about, and it is settled. Anthropic adds three conditions of its own for reaching for a second agent — a subtask that would dump 1,000+ tokens of noise into the main context, genuinely independent facets, or a domain needing its own toolset — plus a verification subagent pattern it says works consistently across domains.[^2] Note that a verifier is a reader, and that its value comes precisely from *not* inheriting the writer's context. The isolation that destroys a parallel-writer swarm is the same isolation that makes a reviewer useful.
+
+Three things this measurement does not tell you.
+
+**It does not price failure.** My task was deterministic and read-only, which is why both arms returned identical numbers. The empirical work on multi-agent failure is a different literature: MAST, built from 150 hand-annotated traces at κ = 0.88 and extended to 1,600+ traces across seven frameworks, sorts what goes wrong into **14 failure modes in three families** — system design, inter-agent misalignment, and task verification.[^5] Two of those three families do not exist in a single-agent run. Fan-out buys new ways to be wrong, and none of them show up on a token meter.
+
+**The aggregate hides its own composition.** `subagent_tokens` is a single integer. It does not split into input, output, cache reads and cache creation, so I cannot tell you how much of the 34,040 was served from a warm prompt cache and how much was billed at full rate. The token count is real; the dollar figure it implies is not one I can derive from it.
+
+**One run per arm, and the cheap kind of agent.** The five Arm B shards are the honest variance estimate available — 34,236 to 34,343, a spread of **107 tokens, or 0.3%**. That tightness is itself evidence for the fixed-cost model, but it is five samples of one trivial task on one machine on one day. Every agent here also ran in background mode, which the documentation says receives *a smaller built-in tool set* than a foreground subagent.[^6] 34,040 is therefore a floor under a floor.
+
+## Takeaways
+
+- **A subagent costs ~34,000 tokens before it does anything.** Measured floor on this harness: 34,172 tokens for a single `wc -w`, decomposing to 34,040 fixed plus 132 per file — a fixed-to-marginal ratio of 258:1.
+- **Fan-out multiplies the fixed cost, not the work.** Five agents on one tenth of the job each cost 4.85× a single agent and returned the answer 1.79× sooner. The multiplier is bounded by N and approaches N as per-shard work shrinks — which is why Anthropic's 3–10× band is a range rather than a constant.
+- **Agent type is the free 53%.** The same task run as `Explore` instead of `general-purpose` cost 16,080 instead of 34,172. You are paying resident context for every tool the shard is permitted to call, on every turn, in every agent.
+- **Writes stay single-threaded.** The Anthropic/Cognition disagreement dissolves along the read–write axis, and both parties now say so. Parallel readers converge; parallel writers make conflicting implicit decisions and hand a coordinator the job of reconciling them.
+- **The orchestrator gets a paragraph, not a trace.** 416 characters came back from 171,542 tokens of work; the subagent transcript files were 0 bytes and the parent transcript held 0 sidechain records. "Share full agent traces" is not implementable here — plan the decomposition so the summary is genuinely sufficient.
+- **Measure your own floor before you fan out.** Eight subagents and about fifteen minutes produced every number above. The ratio that matters is your per-shard work against your harness's boot cost, and only one of those two is in the docs.
+
+## References
+[^1]: Anthropic Engineering, [How we built our multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system) — the 90.2% result (Opus 4 lead with Sonnet 4 subagents against single-agent Opus 4 on an internal research eval), the 4× and 15× token multipliers, the finding that token usage alone explains 80% of variance on BrowseComp, and the statement that coding offers fewer truly parallelisable subtasks than research.
+[^2]: Anthropic, [When to use multi-agent systems (and when not to)](https://claude.com/blog/building-multi-agent-systems-when-and-how-to-use-them) — the 3–10× token band for equivalent tasks, the three conditions favouring multi-agent, the verification subagent pattern, and the named failure modes including the context telephone game.
+[^3]: Cognition, [Don't Build Multi-Agents](https://cognition.com/blog/dont-build-multi-agents) — Principle 1 ("Share context, and share full agent traces, not just individual messages"), Principle 2 ("Actions carry implicit decisions, and conflicting decisions carry bad results"), and the Flappy Bird example.
+[^4]: Cognition, [Multi-Agents: What's Actually Working](https://cognition.com/blog/multi-agents-working) — the revised position, the single-threaded-writes rule, and the review-agent pattern that works best without the coder's context.
+[^5]: Cemri, Pan, Yang et al., [Why Do Multi-Agent LLM Systems Fail?](https://arxiv.org/abs/2503.13657) (arXiv:2503.13657) — the MAST taxonomy: 14 failure modes in three categories, developed from 150 annotated traces at inter-annotator κ = 0.88 and extended to 1,600+ traces across seven frameworks.
+[^6]: Anthropic, [Subagents](https://code.claude.com/docs/en/sub-agents) — "Each subagent runs in its own context window with a custom system prompt, specific tool access, and independent permissions"; the enumeration of what loads into a fresh subagent context (system prompt, task message, `CLAUDE.md`, git status, preloaded skills, sibling roster); the `tools` and `disallowedTools` fields behind the agent types compared above; and the note that background subagents receive a smaller built-in tool set than foreground ones.
+[^7]: Measurements were taken on 2026-09-19 against this blog's own repository, on Claude Code 2.1.261 with Node v24.14.1 on Windows 11. Every subagent ran Haiku 4.5 in background mode with an identical prompt template differing only in the file list. Token figures are the harness's own `subagent_tokens` value reported on task completion, a single aggregate that is not broken down by input, output or cache class; durations are the harness's `duration_ms`. Arm B's wall clock is the slowest of the five concurrent shards (6,666 ms), not their sum. The 0-byte transcript files and the sidechain count were read from disk after all eight agents completed.
