@@ -1,0 +1,206 @@
+---
+title: "Two Agents Split a Receipt. It's Wrong by One Cent."
+description: "Two subagents build the two halves of a receipt module in total isolation. One half won't compile. The fixed version compiles, runs, looks correct — and is silently wrong by a cent."
+pubDate: 2026-09-21
+tags: ['ai', 'llm', 'typescript', 'architecture', 'cost-engineering', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+Two posts in this series measured what an [isolation boundary costs](/posts/subagent-costs-34000-tokens) and [what's inside that cost](/posts/agent-identity-costs-104-tokens). Neither one produced a single bug. That wasn't skill — both experiments were read-only and deterministic by design, so every arm returned the identical answer no matter how many agents touched it. MAST, the largest published taxonomy of multi-agent failure, names **14 distinct failure modes** across three categories.[^1] My first two experiments were structurally incapable of triggering any of them, because none of the 14 has anything to do with an agent counting words correctly.
+
+This one does. I gave two isolated subagents the two halves of one deliverable — the shape of Cognition's now-familiar Flappy Bird anecdote, a bird drawn in one style glued to a background drawn in another[^2] — and let them write real files with no channel between them. One half didn't compile. The fixed version compiled, ran, and produced a receipt that looked completely reasonable. It was silently wrong by a cent.
+
+## MAST, briefly
+
+MAST was built from 150 hand-annotated multi-agent traces at inter-annotator agreement κ = 0.88, then extended to 1,600+ traces across seven frameworks — ChatDev, MetaGPT, HyperAgent, AppWorld, AG2, Magentic-One, OpenManus.[^1] It sorts every failure it found into three categories: **system design issues** (5 modes — a single agent disobeying its own spec, repeating steps, losing history), **inter-agent misalignment** (6 modes — agents talking past each other, resetting a conversation, ignoring input), and **task verification** (3 modes — nobody checking the work, or checking it wrong).
+
+The middle category is the one that matters here, and it's the one my first two posts couldn't reach: it requires two agents to actually interact. A read-only fan-out where every shard reports back an independent number has no dialogue to misalign.
+
+## The experiment
+
+One deliverable, split down an interface no one wrote down: a receipt-printing module for a point-of-sale system, needing a line-item formatter and a total/tax calculator that both consume the same cart. Two fresh `general-purpose` subagents, launched from a single message so neither could see the other start, each given only its own half of the spec and told the module was "brand new, no existing code to match."[^4]
+
+<Mermaid
+  caption="Neither worker agent has a channel to the other — the orchestrator is the only node that ever sees both files. Both failures below were found at the one arrow labeled 'integration attempt.'"
+  label="Flowchart showing an orchestrator dispatching two isolated subagents that each write one file with no connection between them, then an integration attempt that first fails a strict TypeScript compile and, once fixed, produces a receipt that is wrong on adversarial input"
+  code={`
+flowchart TB
+  O["Orchestrator"]
+  O -->|"half-spec: line-item formatter"| A["Agent A · general-purpose<br/>writes lineitems.ts<br/>49,262 tokens"]
+  O -->|"half-spec: total + tax calculator"| B["Agent B · general-purpose<br/>writes total.ts<br/>49,594 tokens"]
+  A -.->|"no channel — 0 messages exchanged"| B
+  A --> I["Integration attempt"]
+  B --> I
+  I -->|"tsc --strict"| F1["FAIL — TS2306<br/>lineitems.ts is not a module"]
+  F1 --> FIX["add two export keywords"]
+  FIX --> R["clean compile, runs,<br/>looks correct on sample data"]
+  R -->|"adversarial input:<br/>3 items @ $0.125 each"| F2["line items read $0.39,<br/>total reads $0.38"]
+`}
+/>
+
+## What converged
+
+The first surprise is what the two agents agreed on without ever comparing notes. Agent A's `LineItem` and Agent B's `PurchasedItem` are structurally identical: `name: string`, `quantity: number`, `unitPrice: number`, both in whole dollars. Different type name, same three fields, same types, same units. For a domain this well-trodden, two independent runs landed on the same "obvious" shape — implicit decisions don't conflict uniformly across a task, they cluster where there's no obvious convention to fall back on. Money formatting and module boundaries turned out to be exactly that kind of place.
+
+## Failure 1: it doesn't compile
+
+Agent A's file, in full save for comments:
+
+```ts
+interface LineItem {
+  name: string;
+  quantity: number;
+  unitPrice: number;
+}
+
+function formatLineItems(items: LineItem[]): string[] {
+  // ...
+}
+```
+
+Agent B's:
+
+```ts
+export interface PurchasedItem {
+  name: string;
+  unitPrice: number;
+  quantity: number;
+}
+
+export function formatTotal(items: PurchasedItem[], taxRate: number): string {
+  // ...
+}
+```
+
+Both agents were told to keep their file "self-contained — no imports from other project files." Agent B read that as a constraint on what it *consumes*. Agent A read it as a constraint on what it *produces*, and exported nothing at all. Importing `formatLineItems` anywhere else fails before a single line of logic runs:
+
+```
+integration.ts:1:43 - error TS2306: File 'lineitems.ts' is not a module.
+```
+
+Real error, from this repository's own TypeScript compiler (v6.0.3) run in strict mode against both files unmodified.[^4] Neither agent violated its instructions. Assembled, the module doesn't exist.
+
+## Failure 2: it compiles, runs, and lies by a cent
+
+Two `export` keywords fix the compile error. What's left is a structurally sound module — and the two functions still disagree on something neither of them wrote down: **where to round**.
+
+Agent A rounds per line, for display:
+
+```ts
+const lineTotal = formatCurrency(item.quantity * item.unitPrice); // toFixed(2), per line
+```
+
+Agent B sums the raw, unrounded values first and rounds once, at the very end:
+
+```ts
+const subtotal = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
+// ...formatMoney(subtotal) — toFixed(2) happens once, after the sum
+```
+
+Run both against the original sample cart — $9.00 espresso beans, $4.50 oat milk — and the receipt looks perfect: line items sum to $22.50, subtotal reads $22.50, everything reconciles. If I'd stopped there and called the module verified, that's MAST's **FM-3.3, incorrect verification**[^1] in miniature: I checked the output, on data too clean to expose the disagreement.
+
+Three items at $0.125 each is not clean:
+
+```
+$ node -e "..."
+per-line displayed: [ '0.13', '0.13', '0.13' ]  → a customer adding by eye gets $0.39
+raw subtotal 0.375 → displayed subtotal            $0.38
+```
+
+The line items say $0.39. The subtotal says $0.38. Both numbers are the honest output of correct, tested-in-isolation code. Neither agent is wrong on its own terms. Assembled, the receipt doesn't add up — by exactly the kind of small, plausible, easy-to-miss margin that erodes trust in a payments system.
+
+## Where this lands in the taxonomy
+
+<Figure
+  caption="This experiment's two findings, placed against all 14 MAST failure modes. Inter-Agent Misalignment needs a channel between agents to misfire on. Two parallel subagents — measured in the previous post at 0-byte transcript files and 0 sidechain records — don't have one, so none of its 6 modes can fire here. Both bugs land in the other two categories instead."
+  label="Diagram of the MAST taxonomy's three categories: 5 system design issue modes, 6 inter-agent misalignment modes shown as structurally blocked in this harness, and 3 task verification modes, with the export omission marked against disobey task specification and the two receipt bugs marked against no-or-incomplete verification and incorrect verification"
+>
+  <svg viewBox="0 0 720 330" width="100%" role="img" aria-labelledby="mast-map-title">
+    <title id="mast-map-title">Where this experiment's bugs land in the MAST taxonomy</title>
+
+    <text x="0" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">MAST · 14 FAILURE MODES · 3 CATEGORIES</text>
+
+    <text x="0" y="38" fill="var(--fg)" font-size="12" font-family="var(--font-sans)" font-weight="700">SYSTEM DESIGN (5)</text>
+    <text x="225" y="38" fill="var(--fg-muted)" font-size="12" font-family="var(--font-sans)" font-weight="700">INTER-AGENT MISALIGNMENT (6)</text>
+    <text x="510" y="38" fill="var(--fg)" font-size="12" font-family="var(--font-sans)" font-weight="700">TASK VERIFICATION (3)</text>
+
+    <rect x="0" y="54" width="3" height="20" fill="var(--series-3)" />
+    <text x="10" y="68" fill="var(--fg)" font-size="11" font-family="var(--font-sans)">1.1 Disobey task specification</text>
+    <text x="10" y="94" fill="var(--fg)" font-size="11" font-family="var(--font-sans)">1.2 Disobey role specification</text>
+    <text x="10" y="120" fill="var(--fg)" font-size="11" font-family="var(--font-sans)">1.3 Step repetition</text>
+    <text x="10" y="146" fill="var(--fg)" font-size="11" font-family="var(--font-sans)">1.4 Loss of conversation history</text>
+    <text x="10" y="172" fill="var(--fg)" font-size="11" font-family="var(--font-sans)">1.5 Unaware of termination conditions</text>
+
+    <rect x="225" y="50" width="270" height="160" fill="var(--fg-muted)" opacity="0.06" />
+    <text x="235" y="68" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">2.1 Conversation reset</text>
+    <text x="235" y="94" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">2.2 Fail to ask for clarification</text>
+    <text x="235" y="120" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">2.3 Task derailment</text>
+    <text x="235" y="146" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">2.4 Information withholding</text>
+    <text x="235" y="172" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">2.5 Ignored other agent's input</text>
+    <text x="235" y="198" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">2.6 Reasoning-action mismatch</text>
+    <text x="235" y="222" fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)" font-style="italic">blocked here — 0-byte transcripts,</text>
+    <text x="235" y="236" fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)" font-style="italic">0 sidechain records (previous post)</text>
+
+    <text x="510" y="68" fill="var(--fg)" font-size="11" font-family="var(--font-sans)">3.1 Premature termination</text>
+    <rect x="510" y="80" width="3" height="20" fill="var(--series-5)" />
+    <text x="520" y="94" fill="var(--fg)" font-size="11" font-family="var(--font-sans)">3.2 No or incomplete verification</text>
+    <rect x="510" y="106" width="3" height="20" fill="var(--series-6)" />
+    <text x="520" y="120" fill="var(--fg)" font-size="11" font-family="var(--font-sans)">3.3 Incorrect verification</text>
+
+    <line x1="0" y1="248" x2="720" y2="248" stroke="var(--fg-muted)" stroke-width="1" opacity="0.3" />
+
+    <circle cx="6" cy="266" r="4" fill="var(--series-3)" />
+    <text x="16" y="270" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">found here — lineitems.ts exported nothing (Failure 1)</text>
+    <circle cx="6" cy="288" r="4" fill="var(--series-5)" />
+    <text x="16" y="292" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">found here — nobody ran the integration until asked (Failure 2)</text>
+    <circle cx="6" cy="310" r="4" fill="var(--series-6)" />
+    <text x="16" y="314" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">found here — passed on clean data, wrong on real data (Failure 2)</text>
+  </svg>
+</Figure>
+
+Isolation doesn't stop conflicting decisions — Cognition already showed that without a shred of MAST's vocabulary. What isolation does is move *where the failure can be observed*. Six of MAST's 14 modes live in a category that presupposes two agents talking to each other mid-task. Parallel subagents on this harness don't talk to each other at all, mid-task or otherwise — [the previous post in this series](/posts/subagent-costs-34000-tokens) measured that directly: 0-byte transcript files, 0 sidechain records, for eight subagents that ran side by side. There is no wire for FM-2.1 through FM-2.6 to travel on. That's not a safety property. It's a redirection: every failure that inter-agent misalignment would have caused instead shows up as an agent quietly over- or under-interpreting a spec it never got to check against anyone else's (FC1), or as a verification step that either didn't happen or didn't happen against the right data (FC3). Both of the bugs above are exactly that — one in each of the two categories isolation didn't block.
+
+## What the verification pass costs
+
+<Chart
+  type="bar"
+  height={300}
+  format="compact"
+  caption="Token cost of a read-only shard (from the first post in this series) against the two write shards measured here. Writing ~50 lines of a real module and a short report cost about 1.45x a single wc -w call — before anyone paid for the integration attempt that found either bug."
+  label="Bar chart comparing 34,172 tokens for a read-only subagent against 49,262 and 49,594 tokens for the two write-task subagents in this experiment"
+  labels={['Read-only task · post 1 baseline', 'Write task · lineitems.ts', 'Write task · total.ts']}
+  series={[{ name: 'tokens', data: [34172, 49262, 49594] }]}
+  yTitle="Tokens per subagent"
+/>
+
+**98,856 tokens** produced two files that, delivered as-is, did not compile together. Neither number includes the integration step: reading both files, writing the driver, running `tsc`, then — the part that actually mattered — thinking of an input adversarial enough to expose the rounding disagreement. That last step is not a boundary crossing the harness bills you for. It is judgment, and nothing about spawning two agents in parallel supplies it for free.
+
+Type-level verification is nearly free by comparison: `tsc --strict` caught Failure 1 in about a second, no model involved, the moment a driver file tried to import both modules. That's the cheap half of MAST's task-verification category, and it's the half most CI pipelines already run. Failure 2 is the expensive half — no type checker flags it, because both functions are individually well-typed and individually correct. It only surfaces if someone runs the combined system against a value neither agent happened to pick, which is precisely the class of check that Anthropic's own guidance singles out a *verifier* subagent for: a reader with no access to either writer's reasoning, whose only job is to try to break what they built.[^3]
+
+## Trade-offs
+
+**Convergence is not proof of compatibility.** The item shape matched by coincidence of domain familiarity, not by design, and that made it easy to assume the rest matched too. It didn't.
+
+**Cheap verification and expensive verification catch different bugs.** A compiler catches structural mismatches for the cost of a CI step. It does not catch two internally-correct rounding strategies disagreeing by a cent — that requires someone to go looking for adversarial input, which is exactly the work an isolated writer has no reason to do and an isolated reviewer has every reason to do.
+
+**One task, one pair of agents, one model generation.** The subagent model here was left at the harness default rather than pinned to Haiku 4.5 as in the read-only baseline, so the token chart above compares harness and agent type cleanly but not model-for-model. The qualitative shape — a loud compile failure plus a silent semantic one — is the kind of result I'd expect to generalize across models; the exact one-cent gap is a property of this specific input, not a universal constant.
+
+**The taxonomy's shape is itself informative.** Six of MAST's 14 modes require a conversation this harness's parallel subagents structurally don't have. That's worth knowing before reaching for a mitigation built for a failure category that can't occur on the system you're running.
+
+## Takeaways
+
+- **Isolation relocates conflicting decisions; it doesn't remove them.** Two agents with zero shared context and zero communication still produced two artifacts that didn't compose — a compile-time failure and a silent one-cent semantic disagreement.
+- **Six of MAST's 14 failure modes need a channel this harness's subagents don't have.** Inter-Agent Misalignment presupposes agents that talk mid-task. Parallel subagents here have 0-byte transcripts and 0 sidechain records — there is no wire for FM-2.1 through FM-2.6 to travel on, so all of the risk this experiment found landed in System Design and Task Verification instead.
+- **A passing integration test is not verification — it's verification against whatever data you happened to try.** The receipt looked perfect on the original sample cart. It broke on the first adversarial input I tried on purpose.
+- **Type checking is the free 10% of verification.** It caught the compile failure instantly, for the price of a CI step. The semantic failure needed a human — or a dedicated verifier agent — to go looking for it.
+- **Convergence on the "obvious" parts of a shared domain is real, and it's a trap.** Two agents independently choosing the same field names for a receipt item is a fact about how well-trodden that shape is, not a fact about whether the rest of the contract holds.
+
+## References
+[^1]: Cemri, Pan, Yang et al., [Why Do Multi-Agent LLM Systems Fail?](https://arxiv.org/abs/2503.13657) (arXiv:2503.13657) — the MAST taxonomy: 14 failure modes across three categories (system design issues, inter-agent misalignment, task verification), developed from 150 annotated traces at inter-annotator κ = 0.88 and extended to 1,600+ traces across seven frameworks (ChatDev, MetaGPT, HyperAgent, AppWorld, AG2, Magentic-One, OpenManus).
+[^2]: Cognition, [Don't Build Multi-Agents](https://cognition.com/blog/dont-build-multi-agents) — Principle 2, "Actions carry implicit decisions, and conflicting decisions carry bad results," illustrated with the Flappy Bird clone whose background and character were drawn in mismatched styles by two agents that never compared notes.
+[^3]: Anthropic, [When to use multi-agent systems (and when not to)](https://claude.com/blog/building-multi-agent-systems-when-and-how-to-use-them) — the verification-subagent pattern, run by a reader with no access to the writer's context, that the guidance reports works consistently across domains.
+[^4]: Methodology. Measured 2026-09-20 against this blog's own repository. Two `general-purpose` subagents were launched in the same message from the Agent tool, each given only its own half of the receipt-module spec and no visibility into the other's file, prompt, or output; the harness reported 49,262 tokens / 2 tool calls / 13,915 ms for the line-item agent and 49,594 tokens / 2 tool calls / 15,411 ms for the total agent. Subagent model was left at the harness default (not pinned), unlike the Haiku-4.5-pinned baseline this post compares against. Both generated files were typechecked with this repository's own TypeScript compiler, v6.0.3, in `--strict` mode (`moduleResolution: bundler`); the compile failure (`TS2306`) was reproduced by importing both files, unmodified, from a third driver file. The rounding disagreement was reproduced with Node v24.14.1 by comparing per-line-rounded display values against a once-at-the-end-rounded subtotal for three items priced at $0.125 each.
