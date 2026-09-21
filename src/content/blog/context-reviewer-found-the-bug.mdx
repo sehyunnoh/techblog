@@ -1,0 +1,132 @@
+---
+title: "Cognition Says Reviewers Work Better Blind. Mine Didn't."
+description: "I gave one reviewer agent nothing and another a 210-word handoff note. Cognition says blind works better. The one with the note caught the bug that actually mattered."
+pubDate: 2026-09-22
+tags: ['ai', 'llm', 'typescript', 'architecture', 'cost-engineering', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+[The previous post](/posts/two-agents-receipt-off-by-a-cent) left two real bugs sitting in two files: a receipt module split between two isolated subagents, one half that doesn't compile, and a fixed version that compiles, runs, and is silently wrong by a cent on the right input. This post asks the obvious next question — would a reviewer have caught either one — and tests a specific, counterintuitive claim about how to build that reviewer.
+
+Cognition's own numbers: their review agent "catches an average of 2 bugs per PR, of which roughly 58% are severe."[^1] The part that's actually counterintuitive is *how* they built it — they "found this technique to work best when the coding and review agents do not share any context beforehand," and they attribute this to **context rot**, the documented tendency for a model to reason worse as its context window fills up.[^1] A reviewer that never saw the coder's reasoning stays short and sharp. A reviewer fed the coder's own accumulated exploration inherits the bloat, and reasons worse for it.
+
+I ran that exact comparison on the two buggy files from the last post. It came out backwards.
+
+## The setup
+
+Same two files, unmodified: `lineitems.ts` (no `export` statement — the compile-breaking bug) and `total.ts` (rounds the subtotal once at the end, while `lineitems.ts` rounds every line individually — the one-cent bug). Two fresh `general-purpose` subagents, launched in the same message so neither could see the other, each told to review the pair for "bugs, integration risks, or correctness issues" and free to compile or run the code if it wanted to. Identical instructions, identical files. The only difference: one reviewer also got a 210-word, 1,492-character handoff note — the two original coder agents' own summaries of what they built, quoted verbatim from [the last post](/posts/two-agents-receipt-off-by-a-cent).[^3] Full experiment details are in the methodology note.[^4]
+
+<Mermaid
+  caption="The only variable between the two reviewers is the handoff note — 210 words, read before either file. Everything else, including permission to compile or run the code, was identical."
+  label="Flowchart showing the same two files going to a cold reviewer with no context and a warm reviewer that first reads a 210-word handoff note, both independently producing a findings list"
+  code={`
+flowchart TB
+  F["lineitems.ts + total.ts<br/>(unmodified from previous post)"]
+  H["handoff note<br/>210 words, 1,492 chars<br/>the coders' own self-reports"]
+  F --> C["Cold reviewer<br/>no context<br/>60,093 tokens"]
+  H --> W["Warm reviewer<br/>reads handoff note first<br/>62,512 tokens"]
+  F --> W
+  C --> RC["6 findings<br/>1 blocker / 2 major / 3 minor"]
+  W --> RW["5 findings<br/>1 blocker / 2 major / 2 minor"]
+`}
+/>
+
+## What both of them found
+
+Both reviewers, unprompted, went further than reading: each set up its own scratch `tsc` project and ran the files with self-chosen test values — nobody told either one to compile or execute anything. Both landed on the same **blocker** independently: `lineitems.ts` exports nothing, so `tsc` fails with `TS2306` the instant anything tries to import it — the identical failure [the previous post](/posts/two-agents-receipt-off-by-a-cent) found by hand.
+
+Both also flagged the same underlying defect in `total.ts` — its `$` column doesn't line up across the Subtotal/Tax/TOTAL lines, because the padding before each `$` is a fixed literal instead of computed from the label's length. They disagreed on how much it mattered: the cold reviewer called it **minor**, the warm reviewer called it **major**. Same defect, same evidence, different verdict — a reminder that an LLM-assigned severity label is a judgment call, not a measurement.
+
+That's the entire overlap. Two shared findings out of nine distinct ones across both reports.
+
+<Figure
+  caption="Nine distinct findings, two reviewers, almost no agreement on which ones mattered. The bug this whole experiment was built around — the one-cent rounding mismatch — was found by exactly one of the two reviewers, and it's the one that had the coders' own notes."
+  label="Diagram comparing findings unique to the cold reviewer, findings both reviewers reported, and findings unique to the warm reviewer, with severity marked blocker, major, or minor for each"
+>
+  <svg viewBox="0 0 760 300" width="100%" role="img" aria-labelledby="overlap-title">
+    <title id="overlap-title">Cold-only, shared, and warm-only findings across the two reviews</title>
+
+    <text x="0" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">9 DISTINCT FINDINGS ACROSS BOTH REVIEWS · B = blocker, M = major, m = minor</text>
+
+    <text x="0" y="38" fill="var(--fg)" font-size="12" font-family="var(--font-sans)" font-weight="700">COLD ONLY (4)</text>
+    <text x="260" y="38" fill="var(--fg)" font-size="12" font-family="var(--font-sans)" font-weight="700">BOTH FOUND (2)</text>
+    <text x="520" y="38" fill="var(--fg)" font-size="12" font-family="var(--font-sans)" font-weight="700">WARM ONLY (3)</text>
+
+    <text x="0" y="62" fill="var(--fg)" font-size="11" font-family="var(--font-sans)">Duplicate item type, no shared source · M</text>
+    <text x="0" y="88" fill="var(--fg)" font-size="11" font-family="var(--font-sans)">Unexported names leak to global scope · M</text>
+    <text x="0" y="114" fill="var(--fg)" font-size="11" font-family="var(--font-sans)">Divider width ignores line-item width · m</text>
+    <text x="0" y="140" fill="var(--fg)" font-size="11" font-family="var(--font-sans)">Doc-comment example is stale · m</text>
+
+    <rect x="260" y="48" width="3" height="20" fill="var(--series-3)" />
+    <text x="270" y="62" fill="var(--fg)" font-size="11" font-family="var(--font-sans)">Missing export — compile fails · B / B</text>
+    <text x="270" y="88" fill="var(--fg)" font-size="11" font-family="var(--font-sans)">$ misalignment in total.ts · m / M</text>
+
+    <rect x="520" y="48" width="3" height="20" fill="var(--series-5)" />
+    <text x="530" y="62" fill="var(--fg)" font-size="11" font-family="var(--font-sans)" font-weight="600">Subtotal ≠ sum of line items · M</text>
+    <text x="530" y="88" fill="var(--fg)" font-size="11" font-family="var(--font-sans)">Negative amounts show $-5.00 · m</text>
+    <text x="530" y="114" fill="var(--fg)" font-size="11" font-family="var(--font-sans)">No width guard on quantity · m</text>
+
+    <line x1="0" y1="170" x2="760" y2="170" stroke="var(--fg-muted)" stroke-width="1" opacity="0.3" />
+
+    <text x="0" y="192" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">Overlap: 2 of 9 findings shared between reviewers (22%) — including one where they agreed on the defect</text>
+    <text x="0" y="210" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">but not its severity. The rounding bug — the one the previous post spent an adversarial test finding by hand —</text>
+    <text x="0" y="228" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">was caught by the reviewer that had the coders' handoff note, and missed entirely by the one that didn't.</text>
+  </svg>
+</Figure>
+
+## Where each reviewer's own testing led it
+
+Neither reviewer was told to look for a rounding bug, or told anything about money at all beyond "total/tax calculator." Both invented their own adversarial inputs — this is worth sitting with, because [the last post's](/posts/two-agents-receipt-off-by-a-cent) whole finding was that nobody thinks to test adversarial values unless something specifically points them there. Here, two reviewer agents did it on their own initiative, unprompted, simply because "review this for correctness" implied it to both of them.
+
+They just tested different axes. The cold reviewer varied the **tax rate** — 6%, 8.25%, 0% — checking `total.ts` in isolation. That never touches the bug: the rounding mismatch lives in *how many items* get summed and *when* each one rounds, not in the tax percentage. The warm reviewer, having just read that Developer A's example used two items and Developer B's used a different two, tried a cart with **fractional quantities** — and that's the exact shape of input that exposes the defect. Three lines each rounding to $0.01 from a raw $0.005 print a visible $0.03; `total.ts` sums the same raw values first and rounds once, printing $0.01. A receipt that visibly doesn't add up, caught with the reviewer's own test case, not the one from the previous post.
+
+Both reviewers verified. Only one verified in the right place.
+
+## Why this probably isn't a real rebuttal
+
+Cognition's explanatory mechanism is specific: **context rot** — a model reasoning worse as its window fills with the coder's own accumulated working history.[^1] That's not what I gave the warm reviewer. The handoff note is 210 words. It is not a trace, a transcript, or an accumulated exploration — [the previous post in this series](/posts/subagent-costs-34000-tokens) measured that a subagent's actual working history isn't even retrievable on this harness: 0-byte transcript files, 0 sidechain records, for every subagent it checked.[^2] The only thing that ever crosses a subagent boundary here is a short result string. A 210-word handoff note *is* that short result string — it's close to the maximum context a reviewer could realistically receive on this harness, not a sliver of a much larger trace that got rotted down.
+
+So the honest reading isn't "Cognition is wrong." It's narrower: the two conditions aren't the same experiment. Cognition's warning is about inheriting a coder's own reasoning at real length. What I tested is whether a *short, comparative* summary — both developers' stated assumptions, side by side — helps or hurts. In this one case, seeing both assumption sets side by side pointed the reviewer straight at the seam between them, which is exactly where the bug was hiding. That's a plausible, different mechanism from context rot, and it's the one this specific bug was built to need: it only exists at the boundary between two files, and the boundary is the one thing neither file's own code makes visible.
+
+## What it cost
+
+<Chart
+  type="bar"
+  height={300}
+  format="compact"
+  caption="Token cost by role across this series, all measured on the same harness. Reviewing costs more than writing, which costs more than reading — and the 4% gap between the two reviewers bought the one finding that mattered."
+  label="Bar chart showing 34,172 tokens for a read-only task, 49,428 tokens average for a write task, 60,093 tokens for the cold review, and 62,512 tokens for the warm review"
+  labels={['Read-only · post 1', 'Write, avg · post 3', 'Review, cold', 'Review, warm']}
+  series={[{ name: 'tokens', data: [34172, 49428, 60093, 62512] }]}
+  yTitle="Tokens per agent"
+/>
+
+The handoff note cost the warm reviewer **2,419 extra tokens** over the cold one — about 4% more, for the file that mattered. Stack the whole pipeline: 98,856 tokens for the two coders in the previous post, plus 60,093 and 62,512 for the two reviewers here, comes to **221,461 tokens** to write and review a two-function receipt module that a human could write correctly in about the same time it took to read this paragraph. Whether that's worth it depends entirely on what the bug would have cost left in — and a receipt that silently disagrees with itself by a cent is exactly the kind of bug that's cheap to write, cheap to miss, and expensive to explain to a customer.
+
+## Trade-offs
+
+**N = 1.** One pair of files, one pair of reviewers, one model generation. This is a demonstration that the effect can point the other way, not a replacement for Cognition's own benchmark — which is drawn from many more PRs than one.
+
+**Severity is a self-report.** Both reviewers rated their own findings' severity with no independent check. The one place they disagreed on severity for the identical defect (minor vs. major, same `$`-alignment bug) is the clearest evidence that this number is a judgment call, not a fact — worth weighting accordingly anywhere an agent's severity rating drives a triage decision.
+
+**Overlap was worse than either reviewer alone.** Running both reviewers found more total defects (9) than either one did (6, then 5) — but two reviewers cost roughly double, and 78% of what they found was reviewer-specific. If you can only afford one reviewer, this one trial doesn't tell you which kind to pick; it tells you that picking either alone leaves real bugs on the table.
+
+**The type of context is the variable, not its presence.** A short, structured, two-sided handoff note is a different object from an inherited single-writer trace. Cognition's context-rot mechanism is about the latter; this experiment tested the former, because the former is the only kind of context this harness can actually hand a reviewer.
+
+## Takeaways
+
+- **The reviewer with context caught the bug the blind one missed.** On these two files, "share no context" and "review well" pointed in opposite directions — the opposite of Cognition's own finding, on a much smaller and different kind of context than theirs.
+- **A 210-word handoff note is a plausible ceiling for "coder context" on this harness, not a floor.** Full agent traces aren't retrievable here — [post 2](/posts/subagent-costs-34000-tokens) measured 0-byte transcripts. The most context any reviewer here could get is a short summary, and that's exactly what was tested.
+- **Both reviewers verified by execution, unprompted — and still only found what they thought to test.** The cold reviewer varied tax rate; the warm reviewer, primed by two different sample carts in the handoff note, varied quantity — and that's the axis the bug lives on. Effort was equal. Coverage wasn't.
+- **Two independent reviewers agreed on less than a quarter of what they found.** 2 of 9 distinct findings were shared, and even one of those two got different severity ratings from each reviewer. A single review — of either kind — is a sample, not a ceiling.
+- **The review pass cost more than the code it reviewed.** 122,605 tokens across both reviewers, against 98,856 to write the two files in the first place. Stacked across the full pipeline, verifying a two-function module cost 221,461 tokens — a number that only looks reasonable next to what a one-cent receipt bug costs when nobody catches it.
+
+## References
+[^1]: Cognition, [Multi-Agents: What's Actually Working](https://cognition.com/blog/multi-agents-working) — "Devin Review catches an average of 2 bugs per PR, of which roughly 58% are severe (logic errors, missing edge cases, security vulnerabilities)"; "we found this technique to work best when the coding and review agents do not share any context beforehand," attributed to context rot, the documented degradation of model reasoning as context grows.
+[^2]: [Your Subagent Costs 34,000 Tokens Before It Reads a File](/posts/subagent-costs-34000-tokens) — measured 0-byte subagent transcript files and 0 sidechain records after eight background subagents completed, cited here as the reason a reviewer on this harness cannot inherit a coder's full working history even if you wanted it to.
+[^3]: [Two Agents Split a Receipt. It's Wrong by One Cent.](/posts/two-agents-receipt-off-by-a-cent) — the two files reviewed in this post, the original compile failure, and the adversarial test that first surfaced the rounding mismatch by hand.
+[^4]: Methodology. Measured 2026-09-21 against this blog's own repository. Two `general-purpose` subagents were launched in the same message from the Agent tool, each given identical instructions to review `lineitems.ts` and `total.ts` (the unmodified, still-unexported files from the previous post) for bugs, integration risks, or correctness issues, with explicit permission to compile or run the code using this repository's own TypeScript compiler (v6.0.3) and Node v24.14.1. The only difference: the warm reviewer was first pointed at a 210-word, 1,492-character handoff note quoting the two original coder agents' self-reported assumptions verbatim, read before either source file. Neither reviewer was told what bugs to look for, or that a bug was known to exist. The harness reported 60,093 tokens / 13 tool calls / 112,346 ms for the cold review and 62,512 tokens / 15 tool calls / 115,114 ms for the warm review. Both reviewers independently built scratch TypeScript projects in their own working directories to compile and execute the files with self-chosen test inputs; neither modified `lineitems.ts` or `total.ts`. Findings and severity ratings are the reviewing agents' own, unedited beyond formatting for length.
