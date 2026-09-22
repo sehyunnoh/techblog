@@ -22,7 +22,10 @@
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.10",
+    "@fontsource/inter": "^5.3.0",
+    "@resvg/resvg-js": "^2.6.2",
     "pagefind": "^1.5.2",
+    "satori": "^0.33.4",
     "typescript": "^6.0.3"
   }
 }
