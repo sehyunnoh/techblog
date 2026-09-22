@@ -1,0 +1,132 @@
+---
+title: "Atlas Lived 292 Days on macOS, Then Became a Chrome Extension"
+description: "Three companies shipped a standalone agent browser. One matched Windows to macOS day one. One took 83 days. One never got there, shut down, and retreated into an extension."
+pubDate: 2026-09-23
+tags: ['security', 'web', 'ai', 'llm', 'architecture', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+[The first post in this series](/posts/browser-agent-same-origin-policy) sorted agentic browsers by what they can reach — restricted interface, browser-use agent, extension with all-domains access — and found that capability and isolation move in opposite directions. That axis says nothing about a different question: what does it cost to actually *ship* one of these things on a second operating system?
+
+Sort the same browsers by how the software reaches you instead of by what it can see, and a different, much more mechanical fault line appears. Two of the three packaging types ride on a browser that was already cross-platform, so a second OS costs them close to nothing. The third has to build a native application per operating system, and the bill for that shows up as real, dated evidence — one company paid it in 83 days, one paid it on day one, and one didn't pay it at all. It shut its browser down instead, 292 days after launch, having never left macOS.
+
+## Three ways to reach a browser
+
+<Figure
+  caption="The same agents from the previous post, regrouped by how the software reaches you rather than by what it can see. Extension and built-in both inherit a codebase that already runs everywhere; standalone does not."
+  label="Diagram of three packaging architectures for agentic browsers — extension, built into an existing browser, and standalone new browser — with the products in each and whether they inherit cross-platform reach for free"
+>
+  <svg viewBox="0 0 760 290" width="100%" role="img" aria-labelledby="pkg-title">
+    <title id="pkg-title">Three packaging architectures and whether each pays a platform tax</title>
+
+    <text x="0" y="12" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">HOW THE AGENT REACHES YOUR BROWSER</text>
+
+    <text x="0" y="38" fill="var(--fg)" font-size="12.5" font-family="var(--font-sans)" font-weight="700">EXTENSION</text>
+    <text x="260" y="38" fill="var(--fg)" font-size="12.5" font-family="var(--font-sans)" font-weight="700">BUILT INTO A BROWSER</text>
+    <text x="530" y="38" fill="var(--fg)" font-size="12.5" font-family="var(--font-sans)" font-weight="700">STANDALONE BROWSER</text>
+
+    <text x="0" y="62" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">Claude for Chrome</text>
+
+    <text x="260" y="62" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">Firefox AI Mode</text>
+    <text x="260" y="84" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">Chrome + Gemini</text>
+    <text x="260" y="106" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">Edge + CoPilot · Brave Leo</text>
+
+    <text x="530" y="62" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">Comet (Perplexity)</text>
+    <text x="530" y="84" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">Aside</text>
+    <text x="530" y="106" fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-sans)" text-decoration="line-through">Atlas (OpenAI) — shut down</text>
+
+    <rect x="0" y="140" width="230" height="3" fill="var(--series-1)" />
+    <text x="0" y="164" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">Rides Chrome's build</text>
+    <text x="0" y="184" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">A second OS is Chrome's</text>
+    <text x="0" y="200" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">problem, not yours.</text>
+
+    <rect x="260" y="140" width="230" height="3" fill="var(--series-1)" />
+    <text x="260" y="164" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">Rides the host's build</text>
+    <text x="260" y="184" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">Firefox, Chrome, Edge, Brave</text>
+    <text x="260" y="200" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">already ship everywhere.</text>
+
+    <rect x="530" y="140" width="230" height="3" fill="var(--series-5)" />
+    <text x="530" y="164" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">Pays per operating system</text>
+    <text x="530" y="184" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">Installer, code signing,</text>
+    <text x="530" y="200" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">keychain, tray — per OS.</text>
+
+    <line x1="0" y1="224" x2="760" y2="224" stroke="var(--fg-muted)" stroke-width="1" opacity="0.3" />
+    <text x="0" y="246" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">Extension and built-in sit at opposite ends of the previous post's capability spectrum — one is</text>
+    <text x="0" y="264" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">the riskiest tier, one is the safest — but both inherit cross-platform reach for free. Packaging</text>
+    <text x="0" y="282" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">cost and security risk turn out to be independent decisions, not two ends of one trade-off.</text>
+  </svg>
+</Figure>
+
+The first two columns share a property that has nothing to do with how capable or how safe they are: neither one had to build a browser. Claude for Chrome is a `.crx` package that runs wherever Chrome already runs.[^1] Firefox AI Mode, Chrome's own Gemini integration, Edge's CoPilot and Brave's Leo are features shipped inside browsers that were cross-platform before any of this existed. The third column is different in kind — a new native application, from an install file up, once per operating system.
+
+## The tax, paid three different ways
+
+Three companies built a standalone agentic browser. Each one's platform rollout is a matter of public record, and the three timelines do not look alike.
+
+**Comet paid it up front.** Perplexity shipped Comet for Windows and macOS on the same day, July 9, 2025, then opened it to everyone free that October.[^2] Whatever the Windows build cost, it was ready before launch — the bill just moved downstream: Android arrived 134 days after the desktop launch, and iOS another 118 days after that.[^2]
+
+**Aside is paying it now.** Aside shipped on macOS on June 23, 2026, and reached 20,000 users inside two weeks.[^3] Windows followed 83 days later, on September 14 — confirmed in the product's own changelog, which also lists "improved system and tray menus on Windows" as a separate line item, the kind of entry that only exists because someone had to build Windows-native menu chrome that the macOS release didn't need.[^4]
+
+**Atlas didn't pay it.** OpenAI shipped Atlas for macOS on October 21, 2025, with Windows, iOS and Android all billed as "coming soon."[^5] None of them ever shipped. On August 9, 2026 — 292 days after launch, the entire time on one operating system — Atlas was discontinued.[^6]
+
+<Chart
+  type="bar"
+  height={300}
+  format="plain"
+  caption="Days between a standalone agent browser's first platform and its Windows release. Comet's bar is zero because both shipped together. Atlas has no bar — not zero, absent — because Windows never came; the browser was discontinued on day 292, still macOS-only."
+  label="Bar chart showing 0 days for Comet, 83 days for Aside, and no bar for Atlas, which never reached Windows before being discontinued on day 292"
+  labels={['Comet', 'Aside', 'Atlas']}
+  series={[{ name: 'Days to Windows', data: [0, 83, null] }]}
+  yTitle="Days from launch to Windows"
+/>
+
+## What the tax buys
+
+None of this makes the standalone architecture a mistake. It's the only one of the three that can put a password manager behind the OS's own keychain, own its update cadence outright, or ship a system-tray presence that looks native rather than borrowed — the deep integration Aside's password manager and Comet's OS-level automation both lean on.[^3][^2] An extension or a built-in feature inherits its host's ceiling; a standalone browser sets its own. The cost is that every one of those integration points has to be rebuilt, per operating system, by hand — which is exactly the list Aside's changelog is quietly working through, one line at a time.
+
+## Where Atlas landed
+
+<Mermaid
+  caption="Atlas didn't add Windows. It stopped being a standalone browser and moved into the two packaging types that don't charge a platform tax."
+  label="Flowchart showing Atlas launching as a standalone macOS-only browser, running for 292 days, being discontinued, and its capabilities splitting into an embedded browser tool inside ChatGPT and a Chrome extension"
+  code={`
+flowchart LR
+  A["Atlas · standalone browser<br/>macOS only · Oct 21 2025"]
+  A -->|"292 days, Windows never shipped"| D["Discontinued<br/>Aug 9 2026"]
+  D --> E["Embedded tool inside<br/>ChatGPT Work / Codex"]
+  D --> F["Chrome extension<br/>sidebar"]
+`}
+/>
+
+OpenAI's own framing was product consolidation, not a platform-cost concession: combine Atlas, the ChatGPT desktop app and Codex into one application and "simplify its product lineup" against growing competition.[^6] But look at where the browsing capability actually landed. Reporting on the transition quotes the plan directly: "the browser becomes a tool for Work and Codex. It can pull in web pages, online files and cloud tools during longer tasks, rather than trying to be a general Chrome replacement" — plus "an updated Chrome extension" for working from Chrome's own sidebar.[^7] One of those two replacements is an embedded feature inside an existing cross-platform app. The other is literally the first packaging type in the diagram above. Atlas didn't just stop being macOS-only. It stopped being standalone.
+
+Whether the unstated cause is the platform tax specifically, or the broader difficulty of maintaining a whole separate browser, OpenAI's own materials do not say — and I could not confirm the exact wording of OpenAI's own announcement directly, because `help.openai.com` and `openai.com` both blocked automated fetches used to write this post, so the quotes above come from secondary reporting that cites them.[^7] What is not in question is the outcome: ten months, one platform, then a retreat to the two architectures that don't charge rent per operating system.
+
+## Trade-offs
+
+**Three standalone browsers is not a law.** Comet shows the tax can be paid same-day with enough resources — it just relocates the cost to mobile instead of Windows. Aside shows it can be paid on a normal engineering timeline. Atlas shows a company can decide it isn't worth paying at all. All three outcomes are consistent with "standalone costs more than extension or built-in"; they are not proof of one universal price.
+
+**Correlation, stated carefully.** OpenAI's public reasoning for folding Atlas into ChatGPT was product simplification, not "porting to Windows cost too much." The timeline — macOS-only for its entire 292-day life, then retreat to an extension — is consistent with a platform-tax explanation without confirming it as the cause.
+
+**The capability axis from the previous post still applies independently.** Nothing here changes the finding that Claude for Chrome — free cross-platform reach, zero platform tax — is also the highest-capability, highest-risk tier measured in that post. Cheap to ship on a second OS and safe to run are unrelated properties.
+
+## Takeaways
+
+- **Packaging predicts platform cost; capability doesn't.** Extensions and features built into an existing browser inherit cross-platform reach for free, regardless of how much of the page they're allowed to see. Only a standalone new browser pays per operating system.
+- **The tax is real and dated, not theoretical.** Aside's own changelog documents Windows-specific tray and menu work as separate line items from the macOS release — 83 days after macOS shipped.
+- **Atlas is the clearest data point precisely because it refused to pay.** macOS-only for all 292 days of its life, then discontinued and folded into an embedded tool plus a Chrome extension — the two packaging types that don't charge platform rent.
+- **The bill doesn't disappear; it moves.** Comet's simultaneous Windows and macOS launch didn't mean Comet skipped the tax — the same 100+ day gaps just reappear between desktop and Android, and again between Android and iOS.
+- **Packaging cost and security risk are independent axes.** The previous post's riskiest tier (Claude for Chrome) and its safest tier (Firefox AI Mode) both sit in this post's zero-tax categories. Neither axis predicts the other.
+
+## References
+[^1]: Anthropic, [Piloting Claude in Chrome](https://www.anthropic.com/news/claude-for-chrome), August 2025, and [Get started with Claude in Chrome](https://support.claude.com/en/articles/12012173-get-started-with-claude-in-chrome) — pilot to 1,000 Max users on August 25, 2025, opened to all Max on November 24, 2025 and to Pro/Team/Enterprise on December 18, 2025; general availability in August 2026. Distributed as a Chrome extension, gated by subscription tier rather than operating system.
+[^2]: Wikipedia, [Comet (browser)](https://en.wikipedia.org/wiki/Comet_(browser)) — Windows and macOS release on July 9, 2025; free for everyone in October 2025; Android on November 20, 2025; iOS on March 18, 2026.
+[^3]: EO / eomag.io, [Aside: The AI Browser Born From the Post-YC Blues](https://www.eomag.io/article/aside-chanhee-lee) — macOS launch on June 23, 2026, and 20,000 users within two weeks.
+[^4]: Aside, [Native app changelog](https://docs.aside.com/changelog/native) — version 1.0.914.1, "Aside is now officially available on Windows!", including the Windows-specific system and tray menu entry; PiunikaWeb, [Aside rolls out Windows version with near-total Mac feature parity](https://piunikaweb.com/2026/09/14/aside-ai-browser-windows-release/) (September 14, 2026) for the release date and the co-founder's "99% of the Mac version's features" claim, cited here as the vendor's own characterization rather than an independently verified figure.
+[^5]: OpenAI, [Introducing ChatGPT Atlas](https://openai.com/index/introducing-chatgpt-atlas/), October 21, 2025 — macOS launch, with Windows, iOS and Android described as coming soon.
+[^6]: Wikipedia, [ChatGPT Atlas](https://en.wikipedia.org/wiki/ChatGPT_Atlas) — the March 2026 announcement to combine Atlas, the ChatGPT desktop app and Codex, and the August 9, 2026 shutdown date, citing contemporaneous CNBC and Wall Street Journal reporting.
+[^7]: OpenAI, [Evolving Atlas into ChatGPT for browser-based agentic work](https://help.openai.com/en/articles/20001371-evolving-atlas-into-chatgpt-for-browser-based-agentic-work) — the official announcement; automated fetches of this page and of openai.com's own blog were blocked while writing this post, so the direct quotations above are sourced through Implicator.ai, [OpenAI folds Codex into ChatGPT as Atlas gets August 9 deprecation target](https://www.implicator.ai/openai-folds-codex-into-chatgpt-as-atlas-gets-august-9-deprecation-target/), which quotes the announcement verbatim.
