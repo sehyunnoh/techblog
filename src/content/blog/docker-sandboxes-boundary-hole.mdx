@@ -1,0 +1,150 @@
+---
+title: "Two Researchers Found the Same Hole in Docker's Sandbox Boundary"
+description: "Docker Sandboxes isolates AI agents in microVMs, not containers. Two bugs patched in the same release both broke it at the one place the guest is allowed to talk back to the host."
+pubDate: 2026-09-24
+tags: ['security', 'devops', 'docker', 'ai', 'architecture', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+On September 7, Docker shipped version 0.42.0 of Sandboxes — the product that runs each AI coding agent in its own microVM instead of a container.[^1] The release notes list two critical fixes: CVE-2026-77179, CVSS 9.4, and CVE-2026-79994, CVSS 8.7.[^1] They were found independently, by two different security researchers, roughly three weeks apart, using unrelated techniques.[^2][^3] And they broke the isolation boundary in the exact same place: the one spot where a sandboxed agent is allowed to talk back to the host.
+
+[A previous post on this blog](/posts/six-agents-twenty-four-kilobytes) measured what container isolation actually costs a fleet of agents — and found that the bind mount making it *convenient* quietly hands the sharing back, 465 MB at a time. Docker Sandboxes is a different architecture, sold on exactly that weakness: a real hypervisor boundary, not a shared kernel with namespaces drawn around it. Two independently discovered bugs, patched in the same release, are a good test of whether the stronger boundary actually held where it mattered.
+
+## A microVM is not a container with better manners
+
+A container and a microVM solve isolation differently. A container shares the host's kernel; the wall around it is namespaces and cgroups — visibility rules enforced by the same kernel the host is running. A microVM has no such shared kernel. Docker's own documentation is specific about this: "every sandbox runs inside a lightweight microVM with its own Linux kernel."[^4] The sandboxed agent cannot see the host's process table, cannot see host device files, cannot exploit a namespace-confusion bug — because there is no shared namespace to confuse. Outbound network traffic is also isolated per sandbox and routed through a policy-based proxy rather than given a raw route to the host network.[^4]
+
+That is a real, structural improvement over the container boundary measured in the earlier post. But a sandbox that can see nothing of the host is also useless to a coding agent — it needs the project's files, and it often needs specific host services. So the design adds exactly two deliberate bridges back across an otherwise sealed wall: a shared folder, so the guest can read and write project files, and a Unix-domain-socket relay, so the guest can reach a short allow-list of host sockets. Every bridge is a place where a host-side process, running with real privileges outside the VM, has to trust something the guest supplies. That is exactly where both patched bugs live.
+
+<Figure
+  caption="A microVM removes the shared-kernel attack surface a container has. It still needs two deliberate bridges back across the hypervisor wall for a coding agent to be useful — and both patched CVEs sit on those bridges, not on the wall itself."
+  label="Diagram contrasting container isolation, which shares the host kernel behind a namespace wall, with microVM isolation, which has a separate guest kernel behind a hypervisor wall but two labeled bridges back to the host: a virtio-fs file share and a Unix-socket relay"
+>
+  <svg viewBox="0 0 760 300" width="100%" role="img" aria-labelledby="boundary-title">
+    <title id="boundary-title">Container namespace wall versus microVM hypervisor wall, with its two bridges back to the host</title>
+
+    <text x="0" y="14" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">CONTAINER</text>
+    <rect x="0" y="26" width="220" height="90" rx="6" fill="none" stroke="var(--line)" stroke-dasharray="4 3" />
+    <text x="14" y="52" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">Same host kernel</text>
+    <text x="14" y="72" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">Namespaces + cgroups</text>
+    <text x="14" y="90" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">draw the wall in software,</text>
+    <text x="14" y="106" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">inside one kernel.</text>
+
+    <text x="270" y="14" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">DOCKER SANDBOXES (microVM)</text>
+    <rect x="270" y="26" width="490" height="240" rx="6" fill="none" stroke="var(--fg)" stroke-width="1.5" />
+    <text x="284" y="52" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">Separate guest kernel</text>
+    <text x="284" y="72" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">Hypervisor wall — no shared</text>
+    <text x="284" y="88" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">/proc, no shared namespace</text>
+    <text x="284" y="104" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">to confuse.</text>
+
+    <rect x="284" y="130" width="220" height="60" rx="5" fill="var(--bg-subtle)" stroke="var(--series-5)" />
+    <text x="296" y="150" fill="var(--fg)" font-size="11" font-family="var(--font-sans)" font-weight="600">Bridge 1 — virtio-fs</text>
+    <text x="296" y="167" fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)">Project files shared in.</text>
+    <text x="296" y="182" fill="var(--series-5)" font-size="10.5" font-family="var(--font-sans)">CVE-2026-77179</text>
+
+    <rect x="284" y="204" width="220" height="60" rx="5" fill="var(--bg-subtle)" stroke="var(--series-5)" />
+    <text x="296" y="224" fill="var(--fg)" font-size="11" font-family="var(--font-sans)" font-weight="600">Bridge 2 — socket relay</text>
+    <text x="296" y="241" fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)">Allow-listed AF_UNIX sockets.</text>
+    <text x="296" y="256" fill="var(--series-5)" font-size="10.5" font-family="var(--font-sans)">CVE-2026-79994</text>
+
+    <text x="530" y="150" fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)">Every bridge is a place</text>
+    <text x="530" y="166" fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)">the host trusts something</text>
+    <text x="530" y="182" fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)">the guest supplied — a</text>
+    <text x="530" y="198" fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)">path, or a socket name —</text>
+    <text x="530" y="214" fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)">across the privilege line.</text>
+  </svg>
+</Figure>
+
+## Bridge 1: a file handle that outlives its path
+
+The shared folder is implemented with virtio-fs: a host-side server process speaks a FUSE-like protocol to the guest kernel over a virtio queue. The first time the guest touches a path, the server hands back a *nodeid* — a short handle the guest reuses for later operations instead of resending the full path each time, which is the whole performance point of the scheme. Security researcher Oren Yomtov, who reported CVE-2026-77179, found that on macOS the server resolves a nodeid two different ways: normally through an inode lookup, but when that lookup fails, it falls back to the path string it cached the first time it saw that nodeid — and reopens the file at that path without checking whether the path still means what it meant the first time.[^2]
+
+The general shape of the attack, in Yomtov's own words: the guest picks a target file on the host, creates a folder and a file with the same name inside the shared workspace, keeps a handle to it open, deletes both the file and the folder, replaces the folder with a symlink pointing anywhere on the host filesystem, and then reads or writes through the still-open handle.[^2] His published proof of concept is three lines:
+
+```bash
+mkdir pv && : > pv/.canary && exec 9< pv/.canary
+rm pv/.canary; rmdir pv; ln -s /Users/Shared pv
+echo CONFIRMED > /proc/self/fd/9
+```
+
+<Mermaid
+  caption="CVE-2026-77179. The host server caches a nodeid-to-path mapping the first time it sees a file, then trusts that cached path on a later reopen — after the guest has quietly made the path mean something else."
+  label="Sequence diagram showing a guest creating and opening a file inside the shared folder, then deleting it and replacing its parent directory with a symlink, and the host server reopening the stale cached path through that symlink onto an arbitrary host location"
+  code={`
+sequenceDiagram
+  participant G as Guest (sandboxed agent)
+  participant H as Host virtio-fs server
+
+  G->>H: open "pv/.canary"
+  H-->>G: nodeid 42, path cached as "pv/.canary"
+  G->>G: keep fd 9 open on nodeid 42
+  G->>G: rm pv/.canary, rmdir pv
+  G->>G: ln -s /Users/Shared pv
+  G->>H: write via fd 9 (nodeid 42)
+  H->>H: inode lookup fails, fall back<br/>to cached path "pv/.canary"
+  H->>H: resolves through new symlink →<br/>host path outside shared workspace
+  H-->>G: write succeeds on host file
+`}
+/>
+
+CWE-59, "Improper Link Resolution Before File Access," is the classification for exactly this pattern: trusting a path across a gap in which an attacker can substitute a symlink for a real file.[^5] The fix in 0.42.0 makes the server re-verify the resolved path stays inside the shared workspace before reopening it — the check that was missing.[^1]
+
+## Bridge 2: the same gap, in a different clock
+
+CVE-2026-79994, reported separately by Jurre van Bergen of ThreatNotify, hits the second bridge.[^6] Docker Sandboxes' guest-to-host socket relay is meant to let the agent reach a short list of authorized Unix-domain sockets — and explicitly *not* reach dangerous ones, like the host's own Docker daemon socket or the system D-Bus.[^7] To enforce that, the relay validates a requested socket path with `stat()`, confirms it sits inside the authorized workspace, and then connects to it by that same pathname.[^8]
+
+The bug is the gap between those two steps. A malicious guest can replace an intermediate directory in that path with a symlink in the window between the validation and the connect — a textbook time-of-check-to-time-of-use race, CWE-367 — so the host ends up connecting to an arbitrary `AF_UNIX` socket instead of the one it just checked.[^8]
+
+<Mermaid
+  caption="CVE-2026-79994. Same structural gap as the file-sharing bug, one bridge over: the host validates a path, then trusts that path is unchanged when it acts on it a moment later."
+  label="Sequence diagram showing a host relay checking that a requested socket path is inside the authorized workspace, then the guest swapping an intermediate directory for a symlink before the host connects, causing the host to reach an arbitrary host socket"
+  code={`
+sequenceDiagram
+  participant G as Guest (sandboxed agent)
+  participant R as Host socket relay
+
+  G->>R: request connect to "work/tmp/app.sock"
+  R->>R: stat("work/tmp") — inside workspace, OK
+  G->>G: replace "work/tmp" with symlink<br/>to arbitrary host directory
+  R->>R: connect("work/tmp/app.sock")
+  R->>R: resolves through new symlink →<br/>arbitrary host AF_UNIX socket
+  R-->>G: relayed connection to<br/>e.g. host Docker daemon socket
+`}
+/>
+
+Different CWE entry, different bridge, three weeks apart, two researchers who — as far as either publication says — were not working together. What they found is the same structural mistake wearing two different masks: a host process that checks a guest-supplied reference once, then trusts it again later without re-checking, while the guest controls exactly what happens in between.
+
+## What the fix actually is
+
+Both bugs shipped fixed in 0.42.0 on the same day.[^1] But Docker's own hardening advice for the file-sharing bridge is not "the bridge is now safe" — it's "avoid needing it." Sandboxes has a `--clone` mode in which the host repository is mounted **read-only** at a fixed path, the agent works against a private clone made inside the VM, and — per Docker's own isolation documentation — "the agent cannot modify any tracked file or any byte under `.git/`."[^4] A read-only mount structurally removes the write-back path both of these bugs needed; there is no live, writable shared folder for a stale nodeid or a swapped symlink to abuse. The safest bridge, as usual, is the one you didn't build.
+
+## Trade-offs
+
+**The threat model this assumes is the one the product exists for.** CVE-2026-77179's CVSS vector has `AV:L` — the attacker needs to already be executing code inside the guest.[^2] That is not a weaker bug; it is *the exact* attacker Docker Sandboxes was built to contain — a coding agent that has been prompt-injected, or that installs and runs something malicious as part of a task. A local-only attack vector is disqualifying for a lot of vulnerability classes. It is not disqualifying here, because the whole point of the product is to survive that attacker.
+
+**Two researchers, two bridges, one release cycle is a signal about the architecture, not a coincidence about the researchers.** Both bugs are guessable from the design once you know it has exactly two deliberate crossings of the hypervisor wall, and that both crossings are implemented as "check a guest-supplied path once, act on it again later." That is a pattern worth auditing for anywhere else the same design shows up — not just in this product.
+
+**The patch has to reach you; it does not push itself.** Docker has not reported exploitation, and CISA's assessment lists none as of publication.[^1] But 0.42.0 fixing a critical, locally-exploitable VM escape only helps a machine that has actually pulled it — this ships as a developer-run CLI/runtime update, not a server-side SaaS patch applied for you. The gap between reserving a CVE (August 20) and shipping the fix (September 7) was about eighteen days;[^1][^2] the gap between your machine and that fix depends entirely on whether you updated.
+
+**The isolation layer changed; the shared-directory property didn't.** [The container post](/posts/six-agents-twenty-four-kilobytes) found that bind-mounting a project directory into a container hands back exactly the sharing the container's namespace wall was supposed to remove. virtio-fs sharing a directory into a microVM is the same trade at a different layer: whatever you deliberately share is, by construction, reachable from both sides. The hypervisor wall protects everything you didn't explicitly bridge. It was never going to protect the bridge itself.
+
+## Takeaways
+
+- **A stronger isolation technology doesn't remove the need for a boundary; it moves where the boundary has to hold.** Docker Sandboxes' hypervisor wall genuinely removes the shared-kernel attack surface a container has — and then reintroduces risk at the two deliberate bridges a coding agent still needs: a shared folder and a socket relay.
+- **Both patched bugs are the same shape at two different bridges.** CWE-59 (link following) in virtio-fs and CWE-367 (TOCTOU) in the socket relay are formally different bug classes that reduce to the same sentence: the host trusted a guest-supplied reference the second time without re-checking it, and the guest controlled what changed in between.
+- **`AV:L` means "the guest already ran code" — which is precisely the attacker this product is built to survive.** Don't read a local attack vector as a lesser bug when the product's entire purpose is containing a hostile or compromised guest.
+- **The documented mitigation is "don't build the bridge," not "the bridge is now safe."** Read-only clone mode removes the write-back path structurally; it is the same lesson as avoiding the convenience bind mount in the container post, one layer up the isolation stack.
+- **The fix shipped September 7; it only protects machines that pulled it.** A critical, locally-exploitable escape patched in a CLI tool depends on the developer updating — check what version of Docker Sandboxes you're actually running before trusting the boundary.
+
+## References
+[^1]: Docker, [Docker Sandboxes v0.42.0 release notes](https://github.com/docker/sbx-releases/releases/tag/v0.42.0) — fixes for CVE-2026-77179 and CVE-2026-79994, shipped September 7, 2026; current stable is 0.43.0.
+[^2]: Oren Yomtov, Accomplish AI, [Guest to host: escaping Docker's hypervisor](https://accomplish.ai/blog/escaping-dockers-hypervisor/), September 19, 2026 — root-cause analysis and the three-line proof of concept for CVE-2026-77179; CVE record via [CVEProject/cvelistV5](https://github.com/CVEProject/cvelistV5/blob/main/cves/2026/77xxx/CVE-2026-77179.json) and [Strix's CVE database](https://www.strix.ai/cve/CVE-2026-77179) — CVSS 9.4 (`AV:L/AC:L/AT:N/PR:N/UI:N`), CWE-59, reserved August 20 and published September 15, 2026.
+[^3]: The Hacker News, [Critical Docker Sandboxes Flaw Lets Malicious Guest Code Read and Modify macOS Host Files](https://thehackernews.com/2026/09/critical-docker-sandboxes-flaw-lets.html), September 2026 — independent corroboration of both CVEs, affected version ranges, and disclosure timeline.
+[^4]: Docker, [Sandboxes isolation architecture](https://docs.docker.com/ai/sandboxes/security/isolation/) and [Docker Sandboxes documentation](https://docs.docker.com/ai/sandboxes/) — microVM-per-sandbox design, network policy proxy, and `--clone` mode's read-only host mount at a fixed path.
+[^5]: MITRE, [CWE-59: Improper Link Resolution Before File Access ('Link Following')](https://cwe.mitre.org/data/definitions/59.html).
+[^6]: AiCybr, [Docker Sandboxes CVE-2026-77179 and CVE-2026-79994: Upgrade to 0.42.0 or Later](https://aicybr.com/blog/docker-sandboxes-cve-2026-77179-79994-host-escape) — discoverer attribution for CVE-2026-79994 (Jurre van Bergen, ThreatNotify) alongside CVE-2026-77179.
+[^7]: The Cyber Sec Guru, [Critical Docker Sandboxes Flaws CVE-2026-77179 & CVE-2026-79994 Enable AI Agent Host Escape](https://thecybersecguru.com/news/docker-sandboxes-cve-2026-77179-cve-2026-79994/) — the socket relay's intended purpose (blocking access to the host Docker daemon socket and system D-Bus) and the TOCTOU exploitation window.
+[^8]: OpenCVE, [CVE-2026-79994](https://app.opencve.io/cve/CVE-2026-79994) — official description, CVSS 8.7 vector (`AV:L/AC:L/AT:P/PR:N/UI:N`), CWE-367, affected versions 0.37.0 through before 0.42.0, and Docker's own reference links.
