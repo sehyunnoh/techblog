@@ -1,0 +1,152 @@
+---
+title: "Go's New SIMD Package Loses to a For Loop Below 256 Elements"
+description: "Go 1.27 ships a portable SIMD API with zero published benchmarks. Measured on real hardware: a plain loop wins below 256 elements, then SIMD holds a steady ~2x — not the 8x its lane count implies."
+pubDate: 2026-09-26
+tags: ['go', 'benchmark', 'backend', 'architecture', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+Go 1.27 ships an experimental package that lets ordinary Go code use SIMD instructions — AVX2 on one machine, NEON on another, a software fallback on whatever's left — without the programmer writing a single line of assembly or branching on `GOARCH`.[^1] The announcement post is long on design and short on one thing: it contains no benchmark numbers at all. The closest it comes is a qualitative goal — "near-asm-performance" — and a warning that reduction operations like summing a vector aren't supported yet.[^1]
+
+So I installed Go 1.27, wrote the dot product from the announcement post almost verbatim, and measured it on real hardware. The headline result isn't the one the lane count would predict.
+
+## What the package actually does
+
+`simd` — loosely modeled on Google's Highway C++ library — solves a problem Highway solved for C++ years earlier: every SIMD instruction set has a different native vector width, and code written for one doesn't run on another without a rewrite.[^1][^2] amd64 alone has three widths (128/256/512-bit across AVX, AVX2, AVX512); arm64's NEON is fixed at 128 bits; RISC-V's vector extension can be anywhere from 128 to 65,536 bits, decided at hardware design time, not compile time.[^1]
+
+Go's answer is to delete the width from the type system. `simd.Float32s` is *a* vector of float32s — however many the current CPU's registers hold — not a `Float32x8` or `Float32x16`. The package only exposes operations available on every supported platform, and fills any gaps with software emulation, so the same source compiles and runs correctly everywhere; it's just faster on hardware that has real support.[^1]
+
+<Figure
+  caption="The package's actual strategy: restrict the API to the intersection of platform capabilities, emulate the rest in software, and expose an escape hatch to hardware-specific types when a program needs to go outside that intersection."
+  label="Diagram showing the simd package sitting between Go source code and three hardware targets — amd64 with AVX/AVX2/AVX512, arm64 NEON, and wasm SIMD — routing operations to native instructions where supported and to software emulation otherwise, with a ToArch escape hatch to platform-specific types"
+>
+  <svg viewBox="0 0 760 260" width="100%" role="img" aria-labelledby="simd-arch-title">
+    <title id="simd-arch-title">How the portable simd package targets three different hardware widths from one source</title>
+
+    <rect x="0" y="10" width="760" height="50" rx="6" fill="var(--bg-subtle)" stroke="var(--line)" />
+    <text x="16" y="30" fill="var(--fg)" font-size="12" font-family="var(--font-sans)" font-weight="700">Your Go source: simd.Float32s, .MulAdd(), .Store()</text>
+    <text x="16" y="48" fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)">One vector width in the type system — whatever the running CPU actually has.</text>
+
+    <line x1="130" y1="60" x2="130" y2="90" stroke="var(--fg-muted)" stroke-width="1.5" />
+    <line x1="380" y1="60" x2="380" y2="90" stroke="var(--fg-muted)" stroke-width="1.5" />
+    <line x1="630" y1="60" x2="630" y2="90" stroke="var(--fg-muted)" stroke-width="1.5" />
+
+    <rect x="0" y="90" width="250" height="80" rx="6" fill="none" stroke="var(--series-1)" />
+    <text x="14" y="112" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">amd64</text>
+    <text x="14" y="130" fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)">AVX2 detected here:</text>
+    <text x="14" y="146" fill="var(--fg)" font-size="10.5" font-family="var(--font-sans)" font-weight="600">256-bit, 8 float32 lanes</text>
+    <text x="14" y="162" fill="var(--fg-muted)" font-size="10" font-family="var(--font-sans)">AVX512 on other chips: 16 lanes</text>
+
+    <rect x="255" y="90" width="250" height="80" rx="6" fill="none" stroke="var(--series-1)" />
+    <text x="269" y="112" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">arm64 NEON</text>
+    <text x="269" y="130" fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)">Fixed 128-bit width</text>
+    <text x="269" y="146" fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)">4 float32 lanes</text>
+
+    <rect x="510" y="90" width="250" height="80" rx="6" fill="none" stroke="var(--fg-muted)" stroke-dasharray="4 3" />
+    <text x="524" y="112" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">No SIMD hardware</text>
+    <text x="524" y="130" fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)">simd.Emulated() == true</text>
+    <text x="524" y="146" fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)">Same source, software fallback</text>
+
+    <line x1="0" y1="192" x2="760" y2="192" stroke="var(--fg-muted)" stroke-width="1" opacity="0.3" />
+    <text x="0" y="214" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">Need an op outside the portable intersection?</text>
+    <text x="0" y="234" fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)">x.ToArch() returns the hardware-specific type (e.g. archsimd.Float32x8) for build-tagged, platform-specific code.</text>
+  </svg>
+</Figure>
+
+Here's the dot product, using the package's actual API — verified against Go 1.27's real `simd` docs, not just the blog post's prose:
+
+```go
+func dotSIMD(x, y []float32) float32 {
+    var acc simd.Float32s
+    n := acc.Len() // lane count: whatever this CPU's vectors hold
+    var i int
+    for i = 0; i+n <= len(x); i += n {
+        u := simd.LoadFloat32s(x[i : i+n])
+        v := simd.LoadFloat32s(y[i : i+n])
+        acc = u.MulAdd(v, acc)
+    }
+    buf := make([]float32, n)
+    acc.Store(buf) // no ReduceSum in Go 1.27 — sum the lanes yourself
+    var sum float32
+    for _, f := range buf {
+        sum += f
+    }
+    for ; i < len(x); i++ { // tail: whatever didn't fill a full vector
+        sum += x[i] * y[i]
+    }
+    return sum
+}
+```
+
+Building it requires `GOEXPERIMENT=simd go build`; the package isn't part of a default build yet.[^1] On the machine this ran on — an Intel Core Ultra 7 Ultra 258V, amd64, no AVX512 — `simd.VectorBitSize()` reports 256, `simd.Emulated()` reports `false`, and `Float32s.Len()` is 8. That's real AVX2 hardware dispatch, not the software fallback.
+
+## The benchmark
+
+Dot product of two `float32` slices, five sizes spanning three orders of magnitude — 16, 256, 4,096, 65,536, and 1,048,576 elements — scalar loop against the `simd` version above, five repetitions each on Go 1.27.0 / windows-amd64, correctness checked first against the scalar result on odd and even lengths including a zero-length input.[^3]
+
+<Chart
+  type="line"
+  height={320}
+  format="plain"
+  caption="Speedup of the simd version over a plain scalar loop, median of 5 runs at each size. Below the dashed parity line, the for loop won."
+  label="Line chart of SIMD speedup factor over scalar at five array sizes: 0.66x at 16 elements (SIMD slower, below the parity line), 2.74x at 256, 1.97x at 4096, 1.99x at 65536, and 1.83x at 1048576"
+  labels={['16', '256', '4,096', '65,536', '1,048,576']}
+  series={[
+    { name: 'SIMD speedup (× scalar)', data: [0.66, 2.74, 1.97, 1.99, 1.83] },
+    { name: 'Parity', data: [1, 1, 1, 1, 1], dashed: true },
+  ]}
+  yTitle="Speedup (scalar time ÷ SIMD time)"
+/>
+
+At 16 elements — two full 8-lane vectors — the `simd` version is **slower**: 14.3 ns against the scalar loop's 9.5 ns, a median across five reps. The fixed cost of assembling a vector, storing it back out to sum the lanes by hand, and handling the tail doesn't pay for itself yet at that size. Cross into 256 elements and the picture flips hard: 2.74x. From there the speedup settles into a plateau — 1.97x at 4,096, 1.99x at 65,536 — before easing down to 1.83x at just over a million elements.
+
+## Why 8 lanes doesn't mean 8x
+
+That plateau sitting at roughly 2x, not 8x, isn't a flaw in the benchmark. It's what happens when the operation is memory-bound rather than compute-bound. The raw throughput numbers make this visible directly: the scalar loop holds steady at **~8.3 GB/s** across every size from 256 elements up to a million, regardless of how much arithmetic is happening per byte. That's a memory-bandwidth ceiling, not a CPU-arithmetic one — a dot product does one multiply-add per element and then throws the inputs away, so the bottleneck is how fast the two input slices can be streamed from memory, not how many lanes are available to multiply them. The `simd` version roughly doubles that figure, to **~16–17 GB/s**, at every size where it wins — vectorizing the *arithmetic* doesn't remove the memory bottleneck, it just makes each fetch do more useful work per cache line before the next one has to arrive.
+
+The size where the multiplier is highest — 256 elements, 2.74x — is also the size that fits trivially inside a 32–48 KB L1 cache (2 KB for both input slices combined). By a million elements, the two slices total 8 MB, large enough to spill past L2 into L3-scale territory on this chip, where both versions pay more for every fetch and the ratio between them compresses.[^4] Lane count sets a ceiling on how much a vectorized kernel *could* speed up; whether real code gets near that ceiling depends on whether the CPU can feed the vector unit fast enough to keep it busy — and for a streaming, one-op-per-element kernel like this, it usually can't.
+
+<Mermaid
+  caption="What GOEXPERIMENT=simd actually compiles, per the Go team's own description of the implementation: source using the portable simd.Float32s type gets rewritten into width-specific copies at compile time, with the right one selected once at startup — not branched on every call."
+  label="Flowchart showing Go source using simd.Float32s being compiler-rewritten into three width-specialized copies suffixed at simd128, at simd256, and at simd0 for the emulated fallback, with a runtime check at program startup selecting one specialized copy for the whole program run"
+  code={`
+flowchart LR
+  A["Go source<br/>simd.Float32s"] --> B["Compiler AST rewrite"]
+  B --> C["func@simd128<br/>NEON / SSE path"]
+  B --> D["func@simd256<br/>AVX2 path"]
+  B --> E["func@simd0<br/>emulated fallback"]
+  F["Program startup:<br/>detect hardware once"] -->|"picks one"| C
+  F -->|"picks one"| D
+  F -->|"picks one"| E
+`}
+/>
+
+That compile-time specialization is also why the API can afford to hide the width at all: the dispatch cost is paid once per process, not once per call, so `acc.Len()` inside a hot loop isn't a branch — it's a compile-time constant for whichever specialized copy of the function is actually running.[^1]
+
+## Trade-offs
+
+**This is one CPU's numbers, and that's the whole point of a portability layer.** `VectorBitSize()` returned 256 here because this chip has AVX2 and not AVX512. A machine with AVX512 gets 16 float32 lanes instead of 8 from the identical source, and would likely show a different plateau; an arm64 NEON machine is fixed at 128 bits, 4 lanes, lower still. The API's entire value proposition is that the *source* doesn't change across those machines — the measured speedup will.
+
+**The package is explicitly experimental, and it shows.** `ReduceSum` doesn't exist in Go 1.27; every user of `MulAdd`-into-an-accumulator has to hand-roll the lane sum this post did, and the Go team has already said a proper reduction is coming in the next release.[^1] Benchmark this again after that ships — the horizontal-sum boilerplate is exactly the kind of fixed cost that hurts most at small sizes.
+
+**The crossover point is a property of this operation, not of `simd` in general.** A kernel that does more arithmetic per byte loaded — matrix multiply, a cryptographic round function, anything compute-bound rather than streaming — would push both the crossover size down and the plateau multiplier up, potentially much closer to the full lane count. Dot product is close to the worst case for showing off a wide vector unit, which is exactly why it's a fair, unflattering first benchmark.
+
+**Measure before reaching for it in a hot path under 256 elements.** The scalar-vs-vector crossover in this specific benchmark landed between 16 and 256 elements. Real code rarely operates on exactly round numbers, and the fixed cost that makes the small case lose — assembling a vector, no built-in reduction, a manual tail loop — is present in every call, whether the input is 10 elements or 10 million.
+
+## Takeaways
+
+- **The official announcement shipped no benchmark numbers.** "Near-asm-performance" is a design goal, not a measurement — this post's numbers come from running the announcement's own example, not from anything Google or the Go team published.
+- **Below 256 elements, the plain scalar loop won outright** — 9.5 ns against 14.3 ns, median of 5 runs — because assembling a vector and hand-summing its lanes has a fixed cost the tiny input can't amortize.
+- **From 256 elements up, the speedup plateaus around 1.8–2.7x, not the 8x the CPU's lane count would suggest**, because dot product is memory-bandwidth-bound: both versions cap out near a fixed GB/s ceiling, and vectorizing the arithmetic doesn't widen that pipe.
+- **`ReduceSum` doesn't exist yet.** Every accumulator pattern in Go 1.27 needs a hand-written lane sum — a real, measurable fixed cost that the Go team has already flagged as fixed in a future release.
+- **The API's portability claim is real; its performance claim is hardware-specific by construction.** The exact multiplier this post measured belongs to one AVX2 chip. The source code that produced it will also run — differently, and only measurement will say how — on NEON, AVX512, or nothing at all.
+
+## References
+[^1]: David Chase and Junyang Shao, [Platform-independent SIMD in Go](https://go.dev/blog/simd-experiment), go.dev, September 24, 2026 — the `simd` package's design, the intersection-plus-emulation strategy, the `GOEXPERIMENT=simd` and `GODEBUG=simd=…` build/runtime controls, the compile-time specialization into width-suffixed functions, and the explicit note that reduction operations aren't supported in Go 1.27.
+[^2]: Google, [Highway: performance-portable, length-agnostic SIMD with runtime dispatch](https://github.com/google/highway) — the C++ library the Go package is loosely modeled on.
+[^3]: Benchmarks in this post: Go 1.27.0, windows/amd64, Intel Core Ultra 7 258V, `GOEXPERIMENT=simd`, `go test -bench=. -benchmem -benchtime=1s -count=5`, median of 5 reps reported per size; correctness verified against the scalar result for lengths 0, 1, 7, 8, 9, 16, 17 and 1,000 before benchmarking. Not a published or peer-reviewed number — a local, reproducible measurement on one machine.
+[^4]: Cache sizes for this chip (Intel Core Ultra 7 258V, "Lunar Lake") per Windows CIM: L1 128–256 KB per core cluster, L2 in the low single-digit megabytes, L3 12 MB shared — consistent with the observed transition from near-full vectorization benefit at 256 elements (2 KB, comfortably L1-resident) to a compressed ~1.8x at 1,048,576 elements (8 MB combined, spilling toward L3-scale traffic).
