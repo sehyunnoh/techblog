@@ -1,0 +1,117 @@
+---
+title: "DeepSeek's Agent Sandboxes Are Reused a Median of Three Times"
+description: "DeepSeek's DSec runs 380,000 concurrent AI-agent sandboxes a day. Not by caching one big image, but by admitting most of a sandbox can never be reused, and building around that instead."
+pubDate: 2026-09-27
+tags: ['ai', 'devops', 'docker', 'architecture', 'cost-engineering', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+DeepSeek published a paper this week describing the infrastructure that runs sandboxed environments for its agent reinforcement-learning training.[^1] The scale numbers are the ones every summary leads with: one deployment unit handles 3 million sandboxes a day, peaks at 380,000 concurrent, and creates over 5,000 new sandboxes per second.[^1] Those numbers describe volume. They don't explain why the problem was hard.
+
+The number that does is smaller and stranger: across a one-week production sample, the median container-based sandbox was built from an image combination reused by only **3** other sandboxes.[^1] Not 3,000. Three. At a company running millions of these a day, most of what gets built gets built once.
+
+[A previous post on this blog](/posts/six-agents-twenty-four-kilobytes) measured what six containers cost when they share a dependency layer: 24.6 kB of marginal disk for isolation that would otherwise cost 465 MB each. That measurement assumed reuse was the norm and cheap once you had it. DSec's numbers describe the opposite regime: reuse that barely happens, at a scale where "barely" is still tens of thousands of distinct combinations a week. The fix isn't a bigger cache. It's not needing one.
+
+## Why one image per task doesn't work
+
+The paper's own numbers make the shape of the problem concrete. In one week of production traffic, the container fleet alone used 11,266 distinct base images against 102,171 distinct workspaces, totaling 82.8 TB.[^1] The microVM fleet, built for more security-sensitive tasks, ran a leaner 2 base images against 53,590 workspaces.[^1] A single training job can burst-request up to 32,000 sandboxes at once, and roughly 90% of them use less than 5% of the CPU they were allocated, because most agent tasks spend their time waiting on tool calls, not computing.[^1]
+
+Bake a base image, a workspace, and a toolkit into one monolithic image the way a typical CI pipeline does, and every one of those three axes multiplies against the other two. Upgrade one of `m` base images and you rebuild all `N` combinations that use it: O(m·N) work. Upgrade one of `k` toolkits and it's O(k·N).[^1] At 11,266 base images and 102,171 workspaces, that multiplication isn't a rounding error, it's the whole cost.
+
+<Figure
+  caption="A monolithic image multiplies three independent axes together, so upgrading any one means rebuilding every combination that touches it. DSec's fix is to stop multiplying: keep each axis as its own read-only layer, and let a sandbox mount the three it needs."
+  label="Diagram contrasting a monolithic image build that multiplies base images, workspaces and toolkits together (O of m times N work to upgrade one base image) against a layered approach where each axis is an independently versioned read-only layer mounted together at sandbox creation (O of m work to upgrade one base image)"
+>
+  <svg viewBox="0 0 760 260" width="100%" role="img" aria-labelledby="dsec-layers-title">
+    <title id="dsec-layers-title">Monolithic image multiplication versus independently versioned layers</title>
+
+    <text x="0" y="14" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">MONOLITHIC (before)</text>
+    <rect x="0" y="26" width="350" height="110" rx="6" fill="none" stroke="var(--fg-muted)" stroke-dasharray="4 3" />
+    <text x="14" y="50" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">m base images × N workspaces × k toolkits</text>
+    <text x="14" y="72" fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)">every combination is one baked image</text>
+    <text x="14" y="96" fill="var(--series-5)" font-size="11" font-family="var(--font-sans)" font-weight="600">upgrade 1 base image → rebuild O(m·N)</text>
+    <text x="14" y="116" fill="var(--series-5)" font-size="11" font-family="var(--font-sans)" font-weight="600">upgrade 1 toolkit → rebuild O(k·N)</text>
+
+    <text x="410" y="14" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">LAYERED (DSec)</text>
+    <rect x="410" y="26" width="350" height="220" rx="6" fill="none" stroke="var(--fg)" stroke-width="1.5" />
+    <rect x="424" y="40" width="322" height="34" rx="4" fill="var(--bg-subtle)" stroke="var(--line)" />
+    <text x="434" y="61" fill="var(--fg)" font-size="10.5" font-family="var(--font-sans)">Writable top layer (per sandbox)</text>
+    <rect x="424" y="80" width="322" height="34" rx="4" fill="none" stroke="var(--series-1)" />
+    <text x="434" y="101" fill="var(--fg)" font-size="10.5" font-family="var(--font-sans)">Toolkit, EROFS, read-only, versioned</text>
+    <rect x="424" y="120" width="322" height="34" rx="4" fill="none" stroke="var(--series-1)" />
+    <text x="434" y="141" fill="var(--fg)" font-size="10.5" font-family="var(--font-sans)">Workspace, EROFS, read-only, versioned</text>
+    <rect x="424" y="160" width="322" height="34" rx="4" fill="none" stroke="var(--series-1)" />
+    <text x="434" y="181" fill="var(--fg)" font-size="10.5" font-family="var(--font-sans)">Base image, EROFS, read-only, versioned</text>
+    <text x="424" y="216" fill="var(--fg)" font-size="11" font-family="var(--font-sans)" font-weight="600">upgrade 1 base image → rebuild O(m)</text>
+    <text x="424" y="236" fill="var(--fg)" font-size="11" font-family="var(--font-sans)" font-weight="600">upgrade 1 toolkit → rebuild O(k)</text>
+  </svg>
+</Figure>
+
+The mechanism for the fix is `overlayfs`, but not the way a Dockerfile normally uses it. DSec patches `dockerd`, about 30 lines, to construct the `lowerdir` stack dynamically at creation time instead of baking it in advance, so a base image, a workspace, and a toolkit can each be versioned and stored independently and only get stacked together when a specific sandbox actually needs that combination.[^1] Each read-only layer is stored as EROFS rather than a plain tarball, which keeps the layer compressed while still allowing block-level, on-demand reads instead of requiring the whole layer to be unpacked up front. MicroVM sandboxes get the equivalent via OverlayBD-formatted disks, merged inside the guest with its own overlayfs.[^1] The result the paper reports: upgrading one base image costs O(m), upgrading one toolkit costs O(k), and neither touches the other N or k combinations that don't use it.[^1]
+
+## Why on-demand beats eager, and by how much
+
+Splitting the layers apart doesn't automatically make anything faster; it just makes it possible to fetch only the layer you need instead of a whole baked image. The paper's own benchmarks show what that's worth in two separate experiments.
+
+<Chart
+  type="bar"
+  height={320}
+  format="plain"
+  caption="Two separate benchmarks from the paper, same shape: fetching only what a task actually touches, on demand, beats copying everything up front, by roughly the same 1.7x margin both times."
+  label="Bar chart of completion time in minutes for four scenarios: evaluation workspace setup with tar at 79 minutes versus EROFS at 45 minutes, and an 8192 container burst with eager image pull at 60 minutes versus on-demand fetch at 35 minutes"
+  labels={['Workspace: tar', 'Workspace: EROFS', '8,192-burst: eager pull', '8,192-burst: on-demand']}
+  series={[{ name: 'Completion time (minutes)', data: [79, 45, 60, 35] }]}
+  yTitle="Minutes"
+/>
+
+Setting up an evaluation workspace from a plain tar archive took 79 minutes; the same workspace as an EROFS layer took 45, a 1.76x difference, with 5.5x less disk write traffic along the way.[^1] Bursting 8,192 containers at once, eagerly pulling each full image first took 60 minutes and wrote roughly 1,600 GB to disk; fetching data on demand from DeepSeek's own distributed filesystem as each sandbox actually touched it took 35 minutes and wrote roughly 700 GB, a 57% reduction, and containers reached full concurrency immediately instead of after a 20-minute pull delay.[^1]
+
+The reason both benchmarks land in the same place is the same underlying fact: most of a base image is never read during a given task. The paper measured actual file-access rates by language: C++ tasks touched 8.7% of their base image's files, Go 13.3%, Java 9.2%, JavaScript 4.2%, Python 6%.[^1] Eagerly copying a whole image means paying, in full, for the roughly 90% of it that a task was never going to open. On-demand EROFS reads only pull the blocks a running sandbox actually asks for, so the other 90%+ simply never crosses the network.
+
+## The other half of "elastic": surviving a preempted GPU
+
+DSec's second problem has nothing to do with images. Agent RL training needs GPUs, and DeepSeek's GPUs are preemptible, meaning training can be paused mid-rollout to give priority workloads the hardware. In the paper's earlier design, the agent loop that drives a sandboxed task ran inside the same pod as model serving and the RL framework. When the GPU got preempted, that pod died, and recovering meant replaying a log of every command the agent had issued to reconstruct where the rollout had gotten to.[^1]
+
+<Mermaid
+  caption="Moving the rollout's real state out of the preemptible GPU pod and into DSec itself removes the need to reconstruct anything: the state was never at risk in the first place."
+  label="Flowchart comparing two designs: in the earlier design, a GPU preemption kills a pod containing both training and the agent loop, requiring command log replay to recover rollout state; in the current design, the agent loop's state lives in DSec's worker container and sandbox, independent of the preemptible GPU pod, so a preemption only affects model training and the rollout state is never lost"
+  code={`
+flowchart TD
+  A["Earlier design:<br/>agent loop inside the<br/>preemptible GPU pod"] --> B["GPU preempted"]
+  B --> C["Pod dies, agent loop lost"]
+  C --> D["Recovery: replay command log"]
+
+  E["Current design:<br/>agent loop's state lives in<br/>DSec worker + sandbox"] --> F["GPU preempted"]
+  F --> G["Training pod reconnects later"]
+  G --> H["Rollout state was never there to lose"]
+`}
+/>
+
+The fix is a straightforward separation once you see it stated: the preemptible GPU pod does model updates and nothing else, while the actual state of a rollout, a worker container acting as the scaffold's control layer plus the agent sandbox holding tools and accumulated progress, lives inside DSec as the single source of truth.[^1] A GPU preemption interrupts training. It doesn't touch the sandbox. When training reconnects, the rollout is exactly where it left off, with no log to replay.
+
+Idle sandboxes still need their memory back during a preemption, so DSec pauses rather than kills them: `docker pause` freezes the process tree, `memory.reclaim` pulls back anonymous and file-backed pages, and resuming issues an `MADV_WILLNEED` prefetch before unpausing. MicroVMs go further, snapshotting memory and execution state, killing the Firecracker process entirely to reclaim its footprint, and restoring from the snapshot on a fresh process when the sandbox is needed again.[^1] Either way, the state that matters, the rollout, was already outside the part of the system that gets interrupted.
+
+## Trade-offs
+
+**This is a design for a workload that barely reuses anything and doesn't live long.** Median container lifetime in the sample was 17.4 minutes.[^1] Laziness pays off precisely because most of what's fetched is read once, briefly, by a short-lived sandbox that will never come back for it. A long-running service that touches most of its own image over its lifetime would pay EROFS's on-demand-fetch latency repeatedly for no benefit, and would be better served by the eager, fully-materialized image this paper is deliberately moving away from.
+
+**On-demand is not free at the moment it's needed.** The paper's own numbers show EROFS setup phases costing more CPU than tar's, not less, because pulling blocks on demand means more small fetches interleaved with tool calls instead of one long sequential unpack.[^1] The 1.7x wall-clock win comes from not doing wasted work, not from doing the necessary work faster.
+
+**Splitting one image into three independently versioned layers is also splitting one compatibility surface into three.** A monolithic image can only ever be exactly as broken as itself; a base image, a workspace, and a toolkit that are versioned and upgraded independently can now combine into a version pairing nobody tested. The paper reports the complexity win in build cost; it doesn't dwell on the compatibility-matrix cost that independence introduces on the other side of the ledger.
+
+**This is the disciplined version of a shortcut this blog has already flagged as a trap.** [The container-cost post](/posts/six-agents-twenty-four-kilobytes) found that bind-mounting a shared `node_modules` directory for convenience quietly handed sharing back to a set of containers meant to be isolated, at 465 MB a container. DSec's read-only, versioned EROFS layers are the same idea, a shared dependency layer across many sandboxes, done in a way that can't accidentally become a write-back path: the layer is read-only by construction, and the one thing every sandbox can write to is a private top layer nothing else ever mounts.
+
+## Takeaways
+
+- **The number that actually explains DSec's difficulty is reuse, not volume.** A median container-based sandbox in production was built from a combination shared by only 3 others, at a scale generating over 5,000 new sandboxes a second.
+- **Monolithic images turn diversity into multiplication.** Baking base image, workspace, and toolkit together means upgrading any one of them costs O(m·N) or O(k·N); independently versioned EROFS layers, mounted together at creation time, drop that to O(m) and O(k).
+- **On-demand beat eager by about the same 1.7x margin in two unrelated benchmarks**, because the underlying cause was the same both times: agent tasks touch a single-digit-to-teens percentage of a base image's files, so copying the rest eagerly is pure waste.
+- **"Elastic" describes the GPUs, not just the sandboxes.** Moving a rollout's real state out of the preemptible training pod and into DSec means a GPU preemption costs a reconnect, not a command-log replay.
+- **The same discipline that made this fast is what a shared dependency layer needs to be safe.** Read-only, versioned layers plus a private writable top layer close off exactly the accidental-sharing failure mode a plain bind mount opens.
+
+## References
+[^1]: DeepSeek-AI et al., [DeepSeek Elastic Compute (DSec): A Sandbox Infrastructure for Effective Agentic Training at Scale](https://arxiv.org/abs/2609.22978), arXiv:2609.22978, September 19, 2026: production workload characterization (burst sizes, CPU utilization, image and workspace counts, fanout distribution), the overlayfs/EROFS layering mechanism and its complexity analysis, the tar-versus-EROFS and eager-versus-on-demand benchmarks, per-language file access rates, and the GPU-preemption and rollout-state-decoupling design.
