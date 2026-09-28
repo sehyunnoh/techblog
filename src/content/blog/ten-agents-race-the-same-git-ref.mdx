@@ -1,0 +1,160 @@
+---
+title: 'Ten Agents Race the Same Git Ref. Nine Updates Vanish.'
+description: 'Ten processes update the same git ref at once. Git returns success for all ten, and by default it hides which nine of them never actually stuck.'
+pubDate: 2026-09-28
+tags: ['ai', 'llm', 'devops', 'architecture', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+Ten processes ran `git update-ref refs/heads/integration <sha>` at the same instant, against the same ref, in the same repository. All ten exited 0. Git told every one of them the write had succeeded.
+
+Only one of the ten survived. Check the ref afterward and it points to whichever process happened to finish last. The other nine, each one a clean, zero-exit-code success, are gone. Not logged as an error. Not flagged as a conflict. Just absent, as if they had never run.
+
+That's the actual result behind this post, and it's relevant right now because of a tool that hit GeekNews this week: [`max-sixty/worktrunk`](https://github.com/max-sixty/worktrunk), a CLI for running several coding agents in parallel git worktrees. It's four months old, past 8,400 stars, and its signature command, `wt merge`, does precisely the operation that produced the race above: it folds a finished agent's branch into a trunk branch from a worktree that never checked that branch out.[^1]
+
+[A previous post on this blog](/posts/agent-fleet-shares-one-git) measured what `git worktree` actually isolates and found the boundary holds for the files an agent's own worktree owns: a private index, a private `HEAD`, a private staging area. Agents commit in parallel without touching each other's work, and the numbers below confirm that again. What that post didn't cover is the step after committing: folding several agents' branches back into one. That's a different operation, with a different failure mode, and it's the one worktrunk automates.
+
+## Separate branches really are safe to commit to
+
+Five worktrees, five branches, twenty commits each, fired at the same time from separate processes on this machine (git 2.55.0.windows.4, a scratch repository built for this test):[^5]
+
+<Chart
+  type="bar"
+  height={300}
+  format="plain"
+  caption="Same 100 commits, same machine. Running five agents at once on five separate branches finishes in a third of the sequential time, with zero commit failures either way. Separate branches mean separate ref files, so there is nothing to contend over."
+  label="Bar chart comparing wall clock time in milliseconds for one hundred git commits split across five agents on five branches, run concurrently at 7238 milliseconds versus run sequentially at 23674 milliseconds"
+  labels={['Concurrent (5 agents at once)', 'Sequential (one at a time)']}
+  series={[{ name: 'Wall time for 100 commits (ms)', data: [7238, 23674] }]}
+  yTitle="Milliseconds"
+/>
+
+Zero commit failures in either run. This is the expected result, and it's worth stating plainly why: each agent's branch is its own file under `refs/heads/`, and each worktree has its own `index.lock`. There's no shared resource for two commits on two different branches to fight over. The 3.27x speedup is close to what five independent processes should buy you, minus the overhead of spawning a `git` process per commit on Windows.
+
+This is the case worktrunk's `wt switch` and everyday agent commits live in, and it holds up. The trouble starts one step later.
+
+## The moment two agents target the same branch
+
+`wt merge` exists to take a feature branch and land it on a target branch, whether that's `main` or an integration branch shared by a fleet of agents.[^1] That target branch typically isn't checked out in the worktree doing the merging, so this isn't the familiar `git merge` you run inside a checkout. It's closer to a `git push` into a bare-style destination: read the target's current tip, verify the incoming commits build on it, then move the target ref forward.
+
+To see what happens when several agents try to do that at once, I pointed ten worktrees at the same non-checked-out branch and had all ten run the plainest possible ref update simultaneously:
+
+```bash
+$ git update-ref refs/heads/integration <this-agent's-sha>
+```
+
+<Mermaid
+  caption="Ten worktrees update the same branch at once. Git's default lock retry serialises the actual writes just enough that all ten calls return success. The final value on the branch is whichever call happened to run last; the other nine successful writes leave no trace."
+  label="Sequence diagram showing ten agents each calling git update-ref against the same ref, all receiving exit code 0, while the ref's final value reflects only the last agent to write, with the other nine updates producing no error and no record"
+  code={`
+sequenceDiagram
+    participant A1 as Agent 1
+    participant A2 as Agent 2
+    participant A9 as Agent 9
+    participant A10 as Agent 10
+    participant Ref as refs/heads/integration
+
+    A1->>Ref: update-ref (new sha)
+    Ref-->>A1: exit 0
+    A2->>Ref: update-ref (new sha)
+    Ref-->>A2: exit 0
+    Note over A2,A9: eight more agents, same call, same exit 0
+    A9->>Ref: update-ref (new sha)
+    Ref-->>A9: exit 0
+    A10->>Ref: update-ref (new sha)
+    Ref-->>A10: exit 0
+    Note over Ref: final value = agent 10's sha only.<br/>agents 1 through 9 succeeded and left nothing behind.
+`}
+/>
+
+Ten out of ten calls returned 0. Fifty out of fifty did the same when I reran the test with forty more worktrees. In both runs, exactly one write is left standing afterward; the rest are indistinguishable, from the caller's point of view, from having never happened.
+
+## Git's own retry is what's hiding this
+
+This isn't a Windows quirk or a fluke of my test rig. It's a documented setting doing exactly what it's documented to do. `core.filesRefLockTimeout` controls how long `git update-ref` keeps retrying when the ref's lock file is already held, and it defaults to 100 milliseconds of retrying before giving up.[^2] That's long enough that ten or even fifty short-lived `git update-ref` calls, launched close together, each eventually get their turn at the lock and each report success, while quietly clobbering whatever the previous holder wrote.
+
+Turn the retry off and the same race stops hiding:
+
+```bash
+$ git -c core.filesRefLockTimeout=0 update-ref refs/heads/integration <sha>
+fatal: update_ref failed for ref 'refs/heads/integration':
+  cannot lock ref 'refs/heads/integration': Unable to create
+  '.git/refs/heads/integration.lock': File exists.
+
+Another git process seems to be running in this repository, or
+the lock file may be stale
+```
+
+With retrying disabled, the ten-agent run produced 1 explicit failure out of 10; the fifty-agent run produced 1 out of 50. The collision rate didn't scale with agent count in this test, because the actual critical section, the read, verify, write and rename around the lock file, is short. What scales with agent count isn't the failure rate, it's the number of successful calls whose result you can no longer trust, because "succeeded" and "survived" turned out to be two different claims.
+
+## What worktrunk's merge command actually does
+
+The reason to look at worktrunk specifically, rather than just at `git update-ref`, is that its author already ran into this and built around it. The function behind `wt merge`, `advance_target`, doesn't call the two-argument form I used above. It calls the three-argument one:
+
+```rust
+// src/commands/worktree/push.rs, advance_target()
+repo.run_command(&[
+    "update-ref",
+    "-m",
+    reflog_message,
+    &target_ref,
+    new_sha,
+    old_sha,
+])
+```
+
+That third argument changes the operation's meaning entirely. Git's own documentation draws the line precisely: with two arguments, `update-ref` "stores the new object name in the ref"; with three, it stores the new value "after verifying that the current value of the ref matches" the third argument, and refuses otherwise.[^2] That's a compare-and-swap. `old_sha` is the target's tip as this agent last saw it. If nothing else has moved the branch in the meantime, the write goes through. If another agent's merge landed first, the check fails, loudly, with a nonzero exit code and a message an agent or a human can act on, instead of the silent overwrite from the section above.[^3]
+
+<Figure
+  caption="Same command, one added argument, opposite failure mode. The two-argument form is what a hand-rolled merge script or a plain force-push tends to reach for; worktrunk's merge path uses the three-argument form specifically so a stale write fails instead of winning silently."
+  label="Comparison of two forms of git update-ref: the two-argument form that always writes and can silently overwrite a concurrent update, versus the three-argument compare-and-swap form that verifies the ref's current value before writing and fails loudly if another writer got there first"
+>
+  <svg viewBox="0 0 700 210" width="100%" role="img" aria-labelledby="cas-title">
+    <title id="cas-title">Two-argument update-ref versus three-argument compare-and-swap update-ref</title>
+
+    <text x="0" y="14" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">NAIVE (what I used to reproduce the race)</text>
+    <rect x="0" y="26" width="330" height="160" rx="7" fill="var(--series-5)" opacity="0.1" stroke="var(--series-5)" stroke-width="1.3" />
+    <text x="14" y="52" fill="var(--fg)" font-size="12" font-family="var(--font-mono)" font-weight="600">update-ref REF NEW</text>
+    <text x="14" y="78" fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-sans)">writes NEW no matter what</text>
+    <text x="14" y="98" fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-sans)">REF currently holds</text>
+    <text x="14" y="130" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">exit 0 every time</text>
+    <text x="14" y="150" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">last writer wins, silently</text>
+
+    <text x="370" y="14" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">WORKTRUNK'S advance_target()</text>
+    <rect x="370" y="26" width="330" height="160" rx="7" fill="var(--series-1)" opacity="0.1" stroke="var(--series-1)" stroke-width="1.3" />
+    <text x="384" y="52" fill="var(--fg)" font-size="12" font-family="var(--font-mono)" font-weight="600">update-ref REF NEW OLD</text>
+    <text x="384" y="78" fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-sans)">writes NEW only if REF still</text>
+    <text x="384" y="98" fill="var(--fg-muted)" font-size="11.5" font-family="var(--font-sans)">equals OLD</text>
+    <text x="384" y="130" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">nonzero exit if stale</text>
+    <text x="384" y="150" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">stale writer fails, loudly</text>
+  </svg>
+</Figure>
+
+That single argument is the difference between a merge tool you can trust to tell you when it failed, and one that tells you it succeeded regardless.
+
+## Even a compare-and-swap has a seam
+
+Worktrunk's own test suite is candid that the three-argument fix doesn't close the gap all the way. One test, `advance_target_carries_dirty_files_and_refuses_atomically`, builds an incoming merge that would overwrite a file with local, uncommitted edits still sitting in the target worktree.[^4] The compare-and-swap on the ref succeeds fine; the problem shows up one step later, syncing that worktree's files to match the new tip. When the incoming change and the local edit touch the same file, `advance_target` detects it and rolls the ref update back atomically, rather than leaving the branch pointer ahead of a working tree it can't safely update.[^4] When the local edits don't overlap with what the merge changes, it carries the local file untouched and lets the ref move.
+
+The authors go further and document, in the source itself, a second and narrower seam: the compare-and-swap covers the ref update, but not the moment right after it, while the target worktree's files are being synced to match. A commit landing in that specific window can be pushed successfully and still get its content reverted by the sync that follows, while staying present in the branch's history. Worktrunk's response isn't to claim this can't happen. It re-reads the ref after the sync and, if it no longer matches what was just pushed, prints a warning rather than pretending nothing occurred.[^4]
+
+None of this is a defect specific to worktrunk. It's what's actually involved in making "several independent processes update one shared pointer" safe, and most of the pieces are invisible until you go looking, the way `core.filesRefLockTimeout` was invisible until I turned it off.
+
+## Takeaways
+
+- **A successful exit code from `git update-ref` doesn't mean your write survived.** With the default 100 ms lock retry, ten or fifty concurrent updates to the same ref can all return 0 while only one of them actually sticks.
+- **The default retry isn't a bug fix, it's a smoothing effect.** `core.filesRefLockTimeout` defaults to 100 ms specifically to make brief lock contention invisible.[^2] That's the right choice for a human occasionally racing a hook. It's the wrong one to lean on when N automated agents are all writing to the same branch.
+- **Two-argument `update-ref`, or an unqualified force-push, is a last-write-wins operation.** If your own tooling folds multiple agents' work into a shared branch this way, silent lost updates are the expected outcome under load, not an edge case.
+- **Three-argument `update-ref` turns a silent loss into a loud, actionable failure.** That's the whole fix: verify the old value, fail if it moved. Worktrunk's `advance_target` does exactly this, and cites the ref's own compare-and-swap semantics from git itself rather than inventing a lock of its own.[^3]
+- **Compare-and-swap on the ref doesn't cover everything downstream of it.** The working tree still has to be synced to the new tip, and worktrunk's own comments and tests acknowledge that window rather than hiding it: overlapping local edits cause an atomic rollback, and a race in the sync step produces a warning instead of a false "all clear."
+
+## References
+[^1]: [max-sixty/worktrunk](https://github.com/max-sixty/worktrunk), MIT OR Apache-2.0. Repository metadata read from the GitHub API on 2026-09-27: 8,436 stars, 302 forks, 50 open issues, first commit 2025-10-17, latest tag `v0.80.0`. The `wt merge` command and its squash, rebase and merge modes are described in the project's README.
+[^2]: Git documentation, [git-update-ref](https://git-scm.com/docs/git-update-ref) for the two-argument versus three-argument (compare-and-swap) semantics, and [git-config](https://git-scm.com/docs/git-config), `core.filesRefLockTimeout`: "The length of time, in milliseconds, to retry when trying to lock an individual reference. Value 0 means not to retry at all; -1 means to try indefinitely. Default is 100 (i.e., retry for 100ms)."
+[^3]: [`src/commands/worktree/push.rs`](https://github.com/max-sixty/worktrunk/blob/v0.80.0/src/commands/worktree/push.rs), function `advance_target` (line 374 at tag `v0.80.0`), the three-argument `update-ref` call this post quotes, and `handle_push` above it, which calls `advance_target` for the fast-forward path used by `wt merge`.
+[^4]: [`src/commands/worktree/push.rs`](https://github.com/max-sixty/worktrunk/blob/v0.80.0/src/commands/worktree/push.rs), test `advance_target_carries_dirty_files_and_refuses_atomically` (line 629) for the atomic-rollback behaviour on overlapping dirty files, and the surrounding comments in `advance_target` for the post-compare-and-swap working-tree sync race and the warning it produces when the ref no longer matches what was just pushed.
+[^5]: Measurements in this post were taken on git 2.55.0 (Windows) against scratch repositories created for the purpose, using `git worktree add` to create 5 to 50 worktrees on separate branches of one repository. Commit timing used five parallel shell processes each running twenty sequential commits; ref-update timing used one `git update-ref` call per worktree, launched together as background processes. Collision counts are from single runs at each setting and will vary with process scheduling; they are reported as observed, not as a guaranteed rate.
