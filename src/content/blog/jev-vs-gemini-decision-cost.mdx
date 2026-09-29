@@ -1,0 +1,177 @@
+---
+title: 'Jev and Gemini Agreed on Every Answer. Gemini Cost 34 Times As Much.'
+description: 'The same classification task, run through Jev and Gemini 3.8 Flash with real API calls: identical accuracy, four to five times the latency, eight to thirty-four times the cost.'
+pubDate: 2026-09-29
+tags: ['ai', 'llm', 'architecture', 'cost-engineering', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Chart from '../../components/Chart.astro';
+
+Eight lines of CI and git log output. Four categories to sort them into. Two ways to ask a model to do it, called for real, on the same eight lines, in the same sitting.
+
+Both got all eight right. One averaged 265.8 milliseconds and cost $17.75 per million decisions. The other averaged 1,099 to 1,387 milliseconds, depending on whether its reasoning mode was on, and cost $145.80 to $598.05 per million, depending on the same setting. Same answers, four to five times the wait, eight to thirty-four times the bill.
+
+[Two earlier posts on this blog](/posts/subagent-costs-34000-tokens) measured what a subagent pays just to exist: 34,040 tokens before it does any work, later [decomposed into a 31,484-token boot and a 2,688-token first turn](/posts/agent-identity-costs-104-tokens). That number is a consequence of a specific design choice: an agent that needs to make a small decision, like which tool to call or which of four categories a log line belongs to, pays for a full autoregressive model turn to get it, prompt, generation, parsing and all. TypeSafe's pitch for Jev is that this is the wrong tool for that job, and that a model trained only to return typed answers and probabilities, with no text generation, should do it faster and cheaper.[^1] This post tests that pitch directly, against a general-purpose model, with real API calls and real, official prices on both sides.
+
+## Why now, and why not TypeSafe's own numbers
+
+Jev launched on 2026-09-15, and its own launch post claims it is "40x-200x faster for the same levels of frontier intelligence," with a home-page figure of "193.6x faster, 444.6x cheaper" that the post itself flags as likely optimistic: "we expect that these are on the higher end of real world gains," and adds that the benchmarks behind it "were made by individuals on our model capabilities team, so some bias could exist."[^1] A vendor's own numbers, honestly caveated or not, aren't a reason to write about a two-week-old product. Two independent write-ups from unrelated authors are.
+
+On 2026-09-24, Privatemode AI published a benchmark converting a general model, GLM-5.3-Flash, into a Jev-style decision maker using nothing but prompting: prefill the response with `choice_index:` so the first generated token has to be an option index, then read the probability the model assigned to each option's token at that one position instead of sampling from them.[^2] No fine-tuning. Separately, a hobbyist blog extended the same logprobs trick to vision models, feeding webcam frames into a locally-run model and reading option probabilities off a single forced token.[^3] Two people, two different models, the same underlying technique, five days apart. That's a real pattern, not a vendor claim, and it's a good excuse to run the comparison myself rather than take either side's word for it.
+
+## What Jev actually returns
+
+Jev's API takes a `state` (the text to evaluate) and a map of typed questions, and answers every question against that state in one request.[^4] A Choice question defines the options and gets back the winning option plus the full probability distribution:
+
+```json
+POST https://api.typesafe.ai/v1/systemone
+{
+  "state": "fatal: Unable to create '/repo/.git/index.lock': File exists.",
+  "model": "jev-latest",
+  "questions": {
+    "category": {
+      "type": "choice",
+      "instructions": "Which category does this CI/git log line belong to?",
+      "criteria": {
+        "lock_contention": "a lock could not be acquired",
+        "network_error": "a network or DNS problem",
+        "syntax_error": "invalid source syntax",
+        "success": "completed with no error"
+      }
+    }
+  }
+}
+```
+
+```json
+{
+  "model": "jev-1.13.0",
+  "answers": {
+    "category": { "type": "choice", "choice": "lock_contention",
+      "probabilities": { "lock_contention": 0.97, "network_error": 0.01,
+                          "syntax_error": 0.01, "success": 0.01 },
+      "confidence": 0.96 }
+  },
+  "usage": { "input_tokens": 422, "output_tokens": 53 }
+}
+```
+
+Two details matter for the rest of this post. Pricing is per input token only, output tokens are free, at $42 per billion input tokens ($0.042 per million).[^4] And the response carries `usage.input_tokens` directly, so the cost of any given call is measurable from the response itself rather than estimated.
+
+## The experiment
+
+Eight lines, four categories: `lock_contention`, `network_error`, `syntax_error`, `success`. One of the lock-contention samples is the exact error message from [this blog's previous post](/posts/ten-agents-race-the-same-git-ref), `cannot lock ref ... File exists`, reused here as a realistic input rather than a contrived one.
+
+Each line went to Jev's Choice endpoint with the criteria shown above, and separately to Gemini 3.8 Flash's `generateContent` endpoint, prompted to return the same four-way choice as a JSON object and nothing else, at `temperature: 0`. Gemini ran twice: once with its default reasoning behavior, and once with `thinkingConfig.thinkingBudget` set to 0, its fastest, cheapest configuration.[^5]
+
+```python
+# Jev: one Choice question per line
+requests.post("https://api.typesafe.ai/v1/systemone", json={
+    "state": line, "model": "jev-latest",
+    "questions": {"category": {"type": "choice",
+        "instructions": "...", "criteria": CATEGORY_CRITERIA}},
+}, headers={"Authorization": f"Bearer {TYPESAFE_API_KEY}"})
+
+# Gemini: same categories, forced JSON, thinking off for the fast run
+requests.post(f".../models/gemini-3.8-flash:generateContent?key={KEY}", json={
+    "contents": [{"parts": [{"text": PROMPT.format(text=line)}]}],
+    "generationConfig": {"temperature": 0,
+        "thinkingConfig": {"thinkingBudget": 0}},
+})
+```
+
+Both models classified all eight lines correctly. The differences are entirely in latency and cost.
+
+<Chart
+  type="bar"
+  height={300}
+  format="plain"
+  caption="Same eight inputs, same correct answers. Jev's average includes one cold TLS handshake on the first call (554 ms); the remaining seven averaged 224.6 ms, which would widen every gap here further."
+  label="Bar chart of average latency in milliseconds across eight classification calls: Jev at 265.8 milliseconds, Gemini 3.8 Flash with thinking disabled at 1099.2 milliseconds, and Gemini 3.8 Flash with default thinking enabled at 1387.1 milliseconds"
+  labels={['Jev', 'Gemini (thinking off)', 'Gemini (thinking on, default)']}
+  series={[{ name: 'Average latency (ms)', data: [265.8, 1099.2, 1387.1] }]}
+  yTitle="Milliseconds"
+/>
+
+<Chart
+  type="bar"
+  height={300}
+  format="usd"
+  logY={true}
+  caption="Cost per million decisions, computed from each provider's official per-token price and this post's own measured token counts. Jev bills input tokens only; Gemini bills input and output, and thinking tokens count as output."
+  label="Bar chart on a logarithmic scale of cost per million decisions: Jev at 17.75 dollars, Gemini with thinking disabled at 145.80 dollars, and Gemini with default thinking enabled at 598.05 dollars"
+  labels={['Jev', 'Gemini (thinking off)', 'Gemini (thinking on, default)']}
+  series={[{ name: 'Cost per million decisions (USD)', data: [17.75, 145.8, 598.05] }]}
+  yTitle="USD per million decisions (log scale)"
+/>
+
+Turning reasoning off is the single best thing you can do for Gemini's number here, and it still isn't enough: 4.1x the latency and 8.2x the cost of Jev, using Gemini's own fastest, cheapest setting. Leave the default on, which is what most integrations do without touching a config flag, and it's 5.2x the latency and 33.7x the cost.
+
+## Why the gap is architectural, not a tuning mistake
+
+<Figure
+  caption="Jev answers with one forward pass over a fixed option set. A general chat model has to generate a token sequence and have code parse it back into an option, and disabling its reasoning mode removes the thinking tokens but not the sequential generation itself."
+  label="Comparison of two request shapes: Jev's typed Choice question returning option probabilities directly from one forward pass, against a general chat completion that must generate a token sequence including optional reasoning tokens before code parses out the answer"
+>
+  <svg viewBox="0 0 700 220" width="100%" role="img" aria-labelledby="shape-title">
+    <title id="shape-title">Typed Choice question versus generate-then-parse chat completion</title>
+
+    <text x="0" y="14" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">JEV: TYPED QUESTION</text>
+    <rect x="0" y="26" width="330" height="170" rx="7" fill="var(--series-1)" opacity="0.1" stroke="var(--series-1)" stroke-width="1.3" />
+    <text x="14" y="52" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">state + criteria in one request</text>
+    <text x="14" y="76" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">one forward pass over the fixed</text>
+    <text x="14" y="94" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">option set</text>
+    <text x="14" y="126" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">returns option + full</text>
+    <text x="14" y="144" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">probability distribution</text>
+    <text x="14" y="176" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">no free-text output to parse</text>
+
+    <text x="370" y="14" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">GENERAL CHAT MODEL</text>
+    <rect x="370" y="26" width="330" height="170" rx="7" fill="var(--series-5)" opacity="0.1" stroke="var(--series-5)" stroke-width="1.3" />
+    <text x="384" y="52" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">prompt asks for JSON</text>
+    <text x="384" y="76" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">optional reasoning tokens</text>
+    <text x="384" y="94" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">generated first, billed as output</text>
+    <text x="384" y="126" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">answer tokens generated</text>
+    <text x="384" y="144" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">one at a time, sequentially</text>
+    <text x="384" y="176" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">code must parse the JSON back out</text>
+  </svg>
+</Figure>
+
+This is the same shape of problem this blog measured in the subagent series: a general-purpose tool pays for capabilities the task never uses.[^6] There, it was a subagent's full tool roster sitting in its system prompt whether or not any tool got called. Here, it's a full autoregressive turn, reasoning included by default, spent on a decision with four possible answers.
+
+## Cross-checking against an independent measurement
+
+This post's numbers come from Gemini, not from Privatemode's GLM-5.3-Flash. If the direction only shows up with one particular general model, it isn't a finding, it's a coincidence. Privatemode's own benchmark, run independently five days earlier with a different model and a different pricing structure, lands in the same place:
+
+| | GLM-5.3-Flash (Privatemode, 28-dataset benchmark)[^2] | Gemini 3.8 Flash, thinking off (this post) |
+|---|---|---|
+| Accuracy vs. Jev | Median gap 0.7 points, not significant (p = 0.64) | Identical on all 8 samples |
+| Cost per million decisions | EUR 62 vs. Jev's EUR 16 (3.9x) | $145.80 vs. Jev's $17.75 (8.2x) |
+| Latency vs. Jev | Mixed by region: 180ms vs. 264ms from Germany, 299ms vs. 164ms from the US | 1,099ms vs. 266ms (4.1x) |
+
+Two independent measurements, two different general models, two different pricing structures, and both land the same way: general models can match Jev's accuracy on this kind of task, but pay several times its cost to do it. As a sanity check on this post's own arithmetic, back-computing Jev's price from its official $0.042-per-million-input-token rate and this post's measured 422.5 average input tokens gives $17.75 per million decisions, close to the EUR 16 Privatemode measured directly by running the calls themselves. Two unrelated methods, on two unrelated dates, converge on the same number for the same product.
+
+## What Jev can't do, and where the gap actually narrows
+
+None of this makes Jev strictly better. Jev's API accepts text only, no images, audio or video.[^4] GLM-5.3-Flash, being a general model, reached 70.2% accuracy on RVL-CDIP, a scanned-document image benchmark Jev cannot attempt at all.[^2] A judgment that needs to look at a picture has exactly one column in this comparison that applies to it, and it isn't Jev's.
+
+The latency comparison also isn't a clean sweep once geography enters it. Privatemode measured GLM-5.3-Flash beating Jev from servers in Germany while Jev beat GLM-5.3-Flash from servers in the US, a 264ms-vs-180ms flip to a 164ms-vs-299ms flip depending on which side of the Atlantic the call originates.[^2] That's routing and regional infrastructure, not model architecture, and it's a reminder that a single-digit-millisecond comparison run from one location, including this post's, describes that location and that day more than it describes a universal constant.
+
+And Jev itself is young enough that its own docs warn the ground is still moving: rate limits are described as "adjusting dynamically" while the company absorbs demand, with the explicit caveat that "the limits above can change without notice."[^4] A cost and latency advantage measured against a two-week-old product is a snapshot, not a guarantee it holds at whatever scale a real integration would run it at.
+
+## Takeaways
+
+- **The accuracy question was a non-issue, twice.** This post's 8-sample test and Privatemode's 28-dataset benchmark both found Jev and a general model landing on the same answers. The gap that matters is cost and latency, not correctness.
+- **Turning off reasoning is necessary but not sufficient.** Gemini with `thinkingBudget: 0` is still 4.1x slower and 8.2x more expensive than Jev per decision. The cost of generate-then-parse doesn't disappear when you remove the extra reasoning tokens on top of it.
+- **Two independent measurements agree on the shape, not just the vendor's own launch post.** Privatemode's GLM-5.3-Flash benchmark and this post's Gemini benchmark used different models, different pricing, different dates, and reached the same conclusion: match on accuracy, lose by several multiples on cost.
+- **A back-computed number and a directly measured one converged.** This post's $17.75-per-million figure, derived from Jev's published price and measured token counts, landed close to the EUR 16 Privatemode measured by actually running the calls. That's what makes both numbers worth trusting rather than either one alone.
+- **The advantage is scoped to what Jev can see.** Text-only judgments are its case. A judgment that needs an image is not, and neither is a claim about latency from a location nobody has tested yet.
+
+## References
+[^1]: TypeSafe, [Introducing System One Models and Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev), published 2026-09-15, for the "40x-200x faster" and "193.6x faster, 444.6x cheaper" claims, the company's own caveat that these figures are "on the higher end of real world gains" and were produced by "individuals on our model capabilities team, so some bias could exist," and the Kahneman System 1/System 2 framing behind the model class's name.
+[^2]: Privatemode AI, [Privatemode Decisions: A confidential alternative to Jev](https://www.privatemode.ai/blog/system-one-from-glm-flash), by Johannes Hötter and Marko Rosenmüller, published 2026-09-24, for the logit-extraction method (prefilled `choice_index:` plus reading option-token probabilities instead of sampling), the 28/29-dataset accuracy comparison, the per-region latency figures, the EUR 62 vs. EUR 16 cost-per-million figures, and the 70.2% RVL-CDIP result.
+[^3]: Allan R. B. Olsen, [personal blog](https://allanrbo.blogspot.com), for an independently built vision-capable extension of the same logprobs technique, used in this post only to establish that two unrelated authors documented the same method within the same week.
+[^4]: TypeSafe, [API reference](https://docs.typesafe.ai/api) for the Choice question and response shape quoted in this post, and [Models](https://docs.typesafe.ai/models) for `jev-1.13.0`'s $42-per-billion-input-token price, its text-only input restriction, its 64k/32k context limits, and the dynamically-adjusting rate limit warning.
+[^5]: Google, [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing) for Gemini 3.8 Flash's official rate ($0.75 per million input tokens, $3.75 per million output tokens including thinking tokens, introductory pricing through 2026-12-31 at the time of writing), and the [Gemini API `thinkingConfig` reference](https://ai.google.dev/gemini-api/docs/thinking) for the `thinkingBudget` parameter used to disable reasoning.
+[^6]: [Your Subagent Costs 34,000 Tokens Before It Reads a File](/posts/subagent-costs-34000-tokens) and [Your Agent's Identity Costs 104 Tokens](/posts/agent-identity-costs-104-tokens), the earlier posts on this blog that measured the fixed cost of a general-purpose agent turn and decomposed it into a 31,484-token boot and a 2,688-token first turn. Measurements in this post were taken 2026-09-29 with `jev-1.13.0` and `gemini-3.8-flash`, eight samples per configuration, one run per configuration; latency and token counts will vary with network conditions and are reported as observed rather than as a guaranteed rate.
