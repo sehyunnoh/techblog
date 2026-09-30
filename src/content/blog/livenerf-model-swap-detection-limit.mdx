@@ -1,0 +1,153 @@
+---
+title: 'It Swapped Opus 5 for Opus 5.5. The Detector Saw Nothing.'
+description: 'An open-source benchmark set out to catch Claude quietly getting worse after launch. Its own validation test, swapping in a different model, came back statistically indistinguishable from noise.'
+pubDate: 2026-09-30
+tags: ['ai', 'llm', 'architecture', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+To prove its own instrument works, a project called livenerf ran a test where it swapped Claude Opus 5 in for Claude Opus 5.5, a real, deliberate substitution of one model for a different one, and measured what came out. The result: an accuracy change of -3.8 points, with a 99% confidence interval of ±6.3 points, and a token-count change whose confidence interval ran from -46% to +8%.[^1] Both intervals cross zero. At the confidence level the project requires to declare anything, a genuine model swap is indistinguishable from noise.
+
+That's not a failure. It's the most useful sentence in the whole repository, because the project says it plainly rather than burying it: "this instrument can't detect a same-family model swap of that size in a validation's worth of samples."[^1] livenerf exists to answer a question that usually never gets a real answer, whether Claude quietly gets worse in the weeks after it ships, and its own validation run just drew the boundary of what it can and can't see.
+
+## Vibes versus vibes
+
+Reports that a hosted model gets weaker some time after launch, quieter answers, shallower reasoning, lower effort, are a recurring pattern across every provider, and every one of these arguments runs into the same wall: there was never a clean measurement taken on day zero to compare against. Two months in, nobody has the baseline, so the argument is vibes against vibes.
+
+livenerf is a small, single-purpose fix for that: start the clock on launch day, keep a frozen benchmark running once a day for thirty days, and use statistics that were already published for exactly this problem rather than inventing new ones. The repository was created on 2026-09-22, the same day Claude Opus 5.5 launched, and by 2026-09-29 had 595 stars, no chosen license yet, and a clean six-day run with zero missed days.[^2] It runs on Inspect, the UK AI Security Institute's open-source evaluation framework, with one specific choice: the "model" under test isn't called through an API key at all. It's headless Claude Code (`claude -p`), wrapped as an Inspect model provider, running against an ordinary Max subscription.[^3] There is no sampling-parameter trick available to make the model itself deterministic, thinking can't be turned off, so the project makes everything else deterministic instead: a frozen prompt set, a pinned CLI version, fixed grading code, and every raw log kept forever.
+
+## Turning a vibe into a testable claim
+
+The statistics aren't homegrown. livenerf follows Evan Miller's *Adding Error Bars to Evals: A Statistical Approach to Language Model Evaluations*, published by Anthropic itself in 2024.[^4] The core idea: measure the same item twice, once at baseline and once later, and look at the paired difference rather than two independent averages, because a paired design cancels out the fact that some questions are just harder than others.
+
+Getting to that panel took a calibration pass first. livenerf screened 2,336 questions across GPQA Diamond, MMLU-Pro, competition mathematics, and AIME 2025-26, sampling each one four times.[^2] Opus 5.5 got about 93% of them right on the first try, and 97% of the full set turned out to be questions the model always got right or always got wrong, useless for detecting drift, since a question with no variance can't show a change. The 78 questions left, the ones the model gets right only sometimes, became the panel.
+
+<Mermaid
+  caption="From 2,336 candidate questions down to a locked 78-question panel. The 97% that were always right or always wrong carry no information about drift and were dropped before the panel was even confirmed."
+  label="Flowchart showing 2336 candidate questions screened with four samples each, splitting into 97 percent always right or always wrong which are discarded, and 78 questions sometimes right which become the calibrated panel, which is then hashed and locked"
+  code={`
+flowchart TD
+  A["2,336 candidate questions<br/>screened, 4 samples each"] --> B["97%: always right<br/>or always wrong, discarded"]
+  A --> C["78 questions:<br/>sometimes right"]
+  C --> D["resampled fresh:<br/>54.7% corrected to 62.0%"]
+  D --> E["SHA-256 hash locked<br/>to data/panel.lock"]
+`}
+/>
+
+Even the selection itself needed a correction. Questions chosen for looking close to 50/50 are, by construction, likely to look more uncertain than they really are, so when livenerf resampled the 78 questions fresh, the measured pass rate rose from 54.7% to 62.0%, and the project's power calculations use the corrected number rather than the original screening estimate.[^2] Once the panel was final, its SHA-256 hash was committed into the repository, and the daily runner now refuses to execute if the live panel no longer matches that hash.[^2] A benchmark that can silently change its own questions over a thirty-day series isn't measuring drift in the model, it's measuring drift in the benchmark.
+
+## The rule for calling it, decided before there was any data to look at
+
+The decision rule was written and committed before the baseline started, and it requires all four of the following at once before livenerf will say anything changed:[^5]
+
+1. The 99% confidence interval on the paired difference excludes zero, in the same direction, in two consecutive ten-day windows.
+2. The difference is at least 3 percentage points, in both windows.
+3. The harness is identical to the baseline's: same CLI version, same hash over the provider, tasks, graders, prompts and lockfile.
+4. The sample error rate in both windows is under 5%.
+
+Point three exists because of a specific failure mode the project calls out directly: a Claude Code update changes the harness surrounding the model, and a changed harness produces results that look exactly like a changed model. Pinning the CLI version and hashing the surrounding code is how livenerf tells those two things apart, rather than assuming they're the same.
+
+## What the validation run actually proved
+
+Before trusting any of this against real data, livenerf ran a validation series: known interventions, checked against the same pipeline, to see whether the instrument could detect a change it had deliberately introduced.[^1]
+
+<Figure
+  caption="Each bar is a measured accuracy change with its confidence interval. Lower effort is clearly visible even at the loosest setting; the deliberate model swap, the one change that should matter most, lands inside the zero line."
+  label="Forest plot of four validation results with confidence intervals: effort low versus high at negative 8.3 plus or minus 4.5 points, effort medium versus high at negative 4.2 plus or minus 3.9 points, an A/A check that should show no change at positive 6.4 plus or minus 3.6 points, and swapping Opus 5 for Opus 5.5 at negative 3.8 plus or minus 6.3 points whose interval crosses zero"
+>
+  <svg viewBox="0 0 700 260" width="100%" role="img" aria-labelledby="forest-title">
+    <title id="forest-title">Four validation results, plotted as accuracy-point change with confidence intervals</title>
+
+    <line x1="350" y1="20" x2="350" y2="230" stroke="var(--fg-faint)" stroke-dasharray="4 3" />
+    <text x="350" y="14" fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)" text-anchor="middle">0 (no change)</text>
+
+    {[
+      { y: 45, label: 'effort: low vs high', lo: -8.3-4.5, hi: -8.3+4.5, mid: -8.3, color: 'var(--series-1)', note: '-8.3 ± 4.5, excludes zero' },
+      { y: 105, label: 'effort: medium vs high', lo: -4.2-3.9, hi: -4.2+3.9, mid: -4.2, color: 'var(--series-3)', note: '-4.2 ± 3.9, borderline' },
+      { y: 165, label: 'A/A check (expect no change)', lo: 6.4-3.6, hi: 6.4+3.6, mid: 6.4, color: 'var(--series-4)', note: '+6.4 ± 3.6, crosses zero as expected' },
+      { y: 205, label: 'model swap: Opus 5 for 5.5', lo: -3.8-6.3, hi: -3.8+6.3, mid: -3.8, color: 'var(--series-5)', note: '-3.8 ± 6.3, crosses zero' },
+    ].map((row) => {
+      const scale = 10;
+      const cx = (v) => 350 + v * scale;
+      return (
+        <g>
+          <text x="0" y={row.y - 8} fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">{row.label}</text>
+          <line x1={cx(row.lo)} y1={row.y} x2={cx(row.hi)} y2={row.y} stroke={row.color} stroke-width="2.5" />
+          <line x1={cx(row.lo)} y1={row.y - 5} x2={cx(row.lo)} y2={row.y + 5} stroke={row.color} stroke-width="2" />
+          <line x1={cx(row.hi)} y1={row.y - 5} x2={cx(row.hi)} y2={row.y + 5} stroke={row.color} stroke-width="2" />
+          <circle cx={cx(row.mid)} cy={row.y} r="4.5" fill={row.color} />
+          <text x={cx(row.hi) + 10} y={row.y + 4} fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)">{row.note}</text>
+        </g>
+      );
+    })}
+  </svg>
+</Figure>
+
+Lowering effort to its minimum setting cut output tokens by 62% and accuracy by 8.3 points, both clearly outside the noise band. The medium-effort setting sat right at the edge, a 4.2-point drop with a confidence interval that barely reaches past zero. The A/A check, run to confirm the pipeline doesn't manufacture a signal out of nothing, came back at +6.4 points with a z-score of 1.79, consistent with zero but close enough to the threshold that the project flagged it rather than moved on.[^1]
+
+And then the model swap. Opus 5 in place of Opus 5.5 is not a subtle change, it's an entirely different model responding to the same 78 questions, and it produced a smaller measured effect than even the medium-effort setting did. livenerf's own conclusion is direct: at this sample size, a same-family swap of that magnitude is not something the instrument can see.[^1] A ten-day decision window has roughly 2.5 times the samples of one validation run, but nothing in the repository claims that's enough to close the gap, only that it might be.
+
+## Where things actually stand right now
+
+As of livenerf's last update, six of the planned thirty days had been collected, all of them baseline days, none missed, all run on the same pinned CLI version and the same harness hash.[^2] The design fixes the shape of what comes next: days 1 through 10 are the baseline, days 11 through 20 and 21 through 30 are the two decision windows the rule above requires, and the earliest day the decision rule can fire is day 30.[^5]
+
+<Figure
+  caption="The baseline finishes around day 10. The first row of real comparison data appears after day 20, but a decision needs agreement across both remaining windows, so the earliest possible call is day 30, around 2026-10-24."
+  label="Timeline showing day 1 through day 10 as the baseline period starting 2026-09-24, day 11 through 20 as decision window one, day 21 through 30 as decision window two, with a marker at day 6 for the current data collection point and a marker at day 30 for the earliest possible call around October 24 2026"
+>
+  <svg viewBox="0 0 700 130" width="100%" role="img" aria-labelledby="timeline-title">
+    <title id="timeline-title">livenerf's 30-day series: baseline, then two decision windows</title>
+
+    <rect x="0" y="30" width="233" height="34" fill="var(--series-3)" opacity="0.18" stroke="var(--series-3)" stroke-width="1.3" />
+    <text x="10" y="52" fill="var(--fg)" font-size="11" font-family="var(--font-sans)" font-weight="600">baseline: days 1-10</text>
+
+    <rect x="233" y="30" width="233" height="34" fill="var(--series-1)" opacity="0.13" stroke="var(--series-1)" stroke-width="1.3" />
+    <text x="243" y="52" fill="var(--fg)" font-size="11" font-family="var(--font-sans)" font-weight="600">window 1: days 11-20</text>
+
+    <rect x="466" y="30" width="233" height="34" fill="var(--series-5)" opacity="0.13" stroke="var(--series-5)" stroke-width="1.3" />
+    <text x="476" y="52" fill="var(--fg)" font-size="11" font-family="var(--font-sans)" font-weight="600">window 2: days 21-30</text>
+
+    <line x1="47" y1="20" x2="47" y2="80" stroke="var(--fg)" stroke-width="1.5" />
+    <text x="47" y="95" fill="var(--fg)" font-size="10.5" font-family="var(--font-sans)" text-anchor="middle">day 6</text>
+    <text x="47" y="108" fill="var(--fg-muted)" font-size="9.5" font-family="var(--font-sans)" text-anchor="middle">collecting now</text>
+
+    <line x1="466" y1="20" x2="466" y2="80" stroke="var(--fg-muted)" stroke-width="1.3" stroke-dasharray="3 3" />
+    <text x="466" y="95" fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)" text-anchor="middle">day 20</text>
+    <text x="466" y="108" fill="var(--fg-muted)" font-size="9.5" font-family="var(--font-sans)" text-anchor="middle">first data row</text>
+
+    <line x1="695" y1="20" x2="695" y2="80" stroke="var(--fg)" stroke-width="1.5" />
+    <text x="695" y="95" fill="var(--fg)" font-size="10.5" font-family="var(--font-sans)" text-anchor="end">day 30</text>
+    <text x="695" y="108" fill="var(--fg-muted)" font-size="9.5" font-family="var(--font-sans)" text-anchor="end">earliest call, ~Oct 24</text>
+  </svg>
+</Figure>
+
+The results table in the repository right now has exactly one row, and it reads "baseline (collecting)."[^2] There is no verdict to report, and there won't be one for another three weeks at minimum. The interesting thing about livenerf today isn't an answer to "has Claude gotten worse", it's that the question has been converted into something with a stated confidence level, a pre-committed threshold, and a known blind spot, which is a different kind of interesting than most claims in this space get to be.
+
+## What could still go wrong
+
+The daily run costs about 3.6% of a weekly Max plan budget to detect an accuracy change of roughly 7.5 points per ten-day window, which is cheap, but it also means the whole series depends on one person's subscription staying active and the runs actually happening on schedule for thirty straight days.[^2]
+
+There's a serving-side wrinkle that complicates even clean data collection: Anthropic's own safety classifier sometimes answers a request with Opus 5 instead of Opus 5.5, or refuses biology and some math questions outright, and livenerf has to detect and exclude those samples rather than silently scoring them.[^2] The same failure mode the model-swap validation deliberately created, a different model answering behind the same name, is something the live serving path can already do on its own, in miniature, which is one more reason the harness-identity check in the decision rule matters.
+
+A report-only audit of the 78 panel questions also found 8 answer keys that look wrong and 30 questions the auditors judged ambiguous, out of a panel picked specifically because the model doesn't always agree with the key.[^2] Nothing was dropped over it. livenerf pre-registered a sensitivity analysis that reruns the primary result without those questions once there's a primary result to rerun.
+
+And the project is unusually candid about a conflict most benchmarks in this space don't have to disclose: it measures Claude, and a meaningful share of its own code, including the item audit, was written with Claude.[^6] Its stated answer isn't to claim that's not a problem, it's to name the specific safeguards meant to contain it: pure-function graders that don't depend on model judgment, a decision rule fixed before any data existed, and every raw log public rather than summarized.[^6]
+
+## Takeaways
+
+- **A rigorous instrument can prove its own blind spot, and that's the useful outcome, not a wasted validation run.** livenerf's own test showed a real model swap producing a smaller measured effect than a milder effort reduction, and said so directly rather than adjusting the threshold to make the result look cleaner.
+- **Pre-registration is what makes a null result mean something.** The four-condition decision rule, the panel hash lock, and the CLI pin were all committed before the baseline started specifically so a later "no change detected" can't be read as the goalposts having moved.
+- **Harness drift and model drift produce the same symptom.** A Claude Code CLI update changes the surrounding harness, and that alone can look exactly like the model changing, which is why the decision rule checks a hash over the whole pipeline, not just a version number.
+- **There is no verdict yet, and there won't be for weeks.** Six of thirty days are done, all baseline. The earliest the decision rule can fire is day 30, around 2026-10-24. Anyone citing this project for a current answer on Opus 5.5 is citing a placeholder row that says "collecting."
+- **The instrument was built, in part, using the model it measures, and the project says so.** Its mitigation is process, not reassurance: fixed graders, a rule set before the data existed, and logs anyone can audit.
+
+## References
+[^1]: [`docs/VALIDATION.md`](https://github.com/ninjahawk/livenerf/blob/main/docs/VALIDATION.md) and the Validation summary in [`README.md`](https://github.com/ninjahawk/livenerf#status), read 2026-09-30, for the A/A check (+6.4 ± 3.6 points, z = 1.79), the effort-low and effort-medium accuracy and token deltas, and the Opus 5 for Opus 5.5 model-swap result (-3.8 ± 6.3 accuracy points, -23% tokens with a 99% CI of -46% to +8%) and the project's own statement that it "can't detect a same-family model swap of that size in a validation's worth of samples."
+[^2]: [ninjahawk/livenerf](https://github.com/ninjahawk/livenerf), created 2026-09-22 (the day Claude Opus 5.5 launched), 595 stars and 7 forks as of 2026-09-29, no license declared, Python. Repository metadata from the GitHub API; the calibration numbers (2,336 screened questions, 93% first-try accuracy, the 78-question panel, the 54.7%-to-62.0% selection-bias correction), the panel-lock mechanism, the safety-classifier substitution behaviour, the item-audit findings, and the 3.6%-of-weekly-budget figure are from `README.md` and [`docs/DESIGN.md`](https://github.com/ninjahawk/livenerf/blob/main/docs/DESIGN.md).
+[^3]: Inspect, the [UK AI Security Institute's](https://inspect.aisi.org.uk/) open-source evaluation framework, and livenerf's `claudecode` model provider, which wraps headless [Claude Code](https://code.claude.com/docs/en/headless) (`claude -p`) so an Inspect eval can run against a Max subscription instead of an API key.
+[^4]: Evan Miller, [*Adding Error Bars to Evals: A Statistical Approach to Language Model Evaluations*](https://arxiv.org/abs/2411.00640) (arXiv:2411.00640, 2024), published by Anthropic, for the paired-difference-with-clustered-standard-errors method livenerf's primary analysis follows.
+[^5]: [`PREREGISTRATION.md`](https://github.com/ninjahawk/livenerf/blob/main/PREREGISTRATION.md), for the four-condition decision rule, the baseline and decision-window schedule (days 1-10, 11-20, 21-30), and the day-30 earliest-call date.
+[^6]: `PREREGISTRATION.md`, "Author and auditor" section, for the project's own disclosure that much of the repository, including the item audit, was written with Claude, and the safeguards it names in response.
