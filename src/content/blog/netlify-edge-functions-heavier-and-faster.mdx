@@ -1,0 +1,147 @@
+---
+title: 'Netlify Made Its Edge Functions Heavier. They Got Five Times Faster.'
+description: 'Netlify replaced the lightweight sandbox running its edge functions with full virtual machines, and median latency dropped from about 30ms to 5 to 6ms.'
+pubDate: 2026-10-01
+tags: ['web', 'security', 'devops', 'architecture', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+Netlify's edge functions run about a billion times a day.[^1] Until this week, every one of those billion calls meant the function's code left Netlify's own network, traveled across the open internet to a separate hosted service, ran there, and traveled back. Netlify has now replaced that entire path with one that never leaves its own network, and runs the code inside a full virtual machine instead of the lightweight sandbox it used before. Median latency fell from a reported 25 to 40 milliseconds down to 5 to 6 milliseconds.[^1]
+
+That result runs against the usual rule of thumb. A full virtual machine is normally the heavier, slower option. A sandbox that shares a process with other code is normally the lighter, faster one. Here the heavier option won, and the reason why turns out to matter more than the headline number.
+
+## What an edge function actually runs on
+
+If "edge function" is new to you: it's a small piece of code, usually a handful of lines of JavaScript, that a hosting provider runs on a server physically close to whoever is making the request, instead of on your application's main server (often called the "origin"), which might be a continent away. Content delivery networks have cached static files this way for years. Edge functions extend the same idea to actual logic: redirecting a visitor based on their country, rewriting a URL, checking a cookie, before the request ever reaches your app. "Edge computing" is just the general name for doing that kind of work at the location nearest the request (the "edge" of the network) rather than in one central data center. The appeal is physics, not cleverness: a request that doesn't have to cross an ocean comes back sooner.
+
+Until this change, Netlify ran that code inside something called a V8 isolate. V8 is the JavaScript engine inside Chrome and Node.js, and in V8's own documentation, "an isolate is a VM instance with its own heap."[^2] It's a self-contained slice of memory and execution living inside one running V8 process, cheap enough that a single machine can host thousands of them. It's the same mechanism that lets a browser run a hundred tabs from a hundred different websites without each tab being a fully separate program.
+
+The trade-off is in where that isolation actually lives. Isolates share the process around them. Under normal operation one isolate can't read another's memory, but if a bug ever let code escape V8's own sandboxing, that escape would be happening inside a process that other isolates, possibly belonging to other customers, were also running in.
+
+## The old path left Netlify's own network
+
+Here's roughly what used to happen on every call:
+
+<Mermaid
+  caption="Before this change, a function call left Netlify's own network to run on a separate hosted execution service, then traveled back. That round trip across the open internet, not the V8 isolate itself, was the biggest piece of the old latency."
+  label="Flowchart showing a client request reaching a Netlify edge node, which forwards it outside Netlify's network to an external hosted execution service, where a V8 isolate runs the function before the response travels back across the internet to the edge node and then the client"
+  code={`
+flowchart LR
+    C[Client request] --> E[Edge node<br/>matches the route]
+    E -->|leaves Netlify's network| H[External hosted<br/>execution service]
+    H --> V[V8 isolate<br/>runs the function]
+    V -->|back across the internet| E2[Edge node]
+    E2 --> C2[Client]
+`}
+/>
+
+The edge node closest to the visitor did its job quickly: it matched the request against the site's configured routes in a fraction of a millisecond. What came after that was the problem. Running the function meant handing the request to a separate, externally hosted service reached over the public internet, which added a real network round trip to every single call, on top of whatever the function itself took to run.
+
+## The new path never leaves home
+
+The replacement runs functions inside Firecracker, an open-source hypervisor. A hypervisor is the layer of software that creates and manages virtual machines: it carves one physical computer into several smaller ones, each of which behaves as if it has the hardware entirely to itself. Firecracker builds what it calls "microVMs," full virtual machines with their own kernel, stripped down and purpose-built to start in a few milliseconds rather than the tens of seconds a general-purpose virtual machine typically takes. It's the same technology AWS built to run Lambda, built for the same problem: executing enormous numbers of short-lived, mutually distrusting pieces of code, cheaply and safely.[^3]
+
+<Mermaid
+  caption="The new path stays entirely inside Netlify's own network. An edge node still terminates the connection and matches the route, but it now hands the request to a compute node on the same network, which runs the function inside a Firecracker microVM instead of calling out to an external service."
+  label="Flowchart showing a client request reaching a Netlify edge node that terminates the connection and matches the route, then passing the request to a compute node on the same network, which runs the function inside a Firecracker microVM before the response returns through the compute node and edge node to the client"
+  code={`
+flowchart LR
+    C[Client request] --> E[Edge node<br/>TLS + route matching]
+    E -->|stays inside Netlify's network| N[Compute node<br/>same network]
+    N --> M[Firecracker microVM<br/>runs the function]
+    M --> N2[Compute node]
+    N2 --> E2[Edge node]
+    E2 --> C2[Client]
+`}
+/>
+
+The edge node still handles the parts it always did (ending the encrypted connection and matching the route), but the function itself now runs one short hop away, inside Netlify's own infrastructure, instead of across the open internet.
+
+## What actually got faster, and why
+
+<Chart
+  type="bar"
+  height={300}
+  format="plain"
+  caption="Netlify's own reported range for how long a typical (median) request took to run, before and after the change. These are the company's self-reported bounds, not numbers independently measured for this post."
+  label="Bar chart comparing the low and high end of Netlify's reported median latency range: 25 to 40 milliseconds before the change, versus 5 to 6 milliseconds after it"
+  labels={['Before (V8 isolates)', 'After (Firecracker microVM)']}
+  series={[
+    { name: 'Low end (ms)', data: [25, 5] },
+    { name: 'High end (ms)', data: [40, 6] },
+  ]}
+  yTitle="Milliseconds"
+/>
+
+When a company reports "median latency," also written as p50, it means that half of all requests finished faster than that number and half finished slower. Netlify also reports that its p99 latency, the time taken by the slowest 1 percent of requests, improved by 47.4 percent. The p99 number matters separately from the median because it's usually what a frustrated user experiences, even on a day when the median looks perfectly fine.
+
+Cold starts, the rare case where a microVM has to be created and booted rather than reused from a warm pool, affect roughly 1.2 percent of requests and average about 9 milliseconds.[^1] Netlify also reports that the microVM itself is created in under a millisecond and finishes booting in about 2 milliseconds at the p99 mark, fast enough that even a cold request barely shows it.
+
+It's worth being precise about where the speedup actually came from, because the obvious story (full virtual machines beat lightweight isolates) is the wrong one. Firecracker microVMs are, in every traditional sense, heavier than V8 isolates: they have their own kernel, their own memory, and they take longer to start from nothing than an in-process sandbox does. The win here came almost entirely from deleting a network round trip to an external service, something that had nothing to do with isolates or virtual machines as technologies. If Netlify had kept that same network hop and only swapped in a heavier sandbox at the far end, the result would likely have been slower, not five times faster.
+
+## A stronger wall, and why Netlify wanted one anyway
+
+Netlify's own blog post states the isolation argument plainly: "V8 isolates, no matter their name, do not provide this level of isolation."[^1] The level it's pointing to is the difference between sharing a process and not sharing one at all.
+
+<Figure
+  caption="A V8 isolate is a sandboxed slice of memory inside one shared process, so a bug that breaks that sandboxing happens inside a process other customers' code may also be running in. A Firecracker microVM gives each deployment its own kernel and its own memory, with the hypervisor itself standing between them."
+  label="Comparison diagram of two isolation models: on the left, several V8 isolates sharing one process, where a sandbox escape in one isolate occurs inside the same process as the others; on the right, separate Firecracker microVMs, each with its own kernel and memory, with no shared process between them"
+>
+  <svg viewBox="0 0 700 220" width="100%" role="img" aria-labelledby="isolation-title">
+    <title id="isolation-title">V8 isolates sharing one process versus separate Firecracker microVMs</title>
+
+    <text x="0" y="14" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">V8 ISOLATES (shared process)</text>
+    <rect x="0" y="26" width="330" height="178" rx="7" fill="var(--series-5)" opacity="0.1" stroke="var(--series-5)" stroke-width="1.3" />
+    <text x="14" y="48" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">one V8 process</text>
+    <rect x="14" y="56" width="302" height="38" rx="5" fill="var(--bg-subtle)" stroke="var(--line)" />
+    <text x="24" y="80" fill="var(--fg)" font-size="11.5" font-family="var(--font-mono)">Isolate A (your function)</text>
+    <rect x="14" y="102" width="302" height="38" rx="5" fill="var(--bg-subtle)" stroke="var(--line)" />
+    <text x="24" y="126" fill="var(--fg)" font-size="11.5" font-family="var(--font-mono)">Isolate B (another customer)</text>
+    <text x="14" y="168" fill="var(--fg)" font-size="11" font-family="var(--font-sans)" font-weight="600">if V8's own sandbox is ever</text>
+    <text x="14" y="184" fill="var(--fg)" font-size="11" font-family="var(--font-sans)" font-weight="600">broken, the escape happens</text>
+    <text x="14" y="200" fill="var(--fg)" font-size="11" font-family="var(--font-sans)" font-weight="600">inside this shared process</text>
+
+    <text x="370" y="14" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">FIRECRACKER MICROVMS (separate)</text>
+    <rect x="370" y="26" width="155" height="178" rx="7" fill="var(--series-1)" opacity="0.1" stroke="var(--series-1)" stroke-width="1.3" />
+    <text x="384" y="48" fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)">microVM A</text>
+    <rect x="384" y="56" width="127" height="56" rx="5" fill="var(--bg-subtle)" stroke="var(--line)" />
+    <text x="394" y="78" fill="var(--fg)" font-size="11" font-family="var(--font-mono)">your function</text>
+    <text x="394" y="96" fill="var(--fg-muted)" font-size="10" font-family="var(--font-sans)">own kernel, own memory</text>
+
+    <rect x="545" y="26" width="155" height="178" rx="7" fill="var(--series-1)" opacity="0.1" stroke="var(--series-1)" stroke-width="1.3" />
+    <text x="559" y="48" fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)">microVM B</text>
+    <rect x="559" y="56" width="127" height="56" rx="5" fill="var(--bg-subtle)" stroke="var(--line)" />
+    <text x="569" y="78" fill="var(--fg)" font-size="11" font-family="var(--font-mono)">another customer</text>
+    <text x="569" y="96" fill="var(--fg-muted)" font-size="10" font-family="var(--font-sans)">own kernel, own memory</text>
+
+    <text x="384" y="140" fill="var(--fg)" font-size="11" font-family="var(--font-sans)" font-weight="600">no process to share.</text>
+    <text x="384" y="156" fill="var(--fg)" font-size="11" font-family="var(--font-sans)" font-weight="600">the hypervisor itself sits</text>
+    <text x="384" y="172" fill="var(--fg)" font-size="11" font-family="var(--font-sans)" font-weight="600">between every microVM</text>
+  </svg>
+</Figure>
+
+In practice this means every Netlify "deploy" (one version of a site's code and its environment variables) gets its own microVM identity. A compromised deployment can misbehave inside its own virtual machine, but it has no shared process to climb into in order to reach a neighbor's code or data. That's a real security upgrade, and it's also the kind of upgrade that's hard to sell on its own, since most days nothing goes wrong either way. Pairing it with a five-times latency win is what makes the trade-off easy to justify internally, even though the two benefits came from different parts of the redesign.
+
+## Trade-offs worth noticing
+
+- These numbers are Netlify's own, published on Netlify's own blog. No outside party has independently reproduced them yet, so treat them the way any vendor-reported benchmark deserves to be treated: directionally credible, not independently verified.
+- The resource limits that existed before the change (50 milliseconds of CPU time per request, 512MB of memory, 20MB of compressed code) are reportedly still in place. Netlify says it's reviewing them now that a real virtual machine and filesystem sit underneath, but a review isn't a shipped change.
+- The lesson here is narrower than "full VMs beat lightweight sandboxes." It only held because Firecracker was specifically engineered to start inside a few milliseconds, and because the actual cost all along was a network hop that had nothing to do with isolates or virtual machines as such. Swap a general-purpose virtual machine in for Firecracker and keep everything else the same, and the same redesign would almost certainly have made things slower.
+- The migration happened without requiring any code changes from existing users, and at the same pricing. That's worth noting precisely because it's the part a vendor gets to fully control and announce on its own schedule, unlike the latency numbers, which at least come with some methodology attached.
+
+## Takeaways
+
+- **The headline number (five times faster) is true, but the obvious explanation for it is wrong.** Firecracker microVMs are heavier than V8 isolates by every normal measure. The speedup came from removing a network round trip, not from the new sandboxing technology being inherently quicker.
+- **"Lightweight" and "heavyweight" describe where the isolation lives, not how fast the whole system runs.** A heavier isolation boundary paid off here only because it was paired with the removal of a much bigger, unrelated bottleneck.
+- **Security and performance improved together, but for separate reasons.** Giving each deployment its own kernel and memory closes a real sharing risk that isolates can't close by design; that upgrade would have been worth doing even without the latency win attached to it.
+- **Self-reported vendor benchmarks are a starting point, not a verdict.** Netlify's numbers are specific and plausible given the architecture change they describe, but nobody outside Netlify has measured them yet.
+- **The generalizable idea is "remove the actual bottleneck," not "always choose the heavier technology."** Here the actual bottleneck was a trip across the open internet. A different system with a different bottleneck would need a different fix, even if the fix looks superficially similar on a slide.
+
+## References
+[^1]: Netlify, ["5x faster Edge Functions: How we replaced v8 isolates with Firecracker MicroVMs"](https://www.netlify.com/blog/edge-functions-firecracker-microvms/), published 2026-10-01. All latency, cold-start, availability, and volume figures, and the direct quote on isolation, come from this post.
+[^2]: V8 documentation, ["Getting started with embedding V8"](https://v8.dev/docs/embed), which defines an isolate as "a VM instance with its own heap."
+[^3]: [Firecracker](https://firecracker-microvm.github.io/) project site, and Alexandru Agache et al., ["Firecracker: Lightweight Virtualization for Serverless Computing"](https://www.usenix.org/system/files/nsdi20-paper-agache.pdf), USENIX NSDI 2020, for Firecracker's design goals and its use inside AWS Lambda.
