@@ -1,0 +1,155 @@
+---
+title: 'Breaking SHA-1 Cost $45,000. It Still Cannot Forge a Commit You Trust.'
+description: 'Git is replacing SHA-1 with SHA-256 for every commit and file it tracks. A GitHub co-founder argues the attacks motivating the switch do not threaten how Git actually works.'
+pubDate: 2026-10-02
+tags: ['security', 'devops', 'architecture', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+Git identifies every file, folder and commit in a repository by a hash: a short string computed from that object's exact content. Change one character anywhere in the content and the hash comes out completely different. For twenty years that hash has been produced by an algorithm called SHA-1. Git 3.0, expected by the end of 2026, will make a different algorithm, SHA-256, the default for every new repository, and the change reaches further than a configuration flag: submodules, signed commits, and any tool that quietly assumed a Git hash is exactly 40 characters long.[^1][^2]
+
+Scott Chacon, a GitHub co-founder, the author of the project's own reference book (Pro Git), and now the founder of GitButler, thinks the migration is a mistake, not because the idea is bad, but because it fixes the wrong problem.[^3] His argument turns on a distinction that is easy to miss unless you look closely at what has actually been broken in SHA-1, and what has not.
+
+## What a hash actually buys Git
+
+If "hash function" is new to you: it is a piece of math that takes any amount of data (a single line, or an entire codebase) and produces a fixed-length string that acts like a fingerprint for that exact content. Feed it the same bytes twice and the fingerprint comes out identical every time. Change even one byte and the fingerprint comes out completely different, in a way nobody can predict in advance.
+
+Git uses this fingerprint for everything. Every file's content, every folder listing, every commit becomes an "object," and that object's hash is its name. There is no separate numbering system and no auto-incrementing ID sitting behind the scenes. Two files anywhere in a repository's history with identical content get the identical hash, which is also how Git avoids storing the same content twice. When you type a command like `git show 1a2b3c4`, you are asking Git to find the object whose fingerprint starts with those characters.
+
+That fingerprint has been produced by SHA-1 since Git's very first commit in 2005. SHA-256 is a newer algorithm from the same family that produces a longer fingerprint: 256 bits instead of 160, written out as 64 hexadecimal characters instead of 40.
+
+## The ID itself gets longer, and some things stop working
+
+I built two throwaway repositories to see this directly rather than take it on faith: one using the current default, one using Git's SHA-256 mode, which has existed as an opt-in feature since 2020.[^2] Committing the same one-line file into each produces hashes of very different shapes.
+
+<Figure
+  caption="Two real commit hashes from scratch repositories created for this post, one line of identical content committed into each. The SHA-256 hash is not a longer version of the SHA-1 one; it comes from a different algorithm entirely and happens to share no characters with it."
+  label="Comparison of a 40-character SHA-1 commit hash and a 64-character SHA-256 commit hash, both produced from committing the same one-line file, shown as monospaced strings with bars below each proportional to its length"
+>
+  <svg viewBox="0 0 700 170" width="100%" role="img" aria-labelledby="hash-length-title">
+    <title id="hash-length-title">SHA-1 commit hash versus SHA-256 commit hash, measured from identical content</title>
+
+    <text x="0" y="16" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">SHA-1 (current default), 40 hex characters</text>
+    <text x="0" y="38" fill="var(--fg)" font-size="12.5" font-family="var(--font-mono)">24faa6d37aa3e0df094507354c5b421c01d79669</text>
+    <rect x="0" y="48" width="400" height="10" rx="3" fill="var(--series-1)" />
+
+    <text x="0" y="92" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">SHA-256 (Git 3.0 default), 64 hex characters</text>
+    <text x="0" y="114" fill="var(--fg)" font-size="12.5" font-family="var(--font-mono)">cdb875bce8504408512852c4ff16d6c7fb7f7c922e3a5bf63ebffca80d609b18</text>
+    <rect x="0" y="124" width="640" height="10" rx="3" fill="var(--series-5)" />
+
+    <text x="0" y="160" fill="var(--fg-muted)" font-size="10.5" font-family="var(--font-sans)">bars drawn to scale: 640px represents 64 characters, 400px represents 40</text>
+  </svg>
+</Figure>
+
+Forty characters versus sixty-four does not sound dramatic on its own, but a huge amount of software quietly assumes a Git hash is exactly 40 characters: commit-linking tools, log parsers, URL patterns, regular expressions copied from a decade-old Stack Overflow answer. Git's own documentation is direct about the bigger structural cost: "SHA-256 repositories cannot be read by older versions of Git," full stop.[^2] A repository converted to the new format cannot simply be opened by whatever Git happens to already be installed somewhere.
+
+## I broke a submodule and a fetch on purpose
+
+Rather than take the compatibility warnings secondhand, I tried two of the specific breakages Git's documentation calls out, using the same two scratch repositories from above.[^4]
+
+<Mermaid
+  caption="Two real failures, reproduced directly: adding a SHA-256 repository as a submodule of a SHA-1 repository, and fetching from a SHA-256 remote into a SHA-1 repository. Both fail immediately, with Git correctly refusing to guess how to reconcile two different hash algorithms."
+  label="Sequence diagram showing a SHA-1 repository attempting to add a SHA-256 repository as a submodule and receiving an error about mismatched hash algorithms, and separately attempting to fetch from a SHA-256 remote and receiving a mismatched algorithms error"
+  code={`
+sequenceDiagram
+    participant A as SHA-1 repo (this post's test)
+    participant B as SHA-256 repo (this post's test)
+
+    A->>B: git submodule add ../sha256-repo
+    B-->>A: error: cannot add a submodule<br/>of a different hash algorithm
+
+    A->>B: git fetch (added as a remote)
+    B-->>A: fatal: mismatched algorithms,<br/>client sha1, server sha256
+`}
+/>
+
+Both failures were immediate and unambiguous, which is the right behavior: Git refuses to silently mix the two formats rather than producing something subtly broken. But "refuses immediately" is still a real cost if the two repositories involved are, say, a large company's main codebase and a vendor's dependency that hasn't converted yet. A submodule relationship or a fetch that worked yesterday stops working the day one side upgrades its hash format and the other hasn't.
+
+## Four named attacks, and what none of them do
+
+Here is the part of the story that motivated the switch in the first place. Git's own breaking-changes documentation lists four published attacks against SHA-1 by name, in order, along with roughly how much computation each one took:[^5]
+
+<Chart
+  type="bar"
+  height={300}
+  format="plain"
+  caption="Each bar is the base-2 logarithm of how many SHA-1 computations a published attack needed; lower means cheaper. All four are collision attacks: the attacker gets to construct both inputs from scratch so they happen to match. None of them is a second-preimage attack, which would mean matching an input someone else already chose and trusts."
+  label="Bar chart of four published SHA-1 attacks by year, showing the base-2 logarithm of the number of SHA-1 computations required: SHAppening in 2015 at 57.5, SHAttered in 2017 at 63.1, Birthday-Near-Collision in 2019 at 68, and Shambles in 2020 at 63.4"
+  labels={['SHAppening (2015)', 'SHAttered (2017)', 'Birthday-Near-Collision (2019)', 'Shambles (2020)']}
+  series={[{ name: 'log2(SHA-1 computations needed)', data: [57.5, 63.1, 68, 63.4] }]}
+  yTitle="log2(computations), lower = cheaper"
+/>
+
+The jump between 2017 and 2019 looks like attacks getting harder, not easier, and that is real: SHAttered in 2017 was an "identical-prefix" collision, where both colliding files have to start with the same bytes, which is comparatively cheap. The 2019 result was the first "chosen-prefix" collision, where the attacker can pick two files that look completely different from the start and still land on the same hash, a much more dangerous capability that initially cost more to pull off. Shambles in 2020 brought that more dangerous attack back down to roughly the same cost as SHAttered, at an estimated $45,000 using rented cloud GPUs, and the researchers used it to forge PGP identity certificates as a demonstration.[^6]
+
+All four, though, are collision attacks. That means the attacker gets to construct both documents, picking whatever content makes the hashes line up. What none of these attacks does is take a hash someone else already published, like the commit hash at the top of a pull request you are about to approve, and produce a different, malicious piece of content that hashes to that exact same value. That second kind of attack is called a second-preimage attack, and no practical second-preimage attack against SHA-1 has ever been published.
+
+<Figure
+  caption="The four attacks above are all on the left. The attack that would let someone swap in malicious content behind a hash you already trust, on the right, has never been demonstrated against SHA-1 at a practical cost."
+  label="Comparison of a collision attack, where an attacker freely constructs two inputs to match each other, demonstrated four times against SHA-1 since 2015, versus a second-preimage attack, where an attacker must match an input they do not control that someone else already trusts, never practically demonstrated against SHA-1"
+>
+  <svg viewBox="0 0 700 180" width="100%" role="img" aria-labelledby="collision-preimage-title">
+    <title id="collision-preimage-title">Collision attacks versus second-preimage attacks on SHA-1</title>
+
+    <text x="0" y="14" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">COLLISION ATTACK (demonstrated 4 times since 2015)</text>
+    <rect x="0" y="26" width="330" height="140" rx="7" fill="var(--series-1)" opacity="0.1" stroke="var(--series-1)" stroke-width="1.3" />
+    <text x="14" y="52" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">Attacker freely picks BOTH documents,</text>
+    <text x="14" y="70" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">built together so their hashes match.</text>
+    <text x="14" y="98" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">Nobody has trusted either one yet.</text>
+    <text x="14" y="126" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">SHAppening, SHAttered,</text>
+    <text x="14" y="144" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">Birthday-Near-Collision, Shambles</text>
+
+    <text x="370" y="14" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">SECOND-PREIMAGE ATTACK (never shown on SHA-1)</text>
+    <rect x="370" y="26" width="330" height="140" rx="7" fill="var(--series-5)" opacity="0.1" stroke="var(--series-5)" stroke-width="1.3" />
+    <text x="384" y="52" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">Attacker is handed a hash someone</text>
+    <text x="384" y="70" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">already published, and must find</text>
+    <text x="384" y="88" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">different content matching it.</text>
+    <text x="384" y="116" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">This is the attack that would let</text>
+    <text x="384" y="134" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">someone swap in code behind a</text>
+    <text x="384" y="152" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">commit you already reviewed.</text>
+  </svg>
+</Figure>
+
+## Where Git's real trust boundary sits
+
+This is the center of Chacon's argument: Git almost never asks you to trust a piece of code purely because its hash matches some number you were told in advance. You decide to trust code by deciding to trust a source, a GitHub account behind an HTTPS connection, a colleague's machine over SSH, a release tarball signed with someone's GPG key, and the hash's job from there is narrower than it sounds: catching accidental corruption and letting Git tell whether two pieces of content are the same, not standing alone as your only line of defense against an adversary.[^3]
+
+<Mermaid
+  caption="The hash sits inside a trust decision that was already made elsewhere. Swapping SHA-1 for SHA-256 strengthens one link in this chain without changing how the other links work."
+  label="Flowchart showing a developer trusting a source such as a GitHub account or a colleague's signed commit, connecting over an authenticated channel like HTTPS or SSH, with Git computing a hash mainly to detect corruption and deduplicate content rather than to establish trust on its own"
+  code={`
+flowchart LR
+    T[You decide to trust<br/>a source: a GitHub account,<br/>a colleague, a signed release] --> C[Authenticated connection:<br/>HTTPS certificate, SSH key,<br/>or a GPG-signed tag]
+    C --> H[Git computes a hash<br/>mainly to catch corruption<br/>and avoid storing duplicates]
+`}
+/>
+
+That is not an argument that SHA-1 is fine forever. NIST, the U.S. agency that sets federal cryptography standards, deprecated SHA-1 for digital signatures back in 2011 and plans to remove it from its standards entirely by the end of 2030, and Git's own documentation cites that institutional pressure alongside the research attacks as a reason to move.[^1][^7] Chacon's objection is narrower: that the specific, disruptive, default-breaking shape of this particular migration is a poor match for a threat that, so far, has only ever let researchers build two documents from scratch that agree with each other, not forge a replacement for something you already reviewed and trust.
+
+## Trade-offs worth noticing
+
+- Git already hardened its SHA-1 implementation against the SHAttered attack specifically back in version 2.13 (2017), without changing the default hash or breaking anything.[^1] The new migration is aimed at attacks that have not been demonstrated yet, not at closing a hole that is currently open.
+- The costs are concrete and itemized in Git's own documentation: submodules, GPG signatures, `git notes`, object borrowing between repositories ("alternates"), and shallow clones all need explicit handling across the two formats, and some combinations (like borrowing objects from a SHA-1 repository into a SHA-256 one) are not supported at all.[^2]
+- Git 3.0 bundles this change together with unrelated breaking changes shipping in the same release: a new on-disk format for branch references called "reftable," a change to the default branch name, and a new requirement that Git be built with a Rust toolchain available.[^1] None of those are about hashing, but they all land on users at the same time.
+- There are two separate reasons being used to justify one migration: a compliance-driven one (NIST's deprecation timeline) and a research-driven one (the four attacks above). They point in the same direction, but they are not the same argument, and conflating them makes the change look more urgent against real-world attackers than the second one alone would support.
+
+## Takeaways
+
+- **A Git hash's job is narrower than "security."** It identifies content and lets Git detect accidental corruption and avoid duplicate storage. Whether you trust that content in the first place is a decision Git mostly leaves to how you connect to a source, not to the hash itself.
+- **Every published attack on SHA-1 so far is a collision attack, not a second-preimage attack.** That distinction decides whether the danger is "an attacker can build two documents that match each other" (demonstrated, four times) or "an attacker can replace a document you already trust without changing its hash" (never demonstrated).
+- **Breaking changes compound when they ship together.** Git 3.0's hash default, reftable format, branch naming, and Rust requirement are four independent changes bundled into one release, which makes the total migration cost harder to reason about than any single piece of it.
+- **Compliance deadlines and demonstrated attacks are different kinds of pressure.** NIST's 2030 SHA-1 removal date and the four research attacks both push toward SHA-256, but only one of them depends on what an actual attacker can currently do to a Git repository.
+- **Testing the compatibility claims directly took minutes and confirmed them exactly.** Git's documentation said submodules and fetches would fail across hash formats; they failed with the precise error messages the documentation implies, on the first try.
+
+## References
+[^1]: Git documentation, ["BreakingChanges"](https://git-scm.com/docs/BreakingChanges), for the Git 3.0 default hash change, the four named SHA-1 attacks with their approximate computational cost (SHAppening 2^57, SHAttered 2^63, Birthday-Near-Collision 2^68, Shambles 2^63), the reftable format change, the default branch name change, and the Rust build requirement.
+[^2]: Git documentation, ["hash-function-transition"](https://git-scm.com/docs/hash-function-transition), for the SHA-1-to-SHA-256 object format design, the statement that SHA-256 repositories cannot be read by older Git versions, and the submodule, signature, notes, alternates and shallow-clone limitations.
+[^3]: Scott Chacon, [GitButler blog, "Git 3.0's upcoming SHA-256 default will be a costly mistake"](https://blog.gitbutler.com/git-3-sha-256), published 2026-10-01, for the argument that Git's trust model rests on source authentication rather than hash strength, and the itemized list of compatibility breakage.
+[^4]: Measurements and failures in this post were produced directly, on git 2.55.0 (Windows), using two scratch repositories created for this post with `git init --object-format=sha1` and `git init --object-format=sha256`, each given one identical one-line file and committed. The submodule and fetch failures were reproduced by adding one repository as a submodule and as a remote of the other, with `protocol.file.allow=always` set to permit the local file-based transport used for testing.
+[^5]: [git-scm.com/docs/BreakingChanges](https://git-scm.com/docs/BreakingChanges), attack list and approximate costs.
+[^6]: [shattered.io](https://shattered.io/) for the SHAttered identical-prefix collision (Stevens, Karpman, Bursztein, Albertini and Markov, 2017); Leurent and Peyrin, ["SHA-1 is a Shambles: First Chosen-Prefix Collision on SHA-1 and Application to the PGP Web of Trust"](https://eprint.iacr.org/2020/014), 2020, for the chosen-prefix collision, its approximate $45,000 cost using rented cloud GPUs, and its use to forge PGP identity certificates; Leurent and Peyrin, ["From Collisions to Chosen-Prefix Collisions: Application to Full SHA-1"](https://eprint.iacr.org/2019/459), EUROCRYPT 2019, for the first chosen-prefix collision; Stevens, Karpman and Peyrin, ["Freestart Collision for Full SHA-1"](https://eprint.iacr.org/2015/967), 2015 ("The SHAppening"), for the freestart collision on SHA-1's compression function.
+[^7]: NIST Special Publication 800-131A (2011) for the deprecation of SHA-1 in digital signature generation, and NIST's 2022 notice, ["NIST Transitioning Away from SHA-1 for All Applications"](https://csrc.nist.gov/news/2022/nist-transitioning-away-from-sha-1-for-all-apps), for the plan to remove SHA-1 from FIPS 180 by the end of 2030.
