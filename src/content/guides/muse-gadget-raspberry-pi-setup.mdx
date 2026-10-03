@@ -1,0 +1,110 @@
+---
+title: 'Turning a Raspberry Pi into a Muse Gadget, Step by Step'
+description: 'A hands-on guide to muse-gadget-sdk, Meta''s open-source SDK for building personal AI agent hardware: setup, what commands the agent can actually run, and how pairing security works.'
+pubDate: 2026-10-03
+updatedDate: 2026-10-03
+tags: ['ai', 'security', 'python', 'tutorial']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+
+Muse is Meta's personal AI agent, announced on September 8, 2026: an assistant that runs on a dedicated cloud machine Meta calls a "Secure VM" and can act on someone's behalf across apps, booking travel, filling out forms, or turning a saved recipe into a grocery list.[^1] On October 2, 2026, Meta open-sourced the hardware side of it: `muse-gadget-sdk`, an Apache-2.0 SDK for building your own physical devices that talk to Muse.[^2] As of this writing the repository is a day old, already at 584 stars, 85 forks, and being pushed to multiple times a day.[^3]
+
+This guide is a direct walkthrough of that SDK, built by cloning the actual repository and reading its source, not by rephrasing the announcement blog posts. It focuses on the Linux Device SDK, which turns a Raspberry Pi (or any Linux box with Bluetooth) into a Muse-connected gadget Muse can run commands on, because that path exposes the most interesting engineering: a real command execution sandbox and two distinct layers of cryptographic pairing, both readable straight from the Python source.[^2]
+
+## Two SDKs, two kinds of gadget
+
+The repository ships two separate device SDKs, and they solve different problems.[^2]
+
+| | ESP32 Device SDK | Linux Device SDK |
+|---|---|---|
+| Turns into | A dedicated gadget: a screen with an avatar, a status light, a button | Any existing Linux machine |
+| Build requires | ESP-IDF v6.0.1, a macOS or Linux build machine, a physical ESP32 board | Python 3.9+, nothing to flash |
+| What Muse gets | A display and voice-style interaction surface | Shell access, file read/write, health stats |
+| Fifteen boards supported, from a $10 status-light DevKit to touchscreen AMOLED panels | ✓ | |
+| Works on a Pi 3B+, 4, 5, or Zero 2 W, or Debian/Ubuntu with Bluetooth LE | | ✓ |
+
+Both are gated behind the same thing: an SDK token from `gadgets.muse.ai`, which every self-built gadget needs to pair, plus the Muse app itself with Developer Mode turned on.[^2]
+
+## Setting up the Linux gadget
+
+The install is one script, meant to be read before it's run, which the project's own instructions say explicitly:[^2]
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/facebookincubator/muse-gadget-sdk/main/linux/install.sh -o install.sh
+less install.sh     # read it first
+bash install.sh --sdk-token mgst_…
+```
+
+The installer sets up a systemd service called `musegadget` under `/opt/musegadget`, running as whatever account you point it at. It asks before taking that account, and tells you upfront whether that account can use `sudo`, because that matters a great deal for what comes next.[^2] Once it's running, pairing opens over Bluetooth for ten minutes: open the Muse app, turn on **Settings > Devices > Developer mode**, add a device, and it shows up as `MuseGadgetXXXXXX`. No Wi-Fi password is needed since the machine is already online. From there it stays connected across reboots, and `sudo musegadget pair` reopens pairing later if you need it.[^2]
+
+## What Muse can actually do once it's paired
+
+The README lists four commands, but the real limits live in `executor.py`, the file that actually dispatches them, and they're worth reading because they're more specific than the docs:[^2][^4]
+
+| Command | What it does | A limit from the source |
+|---|---|---|
+| `system.run` | Runs a shell command via `/bin/bash -c`, returns stdout, stderr, exit code | Capped at 600 seconds; defaults to 120 |
+| `file.read` | Reads a file in chunks | Up to 64 KiB per call |
+| `file.write` | Writes a file atomically, chunked, with an optional SHA-256 check on the final chunk | Replaces the file only once the hash matches |
+| `device.health` | Uptime, load average, memory, disk, temperature, device model | Reads straight from `/proc` and `/sys` |
+
+Two details from the source matter more than the command list itself. First, every command runs through `subprocess.Popen` with its own process group and a restricted `PATH`, and if a command times out, the whole group gets `SIGKILL`'d rather than just the parent process, which is what actually stops a runaway background job instead of orphaning it.[^4] Second, and this is the one to sit with: the executor runs commands as "the account you installed for, with exactly that account's permissions. If it can use sudo, so can Muse."[^2] There's no separate sandbox or permission layer between the Muse agent and the Linux account the installer used. The access boundary the project gives you is choosing which account to install under, not anything enforced in the code itself.
+
+## How the pairing security actually works
+
+There are two different cryptographic handshakes in this codebase, protecting two different connections, and the source is explicit enough about both that it's worth quoting rather than guessing.
+
+The first is local: the phone running the Muse app pairs with the device over Bluetooth LE. `pairing.py`'s own docstring describes exactly what this does and doesn't protect against: "Community pairing protects setup secrets from passive observers. It does not authenticate the ECDH peer, so it cannot stop an active man-in-the-middle."[^5] This is the same wire protocol the ESP32 firmware uses, by design, so the same Muse app pairs with either kind of gadget without caring which one it's talking to.[^5] It's also exactly why the README tells you, twice, to only set a gadget up on a network you trust.[^2]
+
+The second is the gadget's ongoing connection to Muse's cloud backend, and it's a different, stronger mechanism: `link_client.py` opens a WebSocket to `/v1/noise` and runs a real Noise Protocol handshake, specifically `Noise_XX_25519_AESGCM_SHA256`, the same family of handshake used by WireGuard, before opening a long-lived `/link-control` stream that carries the actual commands.[^6] That endpoint path is the literal implementation of what Meta's announcement calls the Muse Secure VM: a dedicated cloud machine that "houses both the agent and a person's data," gated by a separate Sentinel process so "nothing Muse does reaches the internet unless the Sentinel approves it."[^1] The Raspberry Pi doesn't talk to some generic API; it opens an authenticated, encrypted channel straight into that VM.
+
+<Mermaid
+  caption="Two separate handshakes protect two separate hops. The phone-to-device link is a lighter protocol that assumes a trusted local network; the device-to-cloud link is a full Noise XX handshake into Meta's infrastructure."
+  label="Sequence diagram showing the Muse phone app performing an unauthenticated ECDH pairing handshake with a Raspberry Pi gadget over Bluetooth LE, and separately the Raspberry Pi gadget performing a Noise XX handshake with the Muse Secure VM over a WebSocket to open a long-lived link-control stream"
+  code={`
+sequenceDiagram
+    participant P as Muse phone app
+    participant D as Pi gadget (musegadget)
+    participant V as Muse Secure VM
+
+    Note over P,D: Local pairing, Bluetooth LE
+    P->>D: pairing_client_hello (ECDH)
+    D->>P: pairing_ready
+    P->>D: encrypted client-finished record
+    D->>P: session confirmed, no MITM protection
+
+    Note over D,V: Ongoing link, over the internet
+    D->>V: WebSocket /v1/noise
+    D->>V: Noise_XX_25519_AESGCM_SHA256 handshake
+    V->>D: handshake complete
+    D->>V: POST /link-control (long-lived stream)
+    V->>D: link.invoke (run a command)
+    D->>V: link.result
+`}
+/>
+
+## The ESP32 path, briefly
+
+If what you actually want is a physical object with a face on it rather than giving Muse shell access to a server, the ESP32 Device SDK is the other half of the repository. The quickest board to start with is the ESP32-C5 DevKitC-1, which needs no extra hardware beyond its built-in status light and button; the repository lists fifteen boards in total, with seven running a full touch UI with an animated avatar.[^2] The fastest path the project documents isn't manual flashing, it's pointing an agentic coding tool at the repo: install Muse Code (`curl -fsSL https://dev.meta.ai/install.sh | sh`), run it from the `esp32/` directory with `muse --disable-sandbox` so it can reach the board's USB serial port, and ask it in plain language to build and flash for your specific board.[^2] `AGENTS.md` in that directory is what the coding agent actually reads to know how.
+
+## Before you point this at anything that matters
+
+A few things from the source and docs are worth internalizing rather than skimming past:
+
+The project says it outright in its own README: "Built by hackers, for hackers, just for fun." This is explicitly a tinkering project, not a hardened product, and the authors are upfront that bricked boards and bad days are part of the deal.[^2] The SDK token that pairs a gadget ships inside the device itself, in firmware or in `/var/lib/musegadget/sdk_token` readable only by root, and the project's own advice is to treat it "as an identifier rather than a password": if it leaks, revoke it and rebuild, don't treat the leak as catastrophic, but don't treat it as harmless either.[^2] On the ESP32 side specifically, the project recommends turning on NVS flash encryption if your board supports it, because without it anyone with physical access to a board can read its Wi-Fi credentials and device token straight out of flash.[^2]
+
+None of this is unique to Muse. It's the same shape of trade-off every "give an AI agent a real execution environment" project runs into: the thing that makes it useful, letting an agent actually run commands, read files, and act with your account's authority, is also exactly the thing that makes a mistake in the pairing step expensive.
+
+## What this guide doesn't cover
+
+The repository also ships a `skills/` directory with dozens of entries for existing smart-home gear (Philips Hue bridges, Sonos speakers, Roomba vacuums, and more) that Muse can already talk to over their own local APIs, no new hardware or firmware involved.[^2] That's a genuinely different mechanism from everything above: instead of building a gadget, you're handing Muse a written playbook, in Markdown, for a device you already own. It deserves its own guide rather than a rushed paragraph here.
+
+## References
+[^1]: Meta, ["Introducing Muse: The World's First Personal AI Agent Built for Everyone"](https://about.fb.com/news/2026/09/introducing-muse-personal-ai-agent/), published September 8, 2026, for the Muse Secure VM architecture, the Sentinel agent, and what Muse can do.
+[^2]: GitHub, [`facebookincubator/muse-gadget-sdk`](https://github.com/facebookincubator/muse-gadget-sdk), cloned and read directly on 2026-10-03: top-level `README.md`, `esp32/README.md`, and `linux/README.md` for setup steps, the board table, the command table, and all direct quotes attributed to "the README" or "the project" above.
+[^3]: GitHub API (`repos/facebookincubator/muse-gadget-sdk`), queried 2026-10-03: 584 stargazers, 85 forks, repository created 2026-10-02, last pushed 2026-10-03.
+[^4]: `linux/src/musegadget/executor.py` in the cloned repository, for the exact command dispatch logic, timeout handling, and output size limits. Not independently executed in this environment; read directly from source.
+[^5]: `linux/src/musegadget/pairing.py` in the cloned repository, for the BLE pairing protocol's own docstring describing its ECDH-based handshake and explicit lack of active-MITM protection.
+[^6]: `linux/src/musegadget/link_client.py` and `linux/src/musegadget/noise/noise_xx.py` in the cloned repository, for the `/v1/noise` WebSocket handshake, the `Noise_XX_25519_AESGCM_SHA256` protocol identifier, and the `/link-control` message stream.
