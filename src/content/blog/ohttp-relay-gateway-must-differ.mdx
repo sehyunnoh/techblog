@@ -1,0 +1,134 @@
+---
+title: 'OHTTP''s Only Privacy Rule: Relay and Gateway Must Differ. The Protocol Cannot Check.'
+description: 'Cloudflare launched an OHTTP gateway that hides IPs from app servers. The RFC and Cloudflare both say privacy depends on relay and gateway never sharing an operator, a rule no cryptography enforces.'
+pubDate: 2026-10-03
+tags: ['security', 'web', 'architecture', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+On October 2, 2026, Cloudflare opened a closed beta for something it calls an OHTTP Gateway.[^1] The pitch is a single sentence: your app's backend keeps receiving real HTTP requests, but it never learns the IP address of whoever sent them. Oblivious HTTP (OHTTP) is the IETF standard behind this, and a version of it has already been running quietly since 2022 inside what Cloudflare then called Privacy Gateway, used by Apple's iCloud Private Relay.[^1] The usual way to describe the promise is "no single party ever sees both who you are and what you asked for." That sentence is not something the cryptography guarantees on its own. It is a rule the standard writes down in plain English, and leaves for someone else to enforce.[^2]
+
+## How oblivious HTTP actually works
+
+OHTTP splits one HTTP request across two hops instead of one. A **relay** forwards your encrypted request without being able to read it. A **gateway** decrypts it, forwards the plaintext to the actual app server (the **target**), and encrypts the reply on the way back. The encryption in between uses HPKE (Hybrid Public Key Encryption, an IETF-standardized scheme for encrypting a message to a public key without a prior handshake), and the request itself is packed into a format called Binary HTTP, a byte-for-byte binary encoding of an ordinary HTTP request's method, path, headers and body.[^2]
+
+<Mermaid
+  caption="Each hop sees a different half of the information. The relay sees who is asking but not what they asked; the gateway sees what was asked but not who asked it."
+  label="Flowchart showing a client sending an HPKE-encrypted request through a relay, which sees the client's IP address but not the request content, then to a gateway, which decrypts and sees the request content but not the client's IP, then to a target server"
+  code={`
+flowchart LR
+    C["Client<br/>sends an HPKE-encrypted<br/>Binary HTTP request"] --> R["Relay<br/>sees: client IP, timing, size<br/>cannot read the payload"]
+    R --> G["Gateway<br/>decrypts the payload<br/>cannot see the client IP"]
+    G --> T["Target server<br/>receives plain HTTP<br/>cannot see the client IP"]
+`}
+/>
+
+The gateway publishes its public key at a fixed URL (`/.well-known/ohttp-gateway`), so any client can fetch it and encrypt a request that only that gateway's private key can open.[^1] Nobody has to trust the relay with anything sensitive, because the relay is cryptographically locked out of the content. That is the real, cryptographically-backed half of the story. The rest of this post is about the half that isn't.
+
+## What a real exchange looks like, byte by byte
+
+Cloudflare's gateway is still in closed beta and has no public endpoint to test, and its announcement includes no benchmark numbers at all.[^1] Rather than take the mechanism on faith, I ran a separate, independently-published implementation of the same IETF standard locally: `ohttp-ts`, a TypeScript library implementing RFC 9458 published in September 2026, paired with `hpke`, a standalone HPKE library.[^3][^4] Running a client and a gateway against each other in the same Node.js process lets me see exactly what crosses the wire, with no vendor's marketing language in between.
+
+A freshly generated gateway key, encoded the way a gateway would publish it, came out to 41 bytes. Encrypting a one-byte request body against that key produced a message 1,079 bytes long. Every size I tried, from 1 byte up to 20,000 bytes, decomposed into the same formula: the padded, Binary-HTTP-encoded request, plus exactly 55 bytes of OHTTP framing, every single time.[^5] Those 55 bytes are accounted for precisely by the format RFC 9458 defines: a 1-byte key identifier, a 2-byte algorithm identifier for the key exchange, 2 bytes each for the chosen hash and encryption algorithms, a 32-byte ephemeral key used only for this one request, and a 16-byte authentication tag.[^2]
+
+<Figure
+  caption="The 1,079-byte message produced from a 1-byte request body, decomposed into its two real parts: a fixed 55-byte frame that every OHTTP request carries regardless of size, and the padded, encrypted request itself."
+  label="Two proportional bars: a short 55-byte bar representing the OHTTP key identifier, algorithm identifiers, ephemeral key and authentication tag, and a much longer 1,024-byte bar representing the padded, encrypted Binary HTTP request, together making up a 1,079-byte wire message"
+>
+  <svg viewBox="0 0 700 170" width="100%" role="img" aria-labelledby="ohttp-framing-title">
+    <title id="ohttp-framing-title">Composition of a 1,079-byte OHTTP request produced from a 1-byte body</title>
+
+    <text x="0" y="16" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">Fixed OHTTP/HPKE framing, 55 bytes: key ID, algorithm IDs, ephemeral key, auth tag</text>
+    <rect x="0" y="26" width="36" height="22" rx="3" fill="var(--series-1)" />
+    <text x="0" y="68" fill="var(--fg-muted)" font-size="10" font-family="var(--font-sans)">same 55 bytes on every request, regardless of body size</text>
+
+    <text x="0" y="104" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">Padded, encrypted Binary HTTP request, 1,024 bytes</text>
+    <rect x="0" y="114" width="664" height="22" rx="3" fill="var(--series-5)" />
+    <text x="0" y="156" fill="var(--fg-muted)" font-size="10" font-family="var(--font-sans)">padded up from a 1-byte body to a fixed floor, visible only to the gateway's private key</text>
+  </svg>
+</Figure>
+
+I also sent the exact same plaintext request twice. Both came back 1,079 bytes, but the two ciphertexts differed starting from their very first encrypted bytes. HPKE generates a fresh ephemeral key for every single encryption, so two byte-for-byte identical requests never produce the same bytes on the wire.[^2] A relay watching the traffic cannot fingerprint a request by its ciphertext, only by its size and its timing. Which raises the obvious next question: what do size and timing actually reveal?
+
+## The relay cannot read it, but it can usually weigh it
+
+The 1,024-byte floor I measured is not something RFC 9458 requires. The standard explicitly treats padding as optional: "Clients and Oblivious Gateway Resources can use padding to reduce the effectiveness of traffic analysis," and leaves the scheme itself, the block size, everything, up to whoever builds the client and gateway.[^2] The library I tested happens to pad using an algorithm called padmé, with a one-kilobyte floor, by its own documentation.[^4] A gateway that skipped padding entirely would still be fully RFC 9458-compliant, and a relay watching its traffic would see request sizes that track the real content almost exactly.
+
+Measuring the padding that is actually applied shows the trade-off it buys. A request with a 1-byte body still costs 1,079 bytes on the wire, more than a thousand times its real size. A request with a 20,000-byte body costs 20,535 bytes, only 2.6% more than its real size.
+
+<Chart
+  type="line"
+  height={320}
+  format="bytes"
+  caption="Measured directly against a standards-compliant OHTTP implementation: plaintext request bodies from 1 byte to 20,000 bytes, and the size each one actually occupies once padded and encrypted. The gap between the two lines is the padding overhead, largest in relative terms for small requests."
+  label="Line chart comparing plaintext request body size to encapsulated wire size across ten measured points from 1 byte to 20,000 bytes, showing the wire size staying near a fixed floor for small bodies and converging toward the plaintext size for large ones"
+  labels={[1, 500, 900, 1000, 1500, 2000, 4000, 8000, 16000, 20000]}
+  series={[
+    { name: 'Encapsulated size on the wire', data: [1079, 1079, 1079, 1143, 1655, 2231, 4151, 8247, 16439, 20535] },
+    { name: 'Plaintext body size', data: [1, 500, 900, 1000, 1500, 2000, 4000, 8000, 16000, 20000], dashed: true },
+  ]}
+  xTitle="Plaintext body size"
+  yTitle="Bytes"
+/>
+
+A tiny request and a mid-sized one can land in the same padded bucket and look identical to a relay; a short search query and a small form submission might both round up to 1,079 bytes. But a relay watching a stream of multi-kilobyte requests can still estimate their real size to within a few percent, because the padding floor only matters relative to the floor itself; it disappears as requests grow. Nothing in the standard requires closing that gap further, and nothing stops a gateway from not padding at all.
+
+## The whole model rests on one rule the protocol cannot check
+
+Here is the part that actually decides whether "no one sees both" is true: RFC 9458 states it as a plain requirement, not a cryptographic derivation. "To achieve the stated privacy goals, the Oblivious Relay Resource cannot be operated by the same entity as the Oblivious Gateway Resource."[^2] Cloudflare's own announcement says the same thing in its own words: "OHTTP's privacy model requires that the relay and app server be operated by separate, non-colluding parties."[^1]
+
+That requirement cannot be checked by cryptography, because cryptography only governs who can decrypt a message, not who happens to be able to see two separate pieces of plaintext sitting in two different logs. If one organization runs both the relay (which sees IP addresses) and the gateway (which sees decrypted requests), encryption has done nothing: that organization already has both pieces of information in its own infrastructure, decryption keys included, with no need to break anything.
+
+<Figure
+  caption="The cryptography is identical in both cases. What changes is who else is standing next to the two pieces of information it produces."
+  label="Comparison of OHTTP with the relay and gateway operated by separate, non-colluding parties, where no single party sees both the client's IP address and the decrypted request, versus the relay and gateway operated by the same party, where that party trivially holds both pieces of information in its own logs"
+>
+  <svg viewBox="0 0 700 180" width="100%" role="img" aria-labelledby="collusion-title">
+    <title id="collusion-title">Separate operators versus one operator running both the relay and the gateway</title>
+
+    <text x="0" y="14" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">RELAY AND GATEWAY ARE SEPARATE PARTIES</text>
+    <rect x="0" y="26" width="330" height="140" rx="7" fill="var(--series-1)" opacity="0.1" stroke="var(--series-1)" stroke-width="1.3" />
+    <text x="14" y="52" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">Relay's logs: client IP, size, timing.</text>
+    <text x="14" y="70" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">No decryption key, no request content.</text>
+    <text x="14" y="98" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">Gateway's logs: decrypted request.</text>
+    <text x="14" y="116" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">No client IP, because it was never sent one.</text>
+    <text x="14" y="144" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">Neither log alone identifies the request.</text>
+
+    <text x="370" y="14" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">RELAY AND GATEWAY SHARE AN OPERATOR</text>
+    <rect x="370" y="26" width="330" height="140" rx="7" fill="var(--series-5)" opacity="0.1" stroke="var(--series-5)" stroke-width="1.3" />
+    <text x="384" y="52" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">Same operator holds both logs already.</text>
+    <text x="384" y="80" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">Matching a relay log entry to a gateway</text>
+    <text x="384" y="98" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">log entry by timestamp and size needs</text>
+    <text x="384" y="116" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">no decryption at all.</text>
+    <text x="384" y="144" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">Encryption never had to break for this.</text>
+  </svg>
+</Figure>
+
+Cloudflare's announcement names this risk directly, and describes the one place it actually built a check for it: "Mistakes happen, and we anticipated that customers might accidentally break OHTTP's privacy model by running both their relay and gateway on Cloudflare. So, to preserve OHTTP's separation of trust... our Gateway will refuse to decrypt requests sent from Cloudflare Workers or from proxied hosts on Cloudflare."[^1] Read that carefully: it is a runtime check against Cloudflare's own product surface, guarding against a customer accidentally wiring both roles into the same company's infrastructure. It says nothing about, and cannot say anything about, two different companies that quietly agree to compare notes, or one company that operates a relay today and quietly launches a gateway product next year. The protocol's central privacy claim rests entirely on an organizational boundary that the client has no way to verify and the cryptography has no way to enforce.
+
+## Trade-offs and other things the standard says plainly
+
+- **No forward secrecy.** RFC 9458 states it outright: "This document does not provide forward secrecy for either requests or responses during the lifetime of the key configuration." If a gateway's private key is ever compromised, every request encrypted to it while that key was active, not just future ones, becomes readable.[^2]
+- **Responses have no post-compromise security either.** The standard is equally direct about this: "This design does not provide post-compromise security for responses." A key compromise does not just expose the past; depending on how a deployment handles key rotation, it can keep exposing responses until the key is actually replaced.[^2]
+- **A relay can replay a captured request.** RFC 9458 notes that "Encapsulated Requests can be copied and replayed by the Oblivious Relay Resource," and relies on gateways tracking a window of recently-seen request identifiers to limit the damage, not on anything that makes replay impossible.[^2]
+- **Linkability is a choice, not a given.** The standard notes that a gateway "cannot link requests from the same Client in the absence of unique per-Client keys."[^2] That phrase cuts both ways: if a deployment issues a different key per paying customer, for billing or per-account rate limits, it has deliberately reintroduced the ability to link that customer's requests together over time, trading away part of the unlinkability the design otherwise offers.
+- **This post's numbers are not Cloudflare's numbers.** Cloudflare's beta has no public endpoint yet and published no benchmarks, so every byte count and latency figure above comes from an independent, RFC 9458-compliant library running on ordinary laptop hardware, not from Cloudflare's production gateway.[^1][^3][^4]
+
+## Takeaways
+
+- **OHTTP's cryptography and its privacy promise are two different things.** HPKE genuinely locks the relay out of the request content and the gateway out of the client's IP. The headline claim, that no single party sees both, is a separate organizational requirement the standard states in prose, not something the encryption derives on its own.
+- **The standard says the quiet part out loud.** RFC 9458 itself states that the relay "cannot be operated by the same entity as" the gateway, and Cloudflare's own announcement repeats the same requirement in its own words. Neither document treats this as a surprising caveat; both treat it as the foundation everything else sits on.
+- **Padding is optional, and it shows.** A 1-byte request padded to 1,024 bytes costs over 1,000x overhead; a 20,000-byte request padded the same way costs under 3%. RFC 9458 permits any gateway to skip padding entirely, which would leave request size, and therefore a rough shape of the request, visible to the relay.
+- **One company's safeguard only covers that company's infrastructure.** Cloudflare's gateway refuses to decrypt requests relayed through its own Workers or proxied hosting, specifically to stop customers from accidentally running both roles on Cloudflare. That check cannot, and does not claim to, prevent collusion between two unrelated companies.
+- **Measuring a standard directly beats reading about it.** Cloudflare's own post includes zero performance numbers. Running a second, independent implementation of the same RFC took under an hour and produced exact, reproducible byte counts for every claim this post makes about padding and framing overhead.
+
+## References
+[^1]: Cloudflare Blog, ["Announcing Cloudflare's OHTTP Gateway"](https://blog.cloudflare.com/announcing-cloudflare-ohttp-gateway/), published 2026-10-02, for the OHTTP Gateway closed beta, the three-party relay/gateway/app-server model, the 2022 Privacy Gateway launch, the key-publishing endpoint, the statement that OHTTP's privacy model requires separate, non-colluding relay and gateway operators, and the Cloudflare-Workers/proxied-host decryption refusal.
+[^2]: IETF, [RFC 9458, "Oblivious HTTP"](https://www.rfc-editor.org/rfc/rfc9458.html) (Thomson and Wood, 2023), for the four-role architecture, the HPKE-based encapsulated request and response formats, the key configuration format, the requirement that the relay and gateway not share an operator (Section 6), the optional padding guidance (Section 6.2.3), and the explicit non-guarantees around forward secrecy, post-compromise security, replay, and request linkability.
+[^3]: [`ohttp-ts` on npm](https://www.npmjs.com/package/ohttp-ts) and [GitHub](https://github.com/thibmeu/ohttp-ts) (thibmeu, v0.6.1, published 2026-09-30), the RFC 9458-compliant TypeScript implementation used for all direct measurements in this post, including its documented use of padmé padding with a 1 KiB floor.
+[^4]: [`hpke` on npm](https://www.npmjs.com/package/hpke) (panva, RFC 9180 HPKE implementation), the cryptographic backend paired with `ohttp-ts` for this post's measurements.
+[^5]: Measurements in this post were produced directly on Node.js v24.14.1 (Windows), generating a fresh X25519/HKDF-SHA256/AES-128-GCM gateway key with `ohttp-ts` and `hpke`, then encapsulating request bodies of 1 to 20,000 bytes and recording the resulting wire size. Every measured size matched padded-body-size plus exactly 55 bytes of OHTTP/HPKE framing (1-byte key ID, 2-byte KEM ID, 2-byte KDF ID, 2-byte AEAD ID, 32-byte X25519 ephemeral key, 16-byte AEAD tag).
