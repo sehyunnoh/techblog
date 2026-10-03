@@ -1,10 +1,20 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import TagBadge from '../../components/TagBadge.astro';
-import { getTagCounts } from '../../utils/posts';
+import { getPublishedPosts } from '../../utils/posts';
+import { getPublishedGuides } from '../../utils/guides';
 import { TAG_GROUPS, tagGroup, tagDescription, tagLabel } from '../../tags';
 
-const counts = await getTagCounts();
+// Counts span both collections, so a tag used only by a guide still shows up
+// here instead of silently having no index entry.
+const [posts, guides] = await Promise.all([getPublishedPosts(), getPublishedGuides()]);
+const tally = new Map<string, number>();
+for (const entry of [...posts, ...guides]) {
+  for (const tag of entry.data.tags) tally.set(tag, (tally.get(tag) ?? 0) + 1);
+}
+const counts = [...tally.entries()]
+  .map(([tag, count]) => ({ tag, count }))
+  .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
 
 // Only tags that are actually in use — an empty tag page is a dead end.
 const grouped = TAG_GROUPS.map((group) => ({
@@ -21,8 +31,8 @@ const grouped = TAG_GROUPS.map((group) => ({
 >
   <h1 class="page-title">Tags</h1>
   <p class="page-sub">
-    {counts.length} {counts.length === 1 ? 'tag' : 'tags'} in use. Tags come from a fixed vocabulary,
-    so related posts always land under the same label.
+    {counts.length} {counts.length === 1 ? 'tag' : 'tags'} in use across Posts and Guides. Tags
+    come from a fixed vocabulary, so related content always lands under the same label.
   </p>
 
   {

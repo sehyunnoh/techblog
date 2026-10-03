@@ -2,27 +2,36 @@
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import PostCard from '../../components/PostCard.astro';
 import { withBase } from '../../utils/url';
-import { getTagCounts, getPostsByTag } from '../../utils/posts';
+import { getPublishedPosts, getPostsByTag } from '../../utils/posts';
+import { getPublishedGuides, getGuidesByTag } from '../../utils/guides';
 import { tagLabel, tagDescription } from '../../tags';
 
 export async function getStaticPaths() {
-  const counts = await getTagCounts();
+  // Union of tags in use across both collections — a tag only a guide uses
+  // still needs a page built for it, not just tags posts happen to use.
+  const [posts, guides] = await Promise.all([getPublishedPosts(), getPublishedGuides()]);
+  const tagsInUse = new Set<string>();
+  for (const entry of [...posts, ...guides]) {
+    for (const tag of entry.data.tags) tagsInUse.add(tag);
+  }
+
   return Promise.all(
-    counts.map(async ({ tag }) => ({
+    [...tagsInUse].map(async (tag) => ({
       params: { tag },
-      props: { tag, posts: await getPostsByTag(tag) },
+      props: { tag, posts: await getPostsByTag(tag), guides: await getGuidesByTag(tag) },
     })),
   );
 }
 
-const { tag, posts } = Astro.props;
+const { tag, posts, guides } = Astro.props;
 const label = tagLabel(tag);
 const desc = tagDescription(tag);
+const total = posts.length + guides.length;
 ---
 
 <BaseLayout
-  title={`${label} posts`}
-  description={desc || `Posts tagged ${label} on Lleg's study.`}
+  title={label}
+  description={desc || `Posts and guides tagged ${label} on Lleg's study.`}
   path={`/tags/${tag}`}
   narrow
 >
@@ -34,9 +43,25 @@ const desc = tagDescription(tag);
 
   <h1 class="page-title"><span class="hash" aria-hidden="true">#</span>{label}</h1>
   {desc && <p class="page-sub">{desc}</p>}
-  <p class="count">{posts.length} {posts.length === 1 ? 'post' : 'posts'}</p>
+  <p class="count">{total} {total === 1 ? 'item' : 'items'}</p>
 
-  {posts.map((post) => <PostCard post={post} />)}
+  {
+    posts.length > 0 && (
+      <section class="section">
+        {guides.length > 0 && <h2 class="section__label">Posts</h2>}
+        {posts.map((post) => <PostCard post={post} />)}
+      </section>
+    )
+  }
+
+  {
+    guides.length > 0 && (
+      <section class="section">
+        {posts.length > 0 && <h2 class="section__label">Guides</h2>}
+        {guides.map((guide) => <PostCard post={guide} kind="guide" />)}
+      </section>
+    )
+  }
 </BaseLayout>
 
 <style>
@@ -80,6 +105,19 @@ const desc = tagDescription(tag);
   .count {
     margin: 0.6rem 0 1.5rem;
     font-size: 0.8125rem;
+    color: var(--fg-faint);
+  }
+
+  .section {
+    margin-top: 1.5rem;
+  }
+
+  .section__label {
+    margin: 0 0 0.25rem;
+    font-size: 0.75rem;
+    font-weight: 620;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
     color: var(--fg-faint);
   }
 </style>

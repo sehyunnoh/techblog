@@ -1,0 +1,45 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PostCard from '../../components/PostCard.astro';
+import { getPublishedGuides } from '../../utils/guides';
+
+const guides = await getPublishedGuides();
+---
+
+<BaseLayout
+  title="Guides"
+  description="Reference material on Lleg's study: explainers and how-tos for things worth looking up more than once."
+  path="/guides"
+  narrow
+>
+  <h1 class="page-title">Guides</h1>
+  <p class="page-sub">
+    {guides.length} {guides.length === 1 ? 'guide' : 'guides'}. Not news-driven like Posts: these
+    get revised in place as the thing they explain changes.
+  </p>
+
+  {guides.map((guide) => <PostCard post={guide} kind="guide" />)}
+
+  {guides.length === 0 && <p class="empty">No guides yet.</p>}
+</BaseLayout>
+
+<style>
+  .page-title {
+    margin: 0;
+    font-size: 2rem;
+    letter-spacing: -0.028em;
+    font-weight: 680;
+  }
+
+  .page-sub {
+    margin: 0.4rem 0 2rem;
+    color: var(--fg-muted);
+    font-size: 0.9375rem;
+    max-width: 34rem;
+    line-height: 1.6;
+  }
+
+  .empty {
+    color: var(--fg-muted);
+  }
+</style>

@@ -1,0 +1,247 @@
+---
+import type { MarkdownHeading } from 'astro';
+import BaseLayout from './BaseLayout.astro';
+import TagBadge from '../components/TagBadge.astro';
+import { withBase } from '../utils/url';
+import { formatDate, isoDate, readingTime, type Guide } from '../utils/guides';
+
+interface Props {
+  guide: Guide;
+  headings: MarkdownHeading[];
+  related: Guide[];
+}
+
+const { guide, headings, related } = Astro.props;
+const { title, description, pubDate, updatedDate, tags } = guide.data;
+const minutes = readingTime(guide.body);
+
+// Only h2/h3 belong in the contents list; deeper levels make it a wall.
+// `footnote-label` is the visually hidden heading the Markdown processor
+// injects above the footnote list — a real heading in the AST, but not a
+// section of the guide.
+const toc = headings.filter(
+  (h) => (h.depth === 2 || h.depth === 3) && h.slug !== 'footnote-label',
+);
+---
+
+<BaseLayout
+  title={title}
+  description={description}
+  path={`/guides/${guide.id}`}
+  type="article"
+  publishedTime={pubDate}
+  modifiedTime={updatedDate}
+  tags={tags}
+  noindex={guide.data.draft}
+>
+  {/* data-pagefind-body scopes the search index to guide content, keeping the
+      chrome (nav, footer, tag lists) out of every result excerpt. */}
+  <article class="guide" data-pagefind-body>
+    <header class="guide__header">
+      <p class="guide__kicker">Guide</p>
+      <div class="guide__meta">
+        <time datetime={isoDate(pubDate)}>{formatDate(pubDate)}</time>
+        <span aria-hidden="true">·</span>
+        <span>{minutes} min read</span>
+        {
+          updatedDate && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span>Updated {formatDate(updatedDate)}</span>
+            </>
+          )
+        }
+      </div>
+
+      <h1 class="guide__title" data-pagefind-meta="title">{title}</h1>
+      <p class="guide__lede">{description}</p>
+
+      <div class="guide__tags">
+        {tags.map((tag) => <TagBadge tag={tag} size="md" />)}
+      </div>
+    </header>
+
+    {
+      toc.length >= 3 && (
+        <nav class="toc" aria-label="Table of contents" data-pagefind-ignore>
+          <p class="toc__title">Contents</p>
+          <ol class="toc__list">
+            {toc.map((h) => (
+              <li class:list={['toc__item', h.depth === 3 && 'toc__item--sub']}>
+                <a href={`#${h.slug}`}>{h.text}</a>
+              </li>
+            ))}
+          </ol>
+        </nav>
+      )
+    }
+
+    <div class="prose guide__body">
+      <slot />
+    </div>
+
+    {
+      related.length > 0 && (
+        <footer class="guide__footer" data-pagefind-ignore>
+          <h2 class="related__title">Related guides</h2>
+          <ul class="related__list">
+            {related.map((r) => (
+              <li>
+                <a href={withBase(`/guides/${r.id}`)}>{r.data.title}</a>
+                <span class="related__date">{formatDate(r.data.pubDate)}</span>
+              </li>
+            ))}
+          </ul>
+        </footer>
+      )
+    }
+  </article>
+</BaseLayout>
+
+<style>
+  .guide {
+    max-width: 46rem;
+    margin-inline: auto;
+  }
+
+  .guide__header {
+    padding-bottom: 1.75rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .guide__kicker {
+    margin: 0;
+    font-size: 0.75rem;
+    font-weight: 620;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  .guide__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: 0.6rem;
+    font-size: 0.8125rem;
+    color: var(--fg-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .guide__title {
+    margin: 0.6rem 0 0;
+    font-size: clamp(1.85rem, 1.35rem + 2vw, 2.65rem);
+    line-height: 1.15;
+    letter-spacing: -0.028em;
+    font-weight: 680;
+  }
+
+  .guide__lede {
+    margin: 0.9rem 0 0;
+    font-size: 1.075rem;
+    line-height: 1.65;
+    color: var(--fg-muted);
+  }
+
+  .guide__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: 1.25rem;
+  }
+
+  .toc {
+    margin: 2rem 0 0;
+    padding: 1.1rem 1.35rem;
+    background-color: var(--bg-subtle);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+  }
+
+  .toc__title {
+    margin: 0 0 0.6rem;
+    font-size: 0.75rem;
+    font-weight: 620;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+
+  .toc__list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    counter-reset: toc;
+  }
+
+  .toc__item {
+    line-height: 1.75;
+    font-size: 0.9rem;
+  }
+
+  .toc__item--sub {
+    padding-left: 1.1rem;
+    font-size: 0.85rem;
+  }
+
+  .toc__item a {
+    color: var(--fg-muted);
+    text-decoration: none;
+  }
+
+  .toc__item a:hover {
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .guide__body {
+    margin-top: 2.25rem;
+    max-width: none;
+  }
+
+  .guide__footer {
+    margin-top: 3.5rem;
+    padding-top: 1.75rem;
+    border-top: 1px solid var(--line);
+  }
+
+  .related__title {
+    margin: 0 0 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 620;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+
+  .related__list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .related__list li {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.55rem 0;
+    border-top: 1px solid var(--line);
+    font-size: 0.9375rem;
+  }
+
+  .related__list a {
+    color: var(--fg);
+    text-decoration: none;
+  }
+
+  .related__list a:hover {
+    color: var(--accent);
+  }
+
+  .related__date {
+    color: var(--fg-faint);
+    font-size: 0.8125rem;
+    white-space: nowrap;
+  }
+</style>

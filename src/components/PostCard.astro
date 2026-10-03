@@ -1,18 +1,21 @@
 ---
-import type { Post } from '../utils/posts';
-import { formatDate, isoDate, readingTime } from '../utils/posts';
+import type { ContentEntry } from '../utils/content';
+import { formatDate, isoDate, readingTime } from '../utils/content';
 import { withBase } from '../utils/url';
 import TagBadge from './TagBadge.astro';
 
 interface Props {
-  post: Post;
+  post: ContentEntry;
   /** Renders the first entry on the home page larger than the rest. */
   featured?: boolean;
+  /** Which collection `post` belongs to, so the link points at the right route. */
+  kind?: 'post' | 'guide';
 }
 
-const { post, featured = false } = Astro.props;
+const { post, featured = false, kind = 'post' } = Astro.props;
 const { title, description, pubDate, tags, draft } = post.data;
 const minutes = readingTime(post.body);
+const base = kind === 'guide' ? '/guides' : '/posts';
 ---
 
 <article class:list={['card', featured && 'card--featured']}>
@@ -24,7 +27,7 @@ const minutes = readingTime(post.body);
   </div>
 
   <h2 class="card__title">
-    <a href={withBase(`/posts/${post.id}`)}>{title}</a>
+    <a href={withBase(`${base}/${post.id}`)}>{title}</a>
   </h2>
 
   <p class="card__desc">{description}</p>
