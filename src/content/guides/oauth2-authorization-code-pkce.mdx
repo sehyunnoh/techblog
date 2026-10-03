@@ -1,30 +1,27 @@
 ---
 title: 'OAuth 2.0 Authorization Code Flow with PKCE, Step by Step'
-description: 'How the OAuth 2.0 authorization code grant actually works, why PKCE gets added on top, and what the real HTTP requests look like, with references to RFC 6749, RFC 7636 and RFC 9700.'
+description: 'How the OAuth 2.0 authorization code grant works end to end: the request/response shapes, PKCE, refresh token rotation, error responses, and where RFC 10017 now says to actually store the tokens.'
 pubDate: 2026-10-03
+updatedDate: 2026-10-03
 tags: ['security', 'web', 'tutorial']
 draft: false
 ---
 
 import Mermaid from '../../components/Mermaid.astro';
+import Figure from '../../components/Figure.astro';
 
-OAuth 2.0 solves one specific problem: letting an application act on your behalf against some other service, without ever seeing your password for that service. When a third-party app asks to "connect your Google Calendar," OAuth is the mechanism that lets you grant it a narrow, revocable permission instead of handing over your Google credentials directly.
+OAuth 2.0 solves one specific problem: letting an application act on your behalf against some other service without ever seeing your password for that service. When a third-party app asks to "connect your Google Calendar," OAuth is what lets you grant it a narrow, revocable permission instead of handing over your actual Google credentials.
 
-The core spec, RFC 6749, defines four roles that every flow is built from:[^1]
+RFC 6749, the core spec, builds every flow out of four roles.[^1] The **resource owner** is usually you, the person who can grant access. The **client** is the application asking for it, whether that's a web app, a mobile app, or a CLI tool. The **authorization server** authenticates you and issues tokens (accounts.google.com, say). The **resource server** is the API that actually holds what the client wants (the Calendar API itself). Keep these four apart in your head and the rest of the spec stops being alphabet soup.
 
-- **Resource owner**: usually you, the person who can grant access.
-- **Client**: the application asking for access (a web app, a mobile app, a CLI tool).
-- **Authorization server**: the service that authenticates you and issues tokens (for example, accounts.google.com).
-- **Resource server**: the API that actually holds the data the client wants (for example, the Calendar API).
-
-Most real-world integrations use one specific flow out of the several OAuth defines: the **authorization code grant**, now almost always paired with an extension called **PKCE**. This guide walks through both.
+Of the several flows OAuth defines, almost everything built today uses one: the **authorization code grant**, paired with an extension called **PKCE**. This guide walks through both, then covers the parts most tutorials skip: what happens when a request fails, how a client gets a new access token without making the user log in again, and where current guidance says the resulting tokens should actually live.
 
 ## The authorization code flow
 
-RFC 6749 Section 4.1 lays the flow out as six steps, labeled (A) through (F).[^1] The client never touches your password. It only ever sees a short-lived code, and later, a token.
+RFC 6749 Section 4.1 lays this out as six steps, labeled (A) through (F).[^1] The client never touches your password. It only ever sees a short-lived code, and later, a token.
 
 <Mermaid
-  caption="The authorization code flow. Steps (A) through (C) happen in the browser, where the user authenticates directly with the authorization server. Steps (D) through (F) happen server-to-server, over a channel the browser never sees."
+  caption="Steps (A) through (C) happen in the browser, where the user authenticates directly with the authorization server and the client never sees their credentials. Steps (D) through (F) happen server-to-server, over a channel the browser never sees."
   label="Sequence diagram of the OAuth 2.0 authorization code flow: the client redirects the user's browser to the authorization server, the user authenticates and approves, the authorization server redirects back with a code, the client exchanges that code for an access token at the token endpoint, and finally uses the access token against the resource server"
   code={`
 sequenceDiagram
@@ -44,21 +41,15 @@ sequenceDiagram
 `}
 />
 
-The authorization request in step (A) carries a handful of parameters that matter in practice: `response_type=code` (required, telling the server which flow this is), `client_id`, `redirect_uri`, `scope`, and `state`, an opaque value the client generates and checks on the way back to confirm the response matches a request it actually made.[^1] The token request in step (D) carries `grant_type=authorization_code`, the `code` itself, and the same `redirect_uri` sent in step (A); RFC 6749 is explicit that the two redirect URIs "MUST be identical."[^1]
+Step (A)'s authorization request carries a handful of parameters that matter in practice: `response_type=code` (required, naming the flow), `client_id`, `redirect_uri`, `scope`, and `state`, an opaque value the client generates and checks on the way back to confirm the response actually answers a request it made.[^1] Step (D)'s token request carries `grant_type=authorization_code`, the `code` itself, and the same `redirect_uri` sent in step (A). RFC 6749 doesn't leave room to interpret that last part: the two redirect URIs "MUST be identical."[^1]
 
 ## Why PKCE gets added on top
 
-The flow above has a gap. A mobile app, for instance, often can't keep a secret: its `client_id` is public, and the redirect back in step (C) frequently lands on a custom URI scheme that more than one app on the device can register to receive. RFC 7636 names the resulting risk directly: "OAuth 2.0 public clients utilizing the Authorization Code Grant are susceptible to the authorization code interception attack," where a malicious app registered for the same scheme grabs the code before the real app does.[^2]
+The flow above has a gap. A mobile app often can't keep a secret: its `client_id` is public, and the redirect in step (C) frequently lands on a custom URI scheme that more than one app on the device can register to receive. RFC 7636 names the resulting risk directly: "OAuth 2.0 public clients utilizing the Authorization Code Grant are susceptible to the authorization code interception attack," where a malicious app registered for the same scheme grabs the code before the real one does.[^2]
 
-PKCE (Proof Key for Code Exchange) closes that gap by having the client prove, at token-exchange time, that it's the same client that started the flow:
+PKCE, short for Proof Key for Code Exchange, closes that gap by making the client prove, at token-exchange time, that it's the same client that started the flow. Before the redirect in step (A), the client generates a `code_verifier`, a random string between 43 and 128 characters drawn from unreserved URL characters, and derives a `code_challenge` from it.[^2] The `S256` method, base64url-encoding the SHA-256 hash of the verifier, is the one every implementation is required to support. The authorization request carries the challenge, not the verifier; only the token request in step (D) carries the raw verifier, and the authorization server recomputes its hash and checks it against the challenge it was handed back in step (A), rejecting the exchange on any mismatch.[^2] An attacker who intercepts the redirect in step (C) has the code, but not the verifier, which never left the original client.
 
-1. Before the redirect in step (A), the client generates a `code_verifier`: a random string of 43 to 128 characters, drawn from unreserved URL characters.[^2]
-2. It derives a `code_challenge` from that verifier (the `S256` method, base64url-encoding the SHA-256 hash of the verifier, is the one actually required of every implementation).[^2]
-3. The authorization request in step (A) carries the `code_challenge`, not the verifier.
-4. The token request in step (D) carries the raw `code_verifier`.
-5. The authorization server recomputes the hash of the received verifier and checks it against the challenge it was given in step (A), rejecting the exchange if they don't match.[^2]
-
-An attacker who only intercepts the redirect in step (C) has the authorization code, but not the verifier, which never leaves the original client. RFC 7636's own worked example, recomputed directly here rather than copied, shows the shape of the two values:[^2][^3]
+RFC 7636's own worked example shows the shape of the two values. Rather than copy it blind, I recomputed it directly with Node's `crypto` module to confirm it actually holds:[^2][^3]
 
 ```
 code_verifier:  dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk
@@ -80,7 +71,7 @@ GET https://auth.example.com/authorize
   &code_challenge_method=S256
 ```
 
-Step (D), the token exchange, happens server-to-server and is never visible to the user's browser:
+Step (D), the token exchange, happens server-to-server and the user's browser never sees it:
 
 ```bash
 curl -X POST https://auth.example.com/token \
@@ -91,25 +82,95 @@ curl -X POST https://auth.example.com/token \
   -d code_verifier=dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk
 ```
 
-A successful response is a JSON body with `access_token`, a `token_type` of `Bearer`, an `expires_in` in seconds, and often a `refresh_token` for getting a new access token once this one expires, without asking the user to log in again.
+A successful response is JSON: `access_token`, a `token_type` of `Bearer`, an `expires_in` in seconds, and usually a `refresh_token`. That last field is what lets the client get a new access token later without sending the user back through steps (A) through (C).
 
-## What changed: PKCE isn't just for mobile apps anymore
+## Getting a new access token without a new login
 
-PKCE was originally designed for "public" clients, apps that can't hold a secret (mobile and single-page apps). The current OAuth 2.0 Security Best Current Practice, RFC 9700, published in 2025, extends that advice much further: "Although PKCE was designed as a mechanism to protect native apps, this advice applies to all kinds of OAuth clients, including web applications," and recommends PKCE even for confidential, server-side clients that do hold a secret.[^4]
+Access tokens are deliberately short-lived, so a client that got a `refresh_token` back in step (E) can trade it for a fresh access token on its own. RFC 6749 Section 6 defines this as its own grant type, and the request is almost suspiciously simple:[^1]
 
-Two other changes worth knowing if you learned OAuth from an older tutorial:
+```bash
+curl -X POST https://auth.example.com/token \
+  -H "Authorization: Basic czZCaGRSa3F0MzpnWDFmQmF0M2JW" \
+  -d grant_type=refresh_token \
+  -d refresh_token=tGzv3JOkF0XG5Qx2TlKWIA
+```
 
-- **The implicit grant is out.** RFC 9700 says clients "SHOULD NOT use the implicit grant (response type `token`)" and should use the authorization code grant instead.[^4] If a tutorial has you returning a token directly in a redirect URL fragment, it's describing a flow the spec's own current guidance no longer recommends.
-- **Redirect URI matching is exact.** RFC 9700 requires authorization servers to "utilize exact string matching" on redirect URIs, with one narrow exception for the port number on `localhost` URIs used by native apps during local development.[^4] A trailing slash mismatch is enough to make a correctly-configured authorization server refuse the request.
+That's RFC 6749's own example request, reproduced verbatim.[^1] The `Authorization` header is only there because this particular client is confidential and authenticates itself; a public client (a mobile app, say) skips it and sends `client_id` as a body parameter instead.
 
-## Common mistakes
+Here's what the base spec doesn't fully cover, and what RFC 9700 adds: a leaked refresh token is a much bigger problem than a leaked access token, because it's longer-lived and grants everything the original token did.[^4] For public clients specifically, RFC 9700 requires authorization servers to defend against a stolen refresh token in one of two ways. One is cryptographically binding the token to the specific client instance that requested it. The far more common one is **refresh token rotation**: every time a refresh token gets used, the server issues a brand new one and invalidates the old one. If a stolen token and the legitimate client both eventually try to use the same now-invalidated refresh token, the server can't tell which one is the attacker, but it revokes the whole chain either way, which is exactly the point: the theft stops being quietly usable forever and starts being self-reporting.[^4]
 
-- **Treating `state` as optional.** RFC 6749 only marks it "RECOMMENDED," but skipping it removes your only defense against cross-site request forgery on servers that don't support PKCE.[^1][^4]
-- **Reusing a `code_verifier` across requests.** It's meant to be generated fresh per authorization attempt, not stored and reused like a secret.
-- **Checking the access token's expiry client-side and assuming that's enough.** The resource server is the one that actually validates the token on every request; nothing stops a client from sending an expired or revoked one, and nothing but server-side validation will catch it.
+If your authorization server returns a new `refresh_token` in every refresh response, that's not an API quirk. It's the rotation mechanism working as designed, and your client needs to store the new one and discard the old one every single time, not just on first login.
+
+## What a failed request actually looks like
+
+Every OAuth tutorial shows the success path. Section 5.2 of RFC 6749 is just as precise about failure: an error comes back as HTTP 400, with a JSON body naming one of six fixed error codes.[^1]
+
+| Error code | What it means |
+|---|---|
+| `invalid_request` | A required parameter is missing, malformed, or duplicated |
+| `invalid_client` | Client authentication failed |
+| `invalid_grant` | The code or refresh token is invalid, expired, revoked, or was issued to a different client |
+| `unauthorized_client` | This client isn't allowed to use this grant type |
+| `unsupported_grant_type` | The server doesn't support the `grant_type` you sent |
+| `invalid_scope` | The requested scope is invalid or exceeds what was actually granted |
+
+```json
+{
+  "error": "invalid_grant",
+  "error_description": "Authorization code expired"
+}
+```
+
+`invalid_grant` is the one worth remembering: it's what you get back for an authorization code used twice, a code that already expired (they're typically valid for under a minute), or a refresh token a rotation policy already invalidated. If you see it intermittently in production, the first thing to check is whether two requests raced to use the same code or refresh token, not whether your client secret is wrong.
+
+## PKCE and exact redirect matching aren't just for native apps anymore
+
+PKCE was originally built to protect "public" clients: apps that can't hold a secret, like mobile and single-page apps. RFC 9700, the current OAuth 2.0 security best practice published in 2025, pushes that advice further than its original scope: "Although PKCE was designed as a mechanism to protect native apps, this advice applies to all kinds of OAuth clients, including web applications," and recommends it even for confidential, server-side clients that do hold a secret.[^4]
+
+Two more pieces of current guidance are worth knowing if you learned OAuth from an older writeup. RFC 9700 says clients "SHOULD NOT use the implicit grant," the older flow that returned a token directly in a redirect fragment instead of an authorization code; if a tutorial has you doing that, it's describing something the spec's own current guidance has moved past.[^4] And redirect URI matching is exact: authorization servers must "utilize exact string matching," with the sole carve-out being the port number on `localhost` redirects used by native apps during local development.[^4] A trailing slash mismatch is enough for a correctly configured server to refuse the request outright.
+
+That strictness exists because a redirect URI with any wiggle room becomes an open redirector, and RFC 9700 spends real effort on exactly that failure mode: an attacker-controlled page that the authorization server will redirect users to, armed with nothing more than a validly-registered client.[^4] One version of this relies on an abandoned DNS record: a redirect URI pointing at a subdomain whose CNAME still resolves, but to infrastructure the original owner no longer controls, which an attacker can then claim. Exact string matching doesn't fix a dangling DNS record, but it does close off the softer version of this problem, where a server accepts `https://app.example.com/callback/anything` because it only checked the prefix.
+
+## Where should the tokens actually live?
+
+This is the question most OAuth writeups never get to, and it was an open problem in the ecosystem for years. RFC 10017, "OAuth 2.0 for Browser-Based Applications," only became an IETF Best Current Practice in August 2026, which makes it newer than most of the advice still circulating online.[^5]
+
+It ranks three architectures in decreasing order of security. At the bottom is the **browser-based OAuth client**, where the single-page app itself holds the access and refresh tokens, in memory, a cookie, or `localStorage`. The document's objection isn't really about which browser storage API you pick; it's structural. "Malicious JavaScript code has the same privileges as the legitimate application code," so any successful XSS on the page can reach whatever's holding the token, and even a storage mechanism that fully isolates the token doesn't stop the attacker from simply running a fresh authorization flow of their own.[^5] One step up is a **token-mediating backend**, a small server that handles the OAuth exchange but still hands the resulting tokens to the browser afterward, moving some risk around without removing it.
+
+At the top is the pattern RFC 10017 says is "strongly recommended for business applications, sensitive applications, and applications that handle personal data": the **Backend for Frontend**, or BFF.[^5] Here the server, not the browser, holds the OAuth client role entirely. The browser only ever gets a session cookie, and the document is specific about how that cookie has to be configured: "The BFF MUST enable the `HttpOnly` flag for its cookies."[^5] Because `HttpOnly` cookies are invisible to JavaScript by design, "there are no tokens available to extract from the browser" even if the page's JavaScript is fully compromised.[^5]
+
+<Figure
+  caption="Same OAuth flow, different place the tokens end up. On the left, a compromised line of frontend JavaScript can read the access token directly. On the right, the browser never holds anything but a cookie it cannot read, and the attacker's JavaScript can only ride along on requests the legitimate app already makes, not read the token itself."
+  label="Comparison of two architectures for a browser-based app: a browser-based OAuth client, where the single-page app holds the access token itself and a cross-site scripting bug can read it directly, versus a Backend for Frontend, where the server holds the token and the browser only receives an HttpOnly session cookie that JavaScript cannot read"
+>
+  <svg viewBox="0 0 700 190" width="100%" role="img" aria-labelledby="bff-title">
+    <title id="bff-title">Browser-based OAuth client versus Backend for Frontend</title>
+
+    <text x="0" y="14" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">BROWSER-BASED CLIENT (lowest ranked, RFC 10017 Section 6.3)</text>
+    <rect x="0" y="26" width="330" height="150" rx="7" fill="var(--series-5)" opacity="0.1" stroke="var(--series-5)" stroke-width="1.3" />
+    <text x="14" y="52" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">Access and refresh tokens are held</text>
+    <text x="14" y="70" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">by the single-page app itself.</text>
+    <text x="14" y="98" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">A single XSS bug can read the token</text>
+    <text x="14" y="116" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">directly, or start a fresh OAuth flow</text>
+    <text x="14" y="134" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">of its own as the legitimate client.</text>
+    <text x="14" y="160" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">Any storage choice shares this risk.</text>
+
+    <text x="370" y="14" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">BACKEND FOR FRONTEND (strongly recommended, Section 6.1)</text>
+    <rect x="370" y="26" width="330" height="150" rx="7" fill="var(--series-1)" opacity="0.1" stroke="var(--series-1)" stroke-width="1.3" />
+    <text x="384" y="52" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">A server holds the OAuth client role</text>
+    <text x="384" y="70" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">and every token it receives.</text>
+    <text x="384" y="98" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">The browser gets only an HttpOnly</text>
+    <text x="384" y="116" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">session cookie, invisible to any</text>
+    <text x="384" y="134" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">JavaScript running on the page.</text>
+    <text x="384" y="160" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">No token for an XSS bug to reach.</text>
+  </svg>
+</Figure>
+
+None of this makes a BFF immune to XSS. A compromised page can still ride the session cookie to make authenticated requests for as long as the attacker's script runs. What it removes is persistence and reach: there's no long-lived token sitting in `localStorage` for the attacker to exfiltrate and replay later from their own machine, and no refresh token to steal and keep using after the user closes the tab. For a backend you already control, routing OAuth through it isn't an exotic architecture choice; per RFC 10017, it's now the specific thing a security review is going to ask why you didn't do.[^5]
 
 ## References
-[^1]: IETF, [RFC 6749, "The OAuth 2.0 Authorization Framework"](https://www.rfc-editor.org/rfc/rfc6749.html) (Hardt, 2012), Section 1.1 for the four roles, Section 4.1 for the authorization code grant flow and its request/response parameters.
+[^1]: IETF, [RFC 6749, "The OAuth 2.0 Authorization Framework"](https://www.rfc-editor.org/rfc/rfc6749.html) (Hardt, 2012), Section 1.1 for the four roles, Section 4.1 for the authorization code grant, Section 5.2 for the error response format and codes, Section 6 for the refresh token grant and its example request.
 [^2]: IETF, [RFC 7636, "Proof Key for Code Exchange by OAuth Public Clients"](https://www.rfc-editor.org/rfc/rfc7636.html) (Sakimura, Bradley and Agarwal, 2015), for the authorization code interception attack, the `code_verifier`/`code_challenge` mechanism, and the S256 transformation.
 [^3]: The `code_verifier`/`code_challenge` pair in this guide is RFC 7636 Appendix B's own worked example, independently recomputed with Node.js's `crypto` module (`sha256` digest, base64url-encoded) to confirm it, rather than copied without checking.
-[^4]: IETF, [RFC 9700, "Best Current Practice for OAuth 2.0 Security"](https://www.rfc-editor.org/rfc/rfc9700.html) (Lodderstedt, Bradley, Labunets and Fett, 2025), Section 2.1 for redirect URI matching, Section 2.1.1 for extending PKCE to confidential and web clients, Section 2.1.2 for deprecating the implicit grant.
+[^4]: IETF, [RFC 9700, "Best Current Practice for OAuth 2.0 Security"](https://www.rfc-editor.org/rfc/rfc9700.html) (Lodderstedt, Bradley, Labunets and Fett, 2025), Section 2.1 for redirect URI matching and extending PKCE to confidential and web clients, Section 2.1.2 for deprecating the implicit grant, Section 4.11 for open redirection and the subdomain takeover scenario, Section 4.14 for refresh token protection and rotation.
+[^5]: IETF, [RFC 10017, "OAuth 2.0 for Browser-Based Applications"](https://www.rfc-editor.org/rfc/rfc10017.html) (Parecki, De Ryck and Waite, 2026), BCP 212, published August 2026, Section 6 for the three ranked architectures, Section 6.1 for the Backend for Frontend pattern and its `HttpOnly` cookie requirement.
