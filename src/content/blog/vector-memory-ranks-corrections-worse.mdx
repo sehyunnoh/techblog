@@ -1,0 +1,153 @@
+---
+title: "My Blog's Correction Ranks #15. The Mistake It Fixed Ranks #6."
+description: "liao.gg argued vector-based agent memory cannot tell correct from stale, without a benchmark. I tested the claim on this blog's own corrected numbers, with real embeddings."
+pubDate: 2026-10-04
+tags: ['ai', 'llm', 'architecture', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+"Agents Don't Need Memory, They Need Documentation" went to the top of Hacker News on October 3, 2026, 96 points and 59 comments in, arguing that vector-database "memory" for AI agents has a structural flaw: a similarity search over stored snippets "ranks how close two snippets are in embedding space. That's it." It cannot tell a correct memory from a stale one, because nothing in a cosine similarity score encodes correctness or recency.[^1] The post names five failures this causes and proposes structured documentation instead. What it does not include is a benchmark. No numbers, no retrieval test, nowhere the claim gets to fail in public.
+
+This blog has something most test corpora don't: two real, dated, published corrections. Twice this project shipped a number, found it wrong, and fixed it in place with a dated note. That is a ground truth a synthetic test set cannot easily manufacture, and it was sitting in this repository's own git history the whole time. So I built the retrieval system the critique describes, pointed it at this blog's 25 published posts, and asked it the kind of question an agent with "memory" would actually need to answer.
+
+## What "agent memory" usually means
+
+A vector-based memory system works in three steps. First, text (a conversation, a document, a past decision) gets split into chunks. Second, each chunk is converted into an embedding: a list of a few thousand numbers produced by a model trained so that semantically similar text produces numerically similar lists. Third, when an agent needs to recall something, its question gets embedded the same way, and the system returns whichever stored chunks have embeddings closest to the question's, measured by cosine similarity, a number between -1 and 1 that captures how aligned two vectors are regardless of their length.
+
+Nothing in that pipeline checks whether a chunk is still true. A sentence saying "X is 34,040" and a later sentence saying "X is actually 31,484" can both describe the exact same fact, phrased similarly enough that their embeddings land close together, with no vector-space signal for which one supersedes the other. That is liao.gg's argument. I built the pipeline exactly as described and tested it against two cases where I already knew the right answer, because I was the one who wrote the correction.
+
+<Mermaid
+  caption="The experiment's pipeline. Every step mirrors how a real agent-memory plugin is built; the only difference is that the corpus here is a known quantity, with two chunks whose correct ranking is known in advance."
+  label="Flowchart showing blog post source files being split into 924 text chunks, each embedded with Gemini's embedding model, stored as vectors, then a question embedded the same way and compared against every stored vector by cosine similarity to produce a ranked list"
+  code={`
+flowchart LR
+    S["25 published posts<br/>(.mdx source)"] --> C["Chunker<br/>captions, labels,<br/>paragraphs"]
+    C --> E1["924 chunks"]
+    E1 --> V["Gemini embedding-001<br/>RETRIEVAL_DOCUMENT"]
+    V --> DB["924 stored vectors"]
+    Q["A question"] --> V2["Gemini embedding-001<br/>RETRIEVAL_QUERY"]
+    V2 --> R["Cosine similarity<br/>against all 924"]
+    DB --> R
+    R --> Rank["Ranked list,<br/>most similar first"]
+`}
+/>
+
+## Building a corpus with a known answer
+
+I split every post's source into 924 chunks: figure captions, alt-text labels, and markdown paragraphs, stripped of code fences and raw SVG, keeping diagram descriptions since those carry real claims too.[^2] Every chunk was embedded with Google's `gemini-embedding-001`, using the `RETRIEVAL_DOCUMENT` task type the model documentation specifies for indexed content, producing the model's default 3,072-dimensional vector.[^3]
+
+Two of those 924 chunks have a correct ranking I can state in advance, because this blog corrected them itself, on the record, with a dated note:
+
+- **September 17.** A post estimated a container image build at "three orders of magnitude" slower than a git worktree checkout. The next day's measurement found it was 364 times slower, not roughly 1,000. The caption was rewritten in place.[^4]
+- **September 20.** A post called 34,040 tokens the "fixed charge" for a subagent to exist. The next day's measurement found that figure was boot plus one tool-calling turn combined; the boot alone is 31,484. Rather than rewrite the sentence, this one got a dated correction blockquote appended directly below it.[^5]
+
+Two corrections, two different repair strategies: one rewrote the claim, the other appended a note next to it. Both are real content, sitting in the actual corpus, not constructed for this post.
+
+## Case one: a nine-rank gap
+
+For the September 20 correction, I asked the retrieval system three differently-phrased versions of the same question and recorded where the stale chunk and the correcting chunk each landed, out of all 924:
+
+<Chart
+  type="bar"
+  height={320}
+  format="plain"
+  caption="Lower is better: rank 1 is the single most relevant chunk out of 924. A correction should never rank below the claim it corrects. For the most direct phrasing, it ranked nine places below it."
+  label="Grouped bar chart comparing the rank of the stale '34,040 tokens fixed cost' claim against the rank of its correction, across three question phrasings: 'what is the fixed token cost of a subagent before it does any work' (stale rank 6, correction rank 15), 'how many tokens does a subagent cost just to boot with zero tool calls' (stale rank 11, correction rank 7), and 'is 34,040 tokens the fixed boot cost of a subagent' (stale rank 10, correction rank 8)"
+  labels={['"fixed cost before any work"', '"boot cost, zero tool calls"', '"is 34,040 the boot cost?"']}
+  series={[
+    { name: 'Stale claim (34,040)', data: [6, 11, 10] },
+    { name: 'Correction (31,484)', data: [15, 7, 8] },
+  ]}
+  yTitle="Rank out of 924 (lower = more relevant)"
+/>
+
+The most natural phrasing of the question, "what is the fixed token cost of a subagent before it does any work," is the one where it matters most: the stale claim ranked 6th, the correction that explicitly supersedes it ranked 15th. The other two phrasings flipped the order, correction ahead of mistake, by similar margins. There's no consistent winner here, which is itself the finding: nothing about embedding distance reliably favors the current fact over the one it replaced. It depends on how closely your question's wording happens to match one version's wording, a property that has nothing to do with which version is true.
+
+Reading the live post explains part of why the stale number keeps winning. I counted every place on that one page stating 34,040 as the fixed cost, uncorrected: the figure's caption, its alt-text label, two lines of text baked directly into the diagram's SVG, two nodes inside a Mermaid flowchart, and four separate body sentences.[^5] That's ten uncorrected restatements of the same number, two of them inside diagrams nobody redrew when the text was fixed. Against that, exactly one paragraph says otherwise. A retrieval system doesn't know any of those ten are describing the same now-outdated fact; it just sees ten chunks near the query and one chunk slightly less near it.
+
+## Case two: nobody wins, and a third number muddies it further
+
+The September 17 correction is messier in an instructive way. The old caption ("three orders of magnitude") and the new one ("364×, measured in the follow-up post") are nearly the same sentence with one key phrase swapped, which is exactly the scenario liao.gg's critique predicts breaks similarity search worst: two versions close enough in wording that embedding distance barely separates them. It didn't. Across three phrasings, the old and new captions landed within one to two ranks of each other every time, both near the top, with no reliable order between them.
+
+That's already the point: a correction and the mistake it fixes are, to a cosine similarity score, practically the same memory. But there's a complication the retrieval system surfaced that I didn't design for. "364×" describes a one-time container image build. A different, also-true number from the same follow-up post, "a warm container start is about 3×, not 364×," describes a different thing entirely: restarting an already-built container. Both are correct. They answer different questions. And for some phrasings of "how much slower is a container than a worktree," the 3× chunk ranked ahead of both the right and the wrong version of the 364× answer.
+
+<Figure
+  caption="Three numbers about the same two posts, only one of them wrong, and a retrieval system that cannot reliably separate any of them when a question doesn't specify which comparison it means."
+  label="Three statements about worktree-versus-container cost: an estimate of roughly 1,000 times slower which was wrong, a measured 364 times slower for a one-time cold image build which is correct, and a measured roughly 3 times slower for a warm container restart which is also correct but answers a different question"
+>
+  <svg viewBox="0 0 700 220" width="100%" role="img" aria-labelledby="three-numbers-title">
+    <title id="three-numbers-title">Three true-or-false statements, one retrieval system, no way to tell them apart by wording alone</title>
+
+    <rect x="0" y="0" width="700" height="60" rx="7" fill="var(--series-5)" opacity="0.12" stroke="var(--series-5)" stroke-width="1.3" />
+    <text x="14" y="22" fill="var(--fg)" font-size="12.5" font-family="var(--font-sans)" font-weight="600">"Three orders of magnitude" (~1,000x)</text>
+    <text x="14" y="42" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">An estimate. Wrong: the real number is under half that order of magnitude.</text>
+
+    <rect x="0" y="78" width="700" height="60" rx="7" fill="var(--series-1)" opacity="0.12" stroke="var(--series-1)" stroke-width="1.3" />
+    <text x="14" y="100" fill="var(--fg)" font-size="12.5" font-family="var(--font-sans)" font-weight="600">364x, cold image build: 48.1s vs 132ms</text>
+    <text x="14" y="120" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">Measured, correct. The number that corrects the estimate above.</text>
+
+    <rect x="0" y="156" width="700" height="60" rx="7" fill="var(--series-3)" opacity="0.12" stroke="var(--series-3)" stroke-width="1.3" />
+    <text x="14" y="178" fill="var(--fg)" font-size="12.5" font-family="var(--font-sans)" font-weight="600">~3x, warm container start: ~390ms vs 132ms</text>
+    <text x="14" y="198" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">Also measured, also correct. A different comparison entirely.</text>
+  </svg>
+</Figure>
+
+The failure liao.gg describes isn't just "stale beats current." It's broader: similarity search has no mechanism for knowing a question needs disambiguating in the first place. It will hand back whichever stored number sounds most like the question, whether that number is wrong, right-but-answering-something-else, or right-and-exactly-what-was-asked, with the same confident absence of a signal either way.
+
+## Why a single document doesn't have this failure mode
+
+liao.gg's proposed fix is structural, not algorithmic: keep a small set of living documents an agent reads before it works and updates after, rather than an ever-growing pile of retrieved snippets.[^1] The reason this sidesteps the ranking problem isn't that documents are smarter than embeddings. It's that the question "which version is current" stops being a retrieval problem at all. In a correctly maintained document, there is exactly one row for "the subagent's fixed boot cost," and updating it means overwriting that row, not appending a competing one somewhere a similarity search might or might not surface it.
+
+This blog already runs a version of that discipline for the person steering it: a local, gitignored file logs every published topic with a one-line summary, explicitly marked "already covered, no need to look again," rather than leaving that judgment to whatever a search happens to surface.[^6]
+
+<Figure
+  caption="The same fact, stored two ways. One of them makes 'which version is current' a question retrieval has to guess at. The other makes it a question that cannot even be asked, because there is only one row."
+  label="Comparison of a vector memory system, where a fact and its correction exist as two separate stored chunks competing for retrieval rank with no signal for which is current, versus a single structured document, where there is exactly one place the current value lives and updating it means overwriting that one place"
+>
+  <svg viewBox="0 0 700 180" width="100%" role="img" aria-labelledby="doc-vs-rag-title">
+    <title id="doc-vs-rag-title">Scattered snippets versus one row in a maintained document</title>
+
+    <text x="0" y="14" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">VECTOR MEMORY: TEN CHUNKS VS. ONE</text>
+    <rect x="0" y="26" width="330" height="140" rx="7" fill="var(--series-5)" opacity="0.1" stroke="var(--series-5)" stroke-width="1.3" />
+    <text x="14" y="52" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">Caption, alt text, two diagram labels</text>
+    <text x="14" y="70" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">and four sentences all say 34,040,</text>
+    <text x="14" y="88" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">unflagged. One paragraph corrects it.</text>
+    <text x="14" y="116" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">Retrieval ranks them by wording,</text>
+    <text x="14" y="134" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">not by which one is still true.</text>
+
+    <text x="370" y="14" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">STRUCTURED DOC: ONE ROW</text>
+    <rect x="370" y="26" width="330" height="140" rx="7" fill="var(--series-1)" opacity="0.1" stroke="var(--series-1)" stroke-width="1.3" />
+    <text x="384" y="52" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">"Subagent fixed boot cost: 31,484"</text>
+    <text x="384" y="70" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">is the only row for that fact.</text>
+    <text x="384" y="98" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">Updating it means overwriting it.</text>
+    <text x="384" y="116" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">"Which version is current" is not</text>
+    <text x="384" y="134" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">a question retrieval has to answer.</text>
+  </svg>
+</Figure>
+
+## Trade-offs worth naming
+
+- **This is a small, specific corpus.** 924 chunks from 25 posts is nowhere near the scale of a production memory system running for months, and the claim being tested is about a structural property of cosine similarity, not about scale, which is why a small, verifiable corpus is still a fair test. But a bigger corpus could show different margins.
+- **One embedding model, not the field.** Google shipped a newer `gemini-embedding-2` after I ran this; a reranking step on top of raw similarity, which several production RAG systems use, might catch exactly the kind of near-duplicate collision these two cases produce. I tested the baseline the criticism is actually about, not every mitigation available.[^3]
+- **The correction didn't always lose.** Two of six query results favored the current fact over the stale one. The honest claim is not "vector memory always prefers mistakes," it's "vector memory has no reliable mechanism for preferring the correction," and a coin that sometimes lands on the right side is still not a mechanism.
+- **Documentation has its own cost.** The single-source-of-truth approach only works if someone (or some agent) actually does the "update" step in "prompt, consult, build, update." This blog's own two corrections happened because a person read the follow-up measurement and went back to fix the first post. That discipline is a process cost a passively-indexed vector store never asks you to pay, and also never does for you.
+
+## Takeaways
+
+- **A cosine similarity score carries no notion of correctness or time.** Two versions of the same fact, one superseding the other, can and did land one to two ranks apart, functionally tied, because the only thing the score measures is how similar the wording is.
+- **The stale version can win by sheer repetition.** Ten places on one page restate an uncorrected number against one paragraph that corrects it; a retrieval system has no way to know those ten chunks are all describing a single fact that already changed.
+- **Ambiguous questions pull in true-but-wrong-context answers, not just wrong ones.** A correctly measured number describing a different comparison outranked both the right and wrong versions of the number actually being asked about, for some phrasings.
+- **A maintained document sidesteps the question by construction, not by being smarter.** When there is exactly one place a fact can live, "which version is current" stops being something retrieval has to guess.
+- **An uncited claim is still testable, even without the author's own numbers.** liao.gg's post shipped no benchmark; the ground truth to check it against was already sitting in this project's git history.
+
+## References
+[^1]: Kevin Liao, ["Agents Don't Need Memory, They Need Documentation"](https://liao.gg/blog/agents-dont-need-memory), published 2026, for the critique of vector-based agent memory and the proposed documentation-based alternative. Discussed on [Hacker News](https://news.ycombinator.com/), 96 points and 59 comments as of 2026-10-03.
+[^2]: Corpus built from this blog's own published posts at [`sehyunnoh/techblog`](https://github.com/sehyunnoh/techblog), `src/content/blog/`, 25 files as of 2026-10-03. Chunking extracted Figure/Chart `caption` and `label` JSX props plus markdown paragraphs, with code fences and raw SVG stripped; a small number of Mermaid diagram source chunks leaked through the extraction unfiltered and did not appear in any reported top-5 result.
+[^3]: Google AI, ["Embeddings"](https://ai.google.dev/gemini-api/docs/embeddings), for the `gemini-embedding-001` model, the `RETRIEVAL_DOCUMENT`/`RETRIEVAL_QUERY` task types, and the default 3,072-dimensional output, all confirmed directly against the live API for this post (requests to `generativelanguage.googleapis.com`, `batchEmbedContents` for the corpus, `embedContent` for each query).
+[^4]: This blog, commits [`c480d68`](https://github.com/sehyunnoh/techblog/commit/c480d68477e7c19d602d77245aed13336e243463) and [`f1d3875`](https://github.com/sehyunnoh/techblog/commit/f1d3875358922cc5ee9b4ec0799d82a1df6416ff), for the original "three orders of magnitude" caption and its correction to 364x the next day, in `src/content/blog/agent-fleet-shares-one-git.mdx`.
+[^5]: This blog, [`src/content/blog/subagent-costs-34000-tokens.mdx`](https://github.com/sehyunnoh/techblog/blob/main/src/content/blog/subagent-costs-34000-tokens.mdx), for the original 34,040-token claim and its 2026-09-20 correction blockquote to 31,484 boot plus 2,688 for the first tool-calling turn; count of uncorrected restatements verified by direct line-by-line reading of the file.
+[^6]: This blog's local topic backlog is gitignored and not part of the published repository; referenced here only as a description of an existing practice, not as a citable external source.
