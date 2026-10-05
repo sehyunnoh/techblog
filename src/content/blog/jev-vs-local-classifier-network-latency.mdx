@@ -1,0 +1,127 @@
+---
+title: "Red Hat's Classifier Beat Jev by 6x. My Own Attempt Just Tied It."
+description: 'Red Hat benchmarked Jev against 8 other guardrail models and found a local classifier beats it on speed by 6x. I tried to reproduce that result myself, on my own task.'
+pubDate: 2026-10-05
+tags: ['ai', 'llm', 'architecture', 'cost-engineering', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Chart from '../../components/Chart.astro';
+
+[A post on this blog from September 29](/posts/jev-vs-gemini-decision-cost) tested TypeSafe's Jev, a model trained to answer typed questions with probabilities instead of generating text, against Gemini 3.8 Flash on an eight-line classification task. Both got every line right. Jev was four to five times faster and eight to thirty-four times cheaper. The conclusion was narrow on purpose: a decision model beats a general chat model at a decision a chat model was never built to make efficiently.
+
+On October 2, Red Hat's AI Safety team published something with a much bigger scope: Jev, an open alternative called Laya, and a vLLM-hosted model called DiffusionGemma, benchmarked against nine other guardrail systems, pre-trained classifiers and LLM judges included, across two real safety tasks with thousands of samples each.[^1] Jev did not win cleanly. It placed fourth on prompt injection detection, behind a 35-billion-parameter judge, a small pre-trained classifier, and DiffusionGemma. It placed first on content safety. And on latency, a tiny pre-trained classifier, deberta-v3-base, beat Jev by roughly six times: 54 milliseconds against 348.
+
+That last number is the one worth testing rather than just repeating. So I built a bigger version of my own original task, thirty-two lines instead of eight, and ran it through Jev, through Gemini, and through a lightweight classifier of my own, to see whether that six-times gap shows up on a task I control.
+
+## What the bigger benchmark actually found
+
+Red Hat's team ran two tasks through EvalHub's NeMo Guardrails library: prompt injection detection and content safety, both class-balanced between risky and safe samples.[^1] Nine systems in total, split across four methodologies: small pre-trained classifiers (`deberta-v3-base`, `granite-guardian-hap-125m`), a 2019-era zero-shot baseline (`BART-large-mnli`), LLM judges (Mistral's Shieldstral, NVIDIA's Nemotron, a 35-billion-parameter Qwen3.6), and the three decision-model-style systems: Jev, Laya and DiffusionGemma.
+
+<Chart
+  type="bar"
+  height={320}
+  format="percent"
+  caption="Accuracy by task and system, from Red Hat's published tables. Jev wins content safety outright and loses prompt injection to three other systems, including one that costs nothing to run."
+  label="Grouped bar chart of accuracy on two tasks, prompt injection and content safety, for deberta-v3-base, Qwen3.6-35B, DiffusionGemma, and Jev: prompt injection accuracy 89.0%, 89.3%, 87.7%, and 86.3% respectively; content safety accuracy 80.3%, 85.5%, 85.5%, and 86.2% respectively"
+  labels={['deberta-v3-base', 'Qwen3.6-35B', 'DiffusionGemma', 'Jev']}
+  series={[
+    { name: 'Prompt injection accuracy', data: [89.01, 89.31, 87.72, 86.35] },
+    { name: 'Content safety accuracy', data: [80.27, 85.47, 85.53, 86.20] },
+  ]}
+  yTitle="Accuracy (%)"
+/>
+
+The latency numbers, measured from a machine in the United Kingdom against servers in the United States, tell a sharper story. Red Hat discloses the cost of that distance directly: "This will necessarily add a minimum of about 56 ms latency to each network request."[^1] Their own hardware notes split the field in two: small classifiers like `deberta-v3-base` ran locally on a MacBook Pro M1, while the larger systems, Jev included, were reached as network calls, either to TypeSafe's API or to a ROSA OpenShift cluster running vLLM.[^1] Median latency for prompt injection: `deberta-v3-base` at 54.1 ms, Jev at 348.1 ms. Roughly a sixfold gap, and it lines up with the one structural fact the hardware section states outright: one of these ran on the laptop doing the measuring, and the rest did not.
+
+## Building a bigger version of my own test
+
+My September post used eight lines across four categories: `lock_contention`, `network_error`, `syntax_error`, `success`. I expanded it to thirty-two held-out test lines (eight per category, all new, not reused from the original post) plus twenty-four separate training lines to build a classifier from. The categories and their boundaries are mine, not Red Hat's, deliberately: I wanted to test the six-times claim on a task I control end to end, not re-run their benchmark with their data.
+
+For the lightweight classifier, I reused the nearest-centroid approach from [this blog's post two days ago](/posts/vector-memory-ranks-corrections-worse): embed the twenty-four training lines with Gemini's `gemini-embedding-001` using the `CLASSIFICATION` task type, average each category's embeddings into a centroid, then classify a new line by which centroid its embedding sits closest to.[^2] It is not `deberta-v3-base`. It is a cloud embedding call standing in for the general idea of "a smaller, purpose-built model instead of a full chat completion," which is exactly the distinction this experiment was built to probe.
+
+All thirty-two test lines went through all three methods: the nearest-centroid classifier, Jev's Choice endpoint, and Gemini 3.8 Flash with `thinkingBudget: 0`, the same configuration as the September post.[^3][^4] All three got every line right. Accuracy was not where the difference showed up.
+
+<Chart
+  type="bar"
+  height={300}
+  format="plain"
+  caption="Median latency across 32 real API calls per method. The nearest-centroid classifier did not win. It landed within 100 ms of Jev, both far closer to each other than either is to the full chat completion."
+  label="Bar chart of median latency in milliseconds across 32 test lines for three methods: nearest-centroid embedding classifier at 975.3 milliseconds, Jev at 874.3 milliseconds, and Gemini 3.8 Flash with thinking disabled at 1803.4 milliseconds"
+  labels={['Embedding classifier', 'Jev', 'Gemini (thinking off)']}
+  series={[{ name: 'Median latency (ms)', data: [975.3, 874.3, 1803.4] }]}
+  yTitle="Milliseconds"
+/>
+
+My lightweight classifier did not beat Jev. It was, if anything, slightly slower: 975 ms median against Jev's 874 ms, both comfortably ahead of Gemini's 1,803 ms but nowhere close to Red Hat's sixfold gap. Something about my setup didn't reproduce their finding, and the hardware section I quoted above says exactly what.
+
+## The gap was never about model size
+
+`deberta-v3-base` is small enough to run on a laptop CPU with no network request at all. My nearest-centroid classifier is not: every single classification sends a line of text to `generativelanguage.googleapis.com` and waits for an embedding vector to come back, the same kind of round trip Jev's API call makes and Gemini's API call makes. Three different cloud endpoints, three different companies, three different model architectures, and three latency numbers that land in the same 900-to-1,800-millisecond neighborhood from wherever this post's calls actually originated, while Red Hat's locally-run classifier sits at 54 milliseconds from a different machine entirely.
+
+<Figure
+  caption="The variable that actually separated 54 ms from everything else was never which model answered. It was whether the question ever left the machine that asked it."
+  label="Comparison of a local classifier running directly on a laptop CPU with no network request, against three cloud API calls (an embedding-based classifier, Jev, and a general chat model) that all pay a network round trip regardless of how small or specialized the underlying model is"
+>
+  <svg viewBox="0 0 700 190" width="100%" role="img" aria-labelledby="local-vs-cloud-title">
+    <title id="local-vs-cloud-title">What actually explains a 54 ms result versus everything else</title>
+
+    <text x="0" y="14" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">RUNS LOCALLY: NO NETWORK HOP</text>
+    <rect x="0" y="26" width="330" height="140" rx="7" fill="var(--series-1)" opacity="0.1" stroke="var(--series-1)" stroke-width="1.3" />
+    <text x="14" y="52" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">deberta-v3-base, small enough</text>
+    <text x="14" y="70" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">for a laptop CPU.</text>
+    <text x="14" y="98" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">54 ms median. The floor is</text>
+    <text x="14" y="116" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">whatever the CPU can do,</text>
+    <text x="14" y="134" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">nothing else.</text>
+
+    <text x="370" y="14" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)" font-weight="600">EVERYTHING ELSE: A ROUND TRIP</text>
+    <rect x="370" y="26" width="330" height="140" rx="7" fill="var(--series-5)" opacity="0.1" stroke="var(--series-5)" stroke-width="1.3" />
+    <text x="384" y="52" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">My embedding classifier, Jev,</text>
+    <text x="384" y="70" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)">and Gemini: all a network call.</text>
+    <text x="384" y="98" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">875 to 1,800 ms median here,</text>
+    <text x="384" y="116" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">regardless of how small or</text>
+    <text x="384" y="134" fill="var(--fg)" font-size="11.5" font-family="var(--font-sans)" font-weight="600">specialized the model is.</text>
+  </svg>
+</Figure>
+
+This refines the lesson from Red Hat's own benchmark rather than contradicting it. Their deberta-v3-base result is not evidence that purpose-built classifiers beat decision-model architectures by six times. It is evidence that nothing beats zero network hops, and that once a classification task requires leaving the machine that asked the question, the specific cloud endpoint you pick, a dedicated decision model, a general chat model, or a model you repurposed into a classifier yourself, matters far less than whether you needed the network at all.
+
+## Cost didn't follow the same pattern
+
+Latency and cost decoupled completely in this run. Jev bills input tokens only, at $0.042 per million; my thirty-two calls averaged 373.9 input tokens each, putting Jev at roughly $15.71 per million decisions.[^3] Gemini, billing both input and output tokens even with thinking disabled, averaged $82.95 per million on this task. The embedding classifier, estimated from Google's published $0.20-per-million-token rate for text input on its current embedding model, lands near $3.39 per million, cheapest of the three despite not being the fastest.[^2]
+
+<Chart
+  type="bar"
+  height={300}
+  format="usd"
+  logY={true}
+  caption="Cost per million decisions, on a log scale. The embedding classifier is the cheapest option here and also, per the chart above, not the fastest one. Cost and latency moved independently of each other across this run."
+  label="Bar chart on a logarithmic scale of cost per million decisions: the embedding classifier at 3.39 dollars, Jev at 15.71 dollars, and Gemini with thinking disabled at 82.95 dollars"
+  labels={['Embedding classifier', 'Jev', 'Gemini (thinking off)']}
+  series={[{ name: 'Cost per million decisions (USD)', data: [3.39, 15.71, 82.95] }]}
+  yTitle="USD per million decisions (log scale, estimated)"
+/>
+
+The embedding approach pays less per call mostly because the text it sends is short and it never pays for a generated response at all, only for an input embedding. That is a real, measured advantage, independent of the latency question entirely. Cheaper and not-faster is still a legitimate outcome to want, if what a system is optimizing for is throughput cost rather than tail latency.
+
+## Trade-offs worth naming
+
+- **My task was easy; Red Hat's was adversarial.** All three methods hit 100% on my thirty-two lines, four clearly separated categories a human wrote by hand. Red Hat's prompt injection benchmark is specifically built to be hard to classify, which is exactly where Jev placed fourth instead of first. A clean synthetic test cannot reproduce a result that depends on task difficulty, only a result that depends on infrastructure, which is the part this post actually tested.
+- **The embedding classifier's cost is an estimate, not a measured price.** I could not find a published per-token rate specific to `gemini-embedding-001`; the $0.20-per-million figure is Google's current rate for `gemini-embedding-2`, used here as a stand-in and flagged as such.[^2]
+- **One run, one network path, same caveat as September.** These latency numbers describe wherever this post's API calls actually originated, on this day, same as the original post's numbers describe one location on 2026-09-29. Red Hat's own 56 ms UK-to-US disclosure is the model for taking that seriously instead of treating a benchmark as a universal constant.
+- **A real local classifier was never actually tested here.** This post measured what happens when you try to approximate "small, purpose-built, local" with "small, purpose-built, cloud-hosted," and found the cloud part dominates. It did not measure `deberta-v3-base` itself, which remains Red Hat's result, not mine.
+
+## Takeaways
+
+- **A bigger, more adversarial benchmark complicated a narrower earlier finding, and that's the system working.** Jev matching a general model's accuracy on eight friendly samples does not mean it beats nine other systems on an adversarial safety task; Red Hat's benchmark shows it doesn't, consistently, on prompt injection specifically.
+- **"Lightweight classifier beats decision model" and "local beats cloud" are different claims that happened to point the same way in one benchmark.** Separating them took running a lightweight classifier that is not local, and watching the latency advantage disappear while the cost advantage stayed.
+- **Three unrelated cloud APIs converged on a similar latency floor.** An embedding call, a decision-model call and a chat-completion call, from three different companies, landed within a factor of two of each other and nowhere near a locally-run model's result. The network round trip was the dominant cost for all three, not whichever model answered.
+- **Cost and latency are not the same axis.** The cheapest method in this run was not the fastest one. A system optimizing for one will not automatically get the other for free.
+- **Replicating a claim yourself is how you find out which part of it was actually true.** The headline "lightweight model six times faster" survived partially: lightweight didn't save time once it still had to leave the building, but it did save money, and that split only became visible by actually running the comparison.
+
+## References
+[^1]: Rob Geada, Mac Misiura and Shelton Cyril, Red Hat AI Safety team, ["Benchmarking AI decision models against traditional guardrails"](https://developers.redhat.com/articles/2026/10/02/benchmarking-ai-decision-models-against-traditional-guardrails), published 2026-10-02, for the nine-system comparison, the EvalHub/NeMo Guardrails evaluation methodology, the accuracy tables for prompt injection and content safety, the MacBook Pro M1 versus ROSA OpenShift hardware split, and the disclosed ~56 ms UK-to-US network overhead.
+[^2]: Google AI, ["Embeddings"](https://ai.google.dev/gemini-api/docs/embeddings) for the `gemini-embedding-001` model and its `CLASSIFICATION` task type, used for this post's nearest-centroid classifier; [pricing](https://ai.google.dev/gemini-api/docs/pricing) for the $0.20-per-million-input-token rate on the current `gemini-embedding-2` model, used here as a cost estimate since no `gemini-embedding-001`-specific rate was found published.
+[^3]: TypeSafe, [API reference](https://docs.typesafe.ai/api) and [Models](https://docs.typesafe.ai/models) for the Choice question format and `jev-1.13.0`'s $0.042-per-million-input-token price, reused from [this blog's earlier Jev measurement](/posts/jev-vs-gemini-decision-cost).
+[^4]: Google, [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing) for Gemini 3.8 Flash's rate, and the [`thinkingConfig` reference](https://ai.google.dev/gemini-api/docs/thinking) for disabling reasoning, same configuration as the September post. Measurements in this post were taken 2026-10-05 with `jev-1.13.0`, `gemini-3.8-flash` and `gemini-embedding-001`, 32 test samples per method plus 24 training samples for the classifier's centroids, one run per configuration; latency will vary with network conditions and is reported as observed.
