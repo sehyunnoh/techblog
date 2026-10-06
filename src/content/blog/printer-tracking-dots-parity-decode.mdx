@@ -1,0 +1,167 @@
+---
+title: 'One Flipped Dot Breaks the Checksum. The Decoder Returns an Answer Anyway.'
+description: 'DEDA decodes the hidden tracking dots laser printers stamp on pages. I generated my own pattern, decoded it, then corrupted one dot and watched the checksum fail while the decoder answered anyway.'
+pubDate: 2026-10-06
+tags: ['security', 'python', 'architecture', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+Most color laser printers stamp a grid of near-invisible yellow dots on every page they print. The dots encode a serial number and the date and time of printing, a forensic feature manufacturers added decades ago and almost never disclose to the people using the printer. [DEDA](https://github.com/dfd-tud/deda), a toolkit that reached Hacker News this week, extracts, decodes and can anonymize these patterns.[^1] I installed it, generated a tracking dot pattern with my own fake data, and decoded it back to confirm the round trip actually works. It does, exactly. Then I changed one dot and found the more interesting result.
+
+## What a tracking dot pattern actually is
+
+The dots were discovered the way most hidden printer behavior gets discovered: by people comparing test pages. In 2005, researchers at the Electronic Frontier Foundation, Seth Schoen, Robert Lee, Patrick Murphy, Joel Alwen and Andrew "bunnie" Huang, printed pages from identical Xerox DocuColor printers, compared the faint dot patterns under magnification, and worked out what varied between machines and what varied between print jobs.[^2] What they found was a grid of yellow dots, roughly 15 by 8, each row or column encoding one byte, with the topmost row and leftmost column reserved for parity bits used to catch encoding errors. Decoded, the grid gives up the year, month, day, hour and minute a page was printed, plus the printer's serial number, in plain binary-coded decimal.[^2]
+
+This is not a Xerox-only quirk. DEDA's source code lists the same grid shape under four printer brands: "Xerox", "Epson", "Dell", and an identical code value that maps to Xerox a second time, which is what you'd expect if several brands print engines are built on licensed or shared hardware.[^1]
+
+## Building a pattern with known data, and decoding it back
+
+DEDA's `TDM` class (Tracking Dot Matrix) will build this exact grid from a Python dictionary. I gave it a serial number, a manufacturer, and today's date and time, all values I chose myself:
+
+```python
+from libdeda.pattern_handler import Pattern4, TDM
+
+tdm = TDM(Pattern4, trans=dict(rot=0, flip=False), content=dict(
+    serial=314159, manufacturer="Xerox",
+    hour=14, minutes=37, day=6, month=10, year=26,
+))
+```
+
+Calling `.decode()` on that object reads the grid back out, using the same code path DEDA uses on a scanned page:
+
+```python
+{'minutes': '37', 'hour': '14', 'day': '06', 'month': '10', 'year': '26',
+ 'serial': '-314159-', 'manufacturer': 'Xerox',
+ 'timestamp': datetime.datetime(2026, 10, 6, 14, 37)}
+```
+
+Every field matches what I put in. The actual grid, 8 columns by 16 rows, is 39 dots:
+
+<Figure
+  caption="The real 8x16 dot grid this post generated, with the rows this post decoded highlighted. Column 0 and the bottom row carry parity bits; everything else is the data EFF's 2005 guide documented."
+  label="An 8-column by 16-row grid of dots representing a printer tracking dot pattern, with highlighted rows for serial number, year, month, day, hour and minutes, encoding the values 314159, 2026, October, 6th, 14 hundred hours and 37 minutes"
+>
+  <svg viewBox="0 0 400 350" width="100%" role="img" aria-labelledby="grid-title">
+    <title id="grid-title">8x16 tracking dot grid, generated and decoded directly for this post</title>
+    <circle cx="20" cy="41" r="6" fill="var(--series-4)" />
+    <circle cx="20" cy="62" r="6" fill="var(--series-4)" />
+    <rect x="0" y="73" width="192" height="20" fill="var(--accent)" opacity="0.08" />
+    <circle cx="86" cy="83" r="6" fill="var(--series-4)" />
+    <circle cx="108" cy="83" r="6" fill="var(--series-4)" />
+    <circle cx="130" cy="83" r="6" fill="var(--series-4)" />
+    <circle cx="152" cy="83" r="6" fill="var(--series-4)" />
+    <circle cx="174" cy="83" r="6" fill="var(--series-4)" />
+    <text x="200" y="87" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">serial</text>
+    <rect x="0" y="94" width="192" height="20" fill="var(--accent)" opacity="0.08" />
+    <circle cx="64" cy="104" r="6" fill="var(--series-4)" />
+    <circle cx="108" cy="104" r="6" fill="var(--series-4)" />
+    <circle cx="174" cy="104" r="6" fill="var(--series-4)" />
+    <text x="200" y="108" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">serial</text>
+    <rect x="0" y="115" width="192" height="20" fill="var(--accent)" opacity="0.08" />
+    <circle cx="64" cy="125" r="6" fill="var(--series-4)" />
+    <circle cx="86" cy="125" r="6" fill="var(--series-4)" />
+    <circle cx="108" cy="125" r="6" fill="var(--series-4)" />
+    <circle cx="152" cy="125" r="6" fill="var(--series-4)" />
+    <circle cx="174" cy="125" r="6" fill="var(--series-4)" />
+    <text x="200" y="129" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">serial</text>
+    <circle cx="20" cy="146" r="6" fill="var(--series-4)" />
+    <circle cx="20" cy="167" r="6" fill="var(--series-4)" />
+    <rect x="0" y="178" width="192" height="20" fill="var(--accent)" opacity="0.08" />
+    <circle cx="86" cy="188" r="6" fill="var(--series-4)" />
+    <circle cx="108" cy="188" r="6" fill="var(--series-4)" />
+    <circle cx="152" cy="188" r="6" fill="var(--series-4)" />
+    <text x="200" y="192" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">year</text>
+    <rect x="0" y="199" width="192" height="20" fill="var(--accent)" opacity="0.08" />
+    <circle cx="20" cy="209" r="6" fill="var(--series-4)" />
+    <circle cx="108" cy="209" r="6" fill="var(--series-4)" />
+    <circle cx="152" cy="209" r="6" fill="var(--series-4)" />
+    <text x="200" y="213" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">month</text>
+    <rect x="0" y="220" width="192" height="20" fill="var(--accent)" opacity="0.08" />
+    <circle cx="20" cy="230" r="6" fill="var(--series-4)" />
+    <circle cx="130" cy="230" r="6" fill="var(--series-4)" />
+    <circle cx="152" cy="230" r="6" fill="var(--series-4)" />
+    <text x="200" y="234" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">day</text>
+    <rect x="0" y="241" width="192" height="20" fill="var(--accent)" opacity="0.08" />
+    <circle cx="108" cy="251" r="6" fill="var(--series-4)" />
+    <circle cx="130" cy="251" r="6" fill="var(--series-4)" />
+    <circle cx="152" cy="251" r="6" fill="var(--series-4)" />
+    <text x="200" y="255" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">hour</text>
+    <circle cx="130" cy="272" r="6" fill="var(--series-4)" />
+    <circle cx="20" cy="293" r="6" fill="var(--series-4)" />
+    <rect x="0" y="304" width="192" height="20" fill="var(--accent)" opacity="0.08" />
+    <circle cx="64" cy="314" r="6" fill="var(--series-4)" />
+    <circle cx="130" cy="314" r="6" fill="var(--series-4)" />
+    <circle cx="174" cy="314" r="6" fill="var(--series-4)" />
+    <text x="200" y="318" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">minutes</text>
+    <circle cx="20" cy="335" r="6" fill="var(--series-4)" />
+    <circle cx="42" cy="335" r="6" fill="var(--series-4)" />
+    <circle cx="108" cy="335" r="6" fill="var(--series-4)" />
+    <circle cx="152" cy="335" r="6" fill="var(--series-4)" />
+    <circle cx="174" cy="335" r="6" fill="var(--series-4)" />
+    <text x="0" y="345" fill="var(--fg-muted)" font-size="10" font-family="var(--font-sans)">row 15: column parity &#183; column 0: row parity</text>
+  </svg>
+</Figure>
+
+Nine lines of Python, no printer and no scanner involved, reproduced a format that took EFF's team weeks of comparing physical test pages to reverse engineer in 2005.
+
+## What happens when a dot is wrong
+
+The parity bits exist to catch exactly the kind of error a real scan introduces: a smudge, a dropped dot, a compression artifact. I flipped a single bit in the matrix I had just built, at an arbitrary position inside the serial number field, and asked the library two separate questions.
+
+```python
+tampered = tdm.aligned.copy()
+tampered[2, 5] = 1 - tampered[2, 5]  # flip one dot
+tdm2 = TDM(Pattern4, aligned=tampered, trans=dict(rot=0, flip=False))
+
+tdm2.check()    # False
+tdm2.decode()   # still returns a full result
+```
+
+`check()` correctly reports the grid as invalid; the parity math catches the single flipped bit exactly as designed. But `decode()`, called on the same tampered grid, does not refuse. It returns a complete, well-formed answer: every field still present, the date and time unchanged, and a serial number of `314127`, six digits that look exactly as plausible as the real `314159` that was actually encoded. Nothing in that output signals that anything went wrong.
+
+<Mermaid
+  caption="check() and decode() are two separate calls on the same object. Nothing forces the first to run before the second, so a caller that only calls decode() gets a wrong answer with no error."
+  label="Flowchart showing a tampered dot matrix object being passed to two independent methods: check, which correctly returns false, and decode, which independently returns a complete but incorrect result with no indication of the failure"
+  code={`
+flowchart TD
+    T["Tampered matrix<br/>(one dot flipped)"] --> C["tdm.check()"]
+    T --> D["tdm.decode()"]
+    C --> R1["False<br/>parity catches it"]
+    D --> R2["Full result returned<br/>serial: 314127, not 314159<br/>no error, no warning"]
+`}
+/>
+
+This is not a bug exactly, and DEDA's own scanning pipeline does not fall into it: `print_parser.py`, the module that actually processes a scanned page, explicitly filters candidate matrices with `if tdm.check() == False: continue` before trusting anything they decode, and a real printed page carries dozens of repeated copies of the same grid, so a few corrupted copies simply get discarded in favor of clean ones.[^1] The gap only opens if you call `TDM.decode()` directly, the way I did here, without checking first, something the library's own API does not stop you from doing. The safety net is real. It just lives one layer up from the function that needs it, in the code that calls the library rather than in the library itself.
+
+## Not every printer tells you the same amount
+
+DEDA recognizes several distinct grid formats, not one, because different printer manufacturers encode different things. The Xerox-family pattern above hands over a timestamp down to the minute and a serial number. A second pattern DEDA decodes, used by Okidata, HP, Ricoh, Lexmark and Kyocera printers, carries no date or time fields at all: it is built from repeated one-hot-encoded blocks that resolve to little more than a printer identifier, per DEDA's own decode function for that format, which returns a raw printer code and a manufacturer guess and nothing else.[^1] Whether your printer gives up a timestamp or just an anonymous-looking code depends entirely on which manufacturer built it, information nobody is required to disclose on the box.
+
+## The Reality Winner story is more careful than it gets repeated
+
+The most common retelling of this technology involves Reality Winner, the NSA contractor arrested in June 2017 days after a classified document she had printed and mailed to The Intercept was published with a scan showing visible dots. The dots were decoded after the fact, not by investigators quoted in any court filing, but by security researcher Rob Graham, using EFF's own decoding guide against the published scan.[^3]
+
+What EFF itself says about this case is more careful than the popular version: "The affidavit that led to Winner's arrest described how the government identified its suspect. The affidavit did not mention the use of the tracking dots at all, but referred only to other sources of information. It's quite possible that printer dots did not play any role in this investigation at all."[^3] The dots were real, decodable, and consistent with the timeline. Whether they were how she was actually caught is something EFF, the organization that built the decoder being used to make that claim, explicitly declines to confirm.
+
+## Trade-offs worth naming
+
+- **This experiment never touched a printer.** I generated a grid directly through DEDA's Python API and decoded it the same way, which proves the format and the parity math are implemented consistently with EFF's 2005 documentation. It says nothing about how reliably a real scan, with real smudging and real compression, survives the trip through `deda_parse_print`.
+- **Anonymization is best-effort against known patterns.** DEDA's own README warns that "new patterns might not be recognised," and removing a pattern DEDA has never seen is not something the tool claims to do.
+- **The manufacturer field can be ambiguous by design.** DEDA's own lookup table maps two different numeric codes to "Xerox," and its decode function falls back to the string `"Xerox/Dell/Epson"` when the value doesn't match a known code at all, which is itself a tacit admission that this single field cannot always name one company.
+- **One flipped dot is the easy case.** I changed exactly one bit, in a serial-number row, and the parity check still caught it. A corruption pattern that happens to flip two bits in a way that cancels out in the parity sum would not be caught by this scheme at all. This post didn't test that case.
+
+## Takeaways
+
+- **A format EFF spent weeks reverse engineering in 2005 reconstructs in nine lines of Python today.** DEDA's `TDM` class round-tripped a serial number, manufacturer and full timestamp with zero errors, exactly matching the field layout EFF's original guide documents.
+- **A checksum that exists is not the same as a checksum that gets used.** `check()` correctly flagged a single flipped dot as invalid. `decode()`, called on the exact same corrupted object, returned a complete and plausible-looking wrong answer instead of an error.
+- **The real tool is safe; the raw library call is not.** DEDA's actual scanning pipeline filters on `check()` before trusting anything, which is what keeps real-world corruption from producing wrong serial numbers in practice. That protection is a property of how the pipeline is written, not of the data format itself.
+- **Not all tracking dots say the same thing.** The Xerox-family pattern gives up a timestamp to the minute. Five other manufacturers' pattern, also decoded by this same toolkit, gives up little more than an opaque printer code.
+- **The best-known real-world story about this technology is less certain than its retelling.** EFF's own account of the Reality Winner case says the arrest affidavit never mentioned tracking dots and that they may have played no role at all, a caveat that rarely survives the story's retelling.
+
+## References
+[^1]: [`dfd-tud/deda`](https://github.com/dfd-tud/deda) on GitHub, cloned and run directly for this post (`libdeda/pattern_handler.py` for the `Pattern4` and `Pattern2` grid definitions and the `TDM` class; `libdeda/print_parser.py` for the `check()`-filtering scan pipeline). Cite as: Timo Richter, Stephan Escher, Dagmar Schönfeld and Thorsten Strufe, "Forensic Analysis and Anonymisation of Printed Documents," Proceedings of the 6th ACM Workshop on Information Hiding and Multimedia Security (IH&MMSec '18), 2018.
+[^2]: Electronic Frontier Foundation, ["DocuColor Tracking Dot Decoding Guide"](https://w2.eff.org/Privacy/printers/docucolor/), for the 15-by-8 grid dimensions, the parity row and column, the year/month/day/hour/minute/serial field layout, and the 2005 discovery credited to Seth Schoen, Robert Lee, Patrick Murphy, Joel Alwen and Andrew "bunnie" Huang.
+[^3]: Electronic Frontier Foundation, ["Printer Tracking Dots Back in the News"](https://www.eff.org/deeplinks/2017/06/printer-tracking-dots-back-news), published June 2017, for the exact statement that the Reality Winner arrest affidavit did not mention tracking dots and that "it's quite possible that printer dots did not play any role in this investigation at all."
