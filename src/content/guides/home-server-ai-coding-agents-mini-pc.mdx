@@ -1,0 +1,243 @@
+---
+title: 'A Home Server for AI Coding Agents on a Mini PC, Step by Step'
+description: 'Tailscale, Gitea, Hermes Agent and Orca headless, wired into one home server on a single mini PC: a private network, a git remote, and two complementary AI coding agents as systemd services.'
+pubDate: 2026-10-06
+updatedDate: 2026-10-06
+tags: ['devops', 'ai', 'security', 'tutorial']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+
+This guide builds one specific thing: a mini PC that stays on at home and runs the infrastructure a pair of AI coding agents actually need, reachable from your phone or laptop without opening a single port to the public internet. Not a survey of self-hosted apps. Four pieces, each one justified by what the next piece needs: a private network, a git remote, a persistent single agent with memory, and a headless fleet manager that drives other coding agents in parallel.
+
+None of this needs a GPU. Both agents here are orchestrators, not local model runners: they call out to a cloud LLM provider for the actual reasoning and keep the hardware requirements on your side to "can it run a few lightweight services and stay online." A low-power mini PC with 16 to 32 GB of RAM and no discrete graphics card is enough for everything below.
+
+## What you need
+
+- A mini PC running **Ubuntu Server 24.04 LTS** (the exact package names below assume this; Debian 13 is nearly identical, older Ubuntu/Debian releases need the package-name adjustment noted in the Orca section).
+- `sudo` access on it, and either a keyboard/monitor for first boot or SSH already working.
+- A [Tailscale](https://tailscale.com) account (free for personal use) and a [Nous Portal](https://hermes-agent.nousresearch.com) or OpenRouter account for Hermes Agent's model access.
+
+<Mermaid
+  caption="Everything below fits together as one system. Tailscale is the only thing exposed to the outside, and only to devices you've authenticated into your own tailnet. Nothing here listens on a public port."
+  label="Architecture diagram showing a phone or laptop connecting over a private Tailscale network to a mini PC, which runs Gitea exposed via tailscale serve, Hermes Agent running as a persistent daemon with Telegram and Discord gateways, and Orca running headless and paired over the tailnet, with both agents pushing commits to the Gitea git remote"
+  code={`
+flowchart TB
+    P["Your phone or laptop<br/>(Tailscale client)"]
+    T["Telegram / Discord"]
+    subgraph TN["Tailscale private network"]
+        subgraph MP["Mini PC"]
+            TS["tailscaled"]
+            GT["Gitea<br/>:3000, git remote"]
+            SV["tailscale serve<br/>HTTPS to Gitea"]
+            HA["Hermes Agent<br/>hermes serve, daemon"]
+            OR["Orca headless<br/>orca-ide serve :6768"]
+        end
+    end
+    P -->|MagicDNS HTTPS| SV --> GT
+    P -->|pairing-address| OR
+    HA <-->|gateway| T
+    HA -->|git push| GT
+    OR -->|managed agents<br/>git push| GT
+`}
+/>
+
+## Step 1: Tailscale, the private network everything else depends on
+
+Every later step needs a stable, private address for this machine, so Tailscale goes first. Install it and bring the node up:
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+```
+
+The command prints a URL. Open it on any device to authenticate the machine into your tailnet. From here on, this guide refers to the box by its Tailscale name rather than a LAN IP, since that name stays valid no matter which network the mini PC or your phone are actually on.
+
+One console setting unlocks real HTTPS certificates on the tailnet, which the Gitea step below needs: in the [Tailscale admin console](https://login.tailscale.com/admin/dns), open the DNS page, enable **MagicDNS**, then enable **HTTPS Certificates**. This publishes your tailnet's device names (not their traffic, not their IP history) to a public certificate transparency log, which is the trade every automatic-HTTPS system on the public internet makes too.[^1]
+
+## Step 2: Gitea, a git remote that's actually yours
+
+An earlier series on this blog measured what happens when several coding agents race to update the same git ref: ten concurrent writers, nine silently lost updates, no error, because git's default retry behavior swallows the collision.[^2] That series used a throwaway repository. This step gives that repository a permanent home, one your agents push to directly instead of a third-party host.
+
+```bash
+wget -O gitea https://dl.gitea.com/gitea/28.0.0/gitea-28.0.0-linux-amd64
+chmod +x gitea
+sudo cp gitea /usr/local/bin/gitea
+
+sudo adduser --system --shell /bin/bash --gecos 'Git Version Control' \
+  --group --disabled-password --home /home/git git
+
+sudo mkdir -p /var/lib/gitea/{custom,data,log}
+sudo chown -R git:git /var/lib/gitea/
+sudo chmod -R 750 /var/lib/gitea/
+sudo mkdir /etc/gitea
+sudo chown root:git /etc/gitea
+sudo chmod 770 /etc/gitea
+```
+
+Gitea's official systemd unit, unmodified, reproduced here because the install docs only link to it rather than including it inline:[^3]
+
+```ini
+[Unit]
+Description=Gitea (Git with a cup of tea)
+After=network.target
+
+[Service]
+RestartSec=2s
+Type=simple
+User=git
+Group=git
+WorkingDirectory=/var/lib/gitea/
+ExecStart=/usr/local/bin/gitea web --config /etc/gitea/app.ini
+Restart=always
+Environment=USER=git HOME=/home/git GITEA_WORK_DIR=/var/lib/gitea
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Save that as `/etc/systemd/system/gitea.service`, then:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now gitea
+```
+
+Gitea listens on `localhost:3000` and, on first contact, serves a setup wizard that writes `/etc/gitea/app.ini` for you. Reach it once over SSH port-forwarding or directly if you're on the same LAN (`http://<lan-ip>:3000`), complete the wizard, and create your own account. After that, the port never needs to be reachable directly again.
+
+## Step 3: exposing Gitea without exposing anything public
+
+The obvious move here is a reverse proxy with automatic HTTPS, and the obvious tool is Caddy. It's the wrong tool for this specific job: Caddy's automatic certificates need either a public domain pointed at a publicly reachable port 80/443, or API credentials for a DNS provider, neither of which fits a box that is deliberately not reachable from the public internet. Tailscale already solved this for exactly this case:
+
+```bash
+sudo tailscale serve localhost:3000
+```
+
+That's the entire command. It gives the Gitea instance a clean `https://<machine-name>.<tailnet-name>.ts.net` address, provisions a real, publicly-trusted certificate for it through Tailscale's control plane, and terminates TLS, all without opening a single port on your router.[^4] Push a repository to that address the way you would to any other git host.
+
+## Step 4: Hermes Agent, the always-on single agent
+
+Hermes Agent keeps its own memory and runs continuously, so it's the piece best suited to living on a box that never turns off, answering through Telegram or Discord rather than a terminal you have to keep open.
+
+```bash
+curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+hermes setup --portal
+```
+
+`hermes setup --portal` links one Nous Portal OAuth login to the model plus the built-in web search, image generation, TTS and browser tools.[^5] To point it at a different provider instead:
+
+```bash
+hermes config set model anthropic/claude-opus-4
+hermes config set OPENROUTER_API_KEY sk-or-...
+```
+
+Everything lands under `~/.hermes/`: `config.yaml` for settings, `.env` for secrets, `memories/` and `skills/` for what the agent accumulates over time. Running it as a systemd service keeps it alive across reboots:
+
+```ini
+[Unit]
+Description=Hermes Agent gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+ExecStart=/usr/local/bin/hermes serve
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Save as `/etc/systemd/system/hermes@.service`, then `sudo systemctl enable --now hermes@$(whoami)`. `hermes serve` listens on a local Unix socket (`~/.hermes/gateway.sock`), not a network port, so there's nothing here that needs `tailscale serve` or a firewall rule at all.[^5] To reach it from Telegram or Discord instead of a socket on the box itself:
+
+```bash
+hermes config set TELEGRAM_TOKEN your-bot-token
+hermes config set DISCORD_TOKEN your-bot-token
+```
+
+Those tokens are credentials, not configuration. They sit in `.env`, which is readable only by the account running the service; treat a leaked bot token the same way you'd treat a leaked API key, because it grants the same thing, an entry point to an agent that already has memory, skills and whatever the account it runs under can touch.
+
+## Step 5: Orca, headless, for everything Hermes isn't
+
+Where Hermes Agent is one agent with continuity, Orca is a fleet manager: it doesn't reason about code itself, it runs other coding agents, Claude Code, Codex, OpenCode, in parallel, each in its own git worktree.[^6] The two are not competing for the same job. A headless Linux box is an explicitly documented way to run it, separate from the desktop app.[^6]
+
+Orca ships as an Electron app, which means a server with no display needs the libraries Electron links against, even though nothing is ever shown on a screen:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+  curl file jq xvfb zlib1g-dev ca-certificates git \
+  libgtk-3-0t64 libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libgbm1 libasound2t64 \
+  libxtst6 libcups2t64 libdrm2 libxkbcommon0 libpango-1.0-0 libcairo2 libatspi2.0-0t64 \
+  libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libxrender1 libx11-xcb1 \
+  libxcb-dri3-0 libxss1
+```
+
+On Ubuntu 20.04, 22.04 or Debian 12, drop the `t64` suffixes from that list; they're specific to the newer glibc in Ubuntu 24.04 and Debian 13.[^7]
+
+```bash
+sudo mkdir -p /opt/orca
+sudo curl -L https://github.com/stablyai/orca/releases/latest/download/orca-linux.AppImage \
+  -o /opt/orca/orca-linux.AppImage
+sudo chmod +x /opt/orca/orca-linux.AppImage
+```
+
+The headless Linux binary is invoked as `orca-ide`, not `orca`, deliberately, so it doesn't collide with the GNOME Orca screen reader already on most Linux desktops.[^7] Find your Tailscale IP with `tailscale ip -4`, then run it as its own systemd service, official unit file reproduced in full:[^7]
+
+```ini
+[Unit]
+Description=Orca runtime server
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=orca
+WorkingDirectory=/home/orca
+Environment=LIBGL_ALWAYS_SOFTWARE=1
+ExecStart=/opt/orca/orca-linux.AppImage serve --port 6768 --pairing-address 100.64.1.20
+StandardOutput=journal
+StandardError=journal
+KillMode=mixed
+Restart=on-failure
+RestartPreventExitStatus=3
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Replace `100.64.1.20` with your own Tailscale IP, create the service account, and start it:
+
+```bash
+sudo useradd --system --create-home --shell /usr/sbin/nologin orca
+sudo systemctl daemon-reload
+sudo systemctl enable --now orca-serve.service
+```
+
+Pair your phone to this server specifically (rather than the desktop app) with `--mobile-pairing` added to the same command, which prints a QR code instead of just an address.[^7] `LIBGL_ALWAYS_SOFTWARE=1` sidesteps GPU/DRI errors that show up on hardware without a real graphics stack, which describes most mini PCs; `RestartPreventExitStatus=3` stops systemd from restart-looping when exit code 3 means another process already owns the Electron profile, not that something is actually broken.[^7]
+
+## Putting it together
+
+Point Orca's managed agents and Hermes Agent at the Gitea remote from Step 2, and the whole stack does what it was built for: Orca fans a task out across several isolated worktrees, each agent in that fleet commits and pushes to your own git host over the tailnet, and Hermes Agent, reachable from Telegram the whole time, keeps a running memory of what happened across all of it. Nothing involved required a public IP, a cloud account beyond the LLM providers, or a single open port on your router.
+
+## Trade-offs worth naming
+
+- **This is young software.** Orca ships daily releases and Hermes Agent ships every few days; the exact package names, AppImage path, or CLI flags above can drift. Pin a specific release if you need stability over staying current.
+- **No GPU means no local inference, and that's by design here, not a limitation to work around.** Both agents bill a cloud provider per call. A mini PC keeps the always-on cost low; the token bill is a separate, ongoing cost this guide doesn't estimate.
+- **Enabling Tailscale HTTPS Certificates publishes your device names publicly**, in a certificate transparency log, even though the traffic itself stays private. If that's unacceptable, Gitea can stay on plain `tailscale serve --http=3000` instead, reachable over the tailnet without a trusted certificate.
+- **An agent with Telegram access and shell access on your home network is a real attack surface**, not a toy. A leaked bot token or a compromised skill has the same blast radius as a leaked SSH key to the same account.
+
+## References
+[^1]: Tailscale, ["Enabling HTTPS"](https://tailscale.com/docs/how-to/set-up-https-certificates) and [KB 1031, "Install Tailscale on Linux"](https://tailscale.com/kb/1031/install-linux), for the install command, `tailscale up`, and the MagicDNS/HTTPS Certificates prerequisite and its public-ledger disclosure.
+[^2]: [Ten Agents Race the Same Git Ref. Nine Updates Vanish.](/posts/ten-agents-race-the-same-git-ref), this blog, 2026-09-28, for the measured git ref-update collision this step gives a permanent home to.
+[^3]: Gitea, ["Install from binary"](https://docs.gitea.com/installation/install-from-binary) and ["Run as a Linux service"](https://docs.gitea.com/installation/linux-service/), for the install steps, directory permissions, and the systemd unit reproduced from [`contrib/service/systemd/gitea.service`](https://github.com/go-gitea/gitea/blob/main/contrib/service/systemd/gitea.service) in the Gitea source repository.
+[^4]: Tailscale, [KB 1242, "tailscale serve"](https://tailscale.com/kb/1242/tailscale-serve), for the exact command, its automatic certificate provisioning, and the distinction from `tailscale funnel`, which exposes a service to the public internet rather than just the tailnet.
+[^5]: Nous Research, [Hermes Agent documentation](https://hermes-agent.nousresearch.com/docs/), for the install script, `hermes setup --portal`, the `~/.hermes/` directory layout, `hermes serve` and its Unix socket, and Telegram/Discord gateway token configuration.
+[^6]: Stably, [Orca documentation, "Ways to run Orca"](https://www.onorca.dev/docs/ways-to-run), for the four deployment modes and the distinction between Orca as a fleet manager for other coding agents versus a single agent with its own reasoning.
+[^7]: Stably, [`docs/reference/headless-linux-server.md`](https://github.com/stablyai/orca/blob/main/docs/reference/headless-linux-server.md) in the Orca source repository, for the exact Ubuntu/Debian dependency list, the `orca-ide` binary naming, the `serve` command and its flags, the systemd unit file, and the troubleshooting notes on exit status 3 and `LIBGL_ALWAYS_SOFTWARE`.
