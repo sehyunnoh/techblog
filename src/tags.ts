@@ -18,6 +18,7 @@ export const TAGS = {
   observability: { label: 'Observability', group: 'Domain', description: 'Metrics, traces, logs and everything they cost.' },
   data: { label: 'Data', group: 'Domain', description: 'Storage engines, pipelines and query performance.' },
   security: { label: 'Security', group: 'Domain', description: 'Threat models, hardening and secure defaults.' },
+  systems: { label: 'Systems', group: 'Domain', description: 'CPUs, memory hierarchies and the low-level performance behind them.' },
   analytics: { label: 'Analytics', group: 'Domain', description: 'Measuring traffic, and what the measurements actually mean.' },
 
   // ---- Technology ---------------------------------------------------------

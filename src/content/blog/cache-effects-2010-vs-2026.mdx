@@ -1,0 +1,171 @@
+---
+title: "In 2010, Skipping 15 of 16 Array Elements Saved Nothing. On My 2026 CPU It Saves Over 60%."
+description: "I re-ran Igor Ostrovsky's 2010 processor cache experiments in C on a 2026 laptop CPU. The cache cliffs survived. The famous 'skipping is free' result did not."
+pubDate: 2026-10-07
+tags: ['systems', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Chart from '../../components/Chart.astro';
+
+Igor Ostrovsky's "Gallery of Processor Cache Effects" is one of those 2010 blog posts that keeps resurfacing, and it came back to the Hacker News front page this week.[^1] Its first example is the one people remember. Take an array of 64 million integers. Loop A multiplies every element by 3. Loop B multiplies every 16th element by 3. Loop B does about 6% of the arithmetic, so it should finish in a fraction of the time. On his machine it took 78 ms against 80 ms for loop A.
+
+That result is the whole point of the article: the CPU spends its time waiting for memory, not computing, so skipping work you never waited for saves nothing. Sixteen years is a long time in hardware, though. I rewrote the experiments in C and ran them on a 2026 laptop chip to see which of his claims still hold.
+
+The cache cliffs held up fine. The headline did not. Loop B now finishes in well under half the time of loop A.
+
+## A cache, in one paragraph
+
+Main memory (RAM) is slow compared to the processor. To hide that, the CPU keeps small, fast copies of recently used data in **caches**, arranged in levels: L1 is the smallest and fastest, L2 is bigger and slower, L3 is bigger still and shared between cores. The CPU never copies a single number. It moves memory in **cache lines**, which are 64 bytes on x86, so reading one 4-byte integer also drags in the 15 neighbours that share its line. Everything below follows from those two facts.
+
+## How I ran it
+
+The machine is an Intel Core Ultra 7 258V, a laptop chip with 4 performance cores and 4 efficiency cores. I read the core types from Windows (`GetLogicalProcessorInformationEx`) and pinned every single-threaded test to a performance core. The code is C, compiled with gcc 16.2 at `-O2` with auto-vectorization turned off, so the loops stay scalar like the originals. Each number is the median of 5 to 9 runs. The full source is [one file you can download](/files/cache-effects-bench.c), and the methodology note at the bottom has the exact settings.[^2]
+
+## Experiment 1: skipping elements
+
+The loop is as plain as it sounds:
+
+```c
+for (size_t i = 0; i < N; i += k) a[i] *= 3;   // N = 64M ints, k = stride
+```
+
+Ostrovsky's claim is that the time stays flat for strides 1 through 16, then halves each time the stride doubles. Here is what I measured:
+
+<Chart
+  type="line"
+  height={300}
+  format="plain"
+  caption="Time to run the multiply loop over a 64M-integer array, by stride. The 2010 result was flat from stride 1 to 16. On this CPU the curve is already falling at stride 2 and keeps falling."
+  label="Line chart of loop time in milliseconds for strides 1 to 1024: 27.8, 16.3, 14.3, 11.8, 10.1, 8.9, 6.9, 4.3, 2.7, 1.4, 1.1"
+  labels={['1', '2', '4', '8', '16', '32', '64', '128', '256', '512', '1024']}
+  series={[{ name: 'ms', data: [27.84, 16.26, 14.29, 11.83, 10.07, 8.93, 6.92, 4.30, 2.65, 1.38, 1.05] }]}
+  xTitle="Stride (elements skipped between touches)"
+  yTitle="Time (ms)"
+/>
+
+Stride 1 takes about 27 ms. Stride 16 takes about 10 ms. A second run of the same binary gave 26.6 and 10.0 ms, so the gap is not noise. In 2010 the two loops tied; today the 94% reduction in arithmetic removes a bit over 60% of the time.
+
+Why? Stride 16 still touches every cache line in the array, so it moves the same amount of memory as stride 1, and 10 ms looks like roughly what this chip needs to do that. That makes 10 ms the memory floor. Stride 1 runs 16 times as many iterations on top of the same memory traffic, and on a machine this fast the extra instructions are no longer hidden.
+
+I checked that explanation with a control. I ran the same 67 million multiply iterations over a 16 KB array that fits inside L1, so memory plays no part. That took 19.3 ms. In other words, roughly 70% of stride 1's 27 ms is plain instruction work, which the 2010 machine could bury under 80 ms of waiting and mine cannot. The memory system got fast enough that the arithmetic became visible again.
+
+One more detail in the curve. Ostrovsky's data halves with every doubling of the stride after 16. Mine barely moves from stride 16 to 32 (10.1 to 8.9 ms) and only starts halving cleanly around stride 64. Intel's optimization manual covers the CPU's hardware prefetchers, and one of them, as summarized for earlier cores, treats memory as 128-byte pairs of lines and fetches the partner of any line you miss on.[^3] That would explain why touching every second line still pulls in every line. I did not confirm that this chip behaves that way, so treat it as a hypothesis that fits.
+
+## Experiment 2: measuring the caches with a stopwatch
+
+The second trick in the article is the one I find most fun. If you walk through arrays of growing size and time each access, the time jumps whenever the array stops fitting in a cache level. You can read the cache sizes off the graph without looking anything up.
+
+I ran two versions. The first is Ostrovsky's pattern: touch one integer per cache line, in order, wrapping around inside the array. The second is a **pointer chase**: each 64-byte line holds the index of the next line to visit, arranged as one random cycle through the whole array. The CPU cannot guess where the next load goes until the previous one finishes, so every access pays full latency. A linked list scattered around the heap behaves the same way.
+
+<Chart
+  type="line"
+  height={340}
+  logY
+  format="plain"
+  caption="Time per access (ns, log scale) against array size. Sequential access, the 2010 pattern, shows modest steps. The random pointer chase shows the real latency of each level, from about 1 ns in L1 to about 128 ns in main memory."
+  label="Line chart on a log axis with two series over array sizes from 4 KB to 256 MB. Sequential rises from 0.22 to 2.6 nanoseconds. Pointer chase rises from 1.1 to 127.9 nanoseconds"
+  labels={['4 KB','8 KB','16 KB','32 KB','64 KB','128 KB','256 KB','512 KB','1 MB','2 MB','4 MB','8 MB','16 MB','32 MB','64 MB','128 MB','256 MB']}
+  series={[
+    { name: 'Sequential, one touch per line', data: [0.223,0.226,0.227,0.218,0.528,0.523,0.708,0.776,0.775,0.781,1.597,1.623,1.667,2.314,2.586,2.627,2.644] },
+    { name: 'Random pointer chase', data: [1.098,1.105,1.114,1.103,2.617,2.596,3.575,3.931,4.673,5.070,11.121,15.830,55.481,101.714,116.748,123.414,127.900] }
+  ]}
+  xTitle="Array size"
+  yTitle="ns per access"
+/>
+
+Both curves step up in the same places, so the 2010 technique still works. But look at the vertical scale. The sequential pattern only gets about 12 times slower between the smallest and largest array (0.22 to 2.6 ns). The pointer chase gets 116 times slower (1.1 to 127.9 ns). The hardware prefetcher notices the in-order walk, starts loading lines before the loop asks for them, and hides most of the memory latency. That is why a sequential benchmark understates how slow memory really is, and why I added the chase.
+
+To pin the edges down, I reran the chase at sizes between the powers of two. The L1 cliff sits between 48 KB (1.10 ns) and 56 KB (2.63 ns), so the L1 data cache is 48 KB or close to it. The next step starts after 2 MB (5.1 ns) and is clearly under way by 3 MB (9.4 ns). Then latency climbs gradually from 12 MB (29 ns) to 32 MB (99 ns). Windows reports 12 MB of L3 for this chip, and that matches where the climb begins. The L3 is shared with the other cores and the rest of the system, so its edge is blurrier than L1's.
+
+The practical reading is the pointer-chase column. A cache hit in L1 costs about 1 ns. A trip to main memory costs about 128 ns. When you walk a list of nodes scattered through memory, you can lose two orders of magnitude, and the sequential row shows how much of that an array layout buys back.
+
+## Experiment 3: two threads, two variables, one cache line
+
+This one matters most if you write multithreaded code. Four threads each increment their own counter 100 million times. In the first layout the counters are four adjacent integers. In the second they sit 64 bytes apart.
+
+<Figure
+  caption="The same four counters in two layouts. Packed together, the four threads write to one cache line, so each core's copy is invalidated every time another core writes. Padded to 64 bytes apart, each counter has a line to itself."
+  label="Diagram with two rows. Top row: one 64-byte cache line divided into 16 slots, with the first four slots marked T0 to T3. Bottom row: four separate cache lines, each with a single marked slot belonging to one thread"
+>
+  <svg viewBox="0 0 720 200" width="100%" role="img" aria-labelledby="fs-title">
+    <title id="fs-title">Four counters in one cache line versus four cache lines</title>
+
+    <text x="0" y="14" fill="var(--fg)" font-size="12" font-family="var(--font-sans)" font-weight="700">ADJACENT: 4 counters, 1 cache line</text>
+    <rect x="0" y="24" width="640" height="34" fill="var(--bg-subtle)" stroke="var(--line)" />
+    <g font-size="11" font-family="var(--font-sans)" font-weight="600" text-anchor="middle" fill="var(--bg)">
+      <rect x="0" y="24" width="40" height="34" fill="var(--series-1)" />
+      <rect x="40" y="24" width="40" height="34" fill="var(--series-2)" />
+      <rect x="80" y="24" width="40" height="34" fill="var(--series-3)" />
+      <rect x="120" y="24" width="40" height="34" fill="var(--series-4)" />
+      <text x="20" y="45">T0</text>
+      <text x="60" y="45">T1</text>
+      <text x="100" y="45">T2</text>
+      <text x="140" y="45">T3</text>
+    </g>
+    <text x="0" y="76" fill="var(--fg-muted)" font-size="11" font-family="var(--font-sans)">Every write by one core invalidates the other three cores' copy of this line.</text>
+
+    <text x="0" y="116" fill="var(--fg)" font-size="12" font-family="var(--font-sans)" font-weight="700">PADDED: 4 counters, 4 cache lines</text>
+    <g font-size="11" font-family="var(--font-sans)" font-weight="600" text-anchor="middle" fill="var(--bg)">
+      <rect x="0" y="126" width="150" height="34" fill="var(--bg-subtle)" stroke="var(--line)" />
+      <rect x="0" y="126" width="9.4" height="34" fill="var(--series-1)" />
+      <rect x="170" y="126" width="150" height="34" fill="var(--bg-subtle)" stroke="var(--line)" />
+      <rect x="170" y="126" width="9.4" height="34" fill="var(--series-2)" />
+      <rect x="340" y="126" width="150" height="34" fill="var(--bg-subtle)" stroke="var(--line)" />
+      <rect x="340" y="126" width="9.4" height="34" fill="var(--series-3)" />
+      <rect x="510" y="126" width="150" height="34" fill="var(--bg-subtle)" stroke="var(--line)" />
+      <rect x="510" y="126" width="9.4" height="34" fill="var(--series-4)" />
+    </g>
+    <g font-size="11" font-family="var(--font-sans)" fill="var(--fg-muted)">
+      <text x="0" y="178">T0 only</text>
+      <text x="170" y="178">T1 only</text>
+      <text x="340" y="178">T2 only</text>
+      <text x="510" y="178">T3 only</text>
+    </g>
+  </svg>
+</Figure>
+
+The threads never touch each other's variable, so you might expect no interference. But a core can only write to a cache line it holds exclusively, and when four cores take turns writing to one line, it bounces between them. This is called **false sharing**: the data is not shared, but the line is.
+
+<Chart
+  type="bar"
+  height={300}
+  format="plain"
+  caption="Time for each thread to increment its counter 100 million times, by number of threads. Padded counters stay flat, so the work really runs in parallel. Adjacent counters slow down with every thread added."
+  label="Grouped bar chart. Adjacent layout: 25.8, 157.5, 231.4, 268.2 milliseconds for 1 to 4 threads. Padded layout: 24.0, 25.6, 26.9, 26.9 milliseconds"
+  labels={['1 thread', '2 threads', '3 threads', '4 threads']}
+  series={[
+    { name: 'Adjacent (one cache line)', data: [25.8, 157.5, 231.4, 268.2] },
+    { name: 'Padded (64 bytes apart)', data: [24.0, 25.6, 26.9, 26.9] }
+  ]}
+  yTitle="Time (ms)"
+/>
+
+With one thread there is nothing to fight over, and both layouts take about 25 ms. At four threads the padded version still takes 27 ms while the packed one takes 268 ms, a factor of 10. Ostrovsky measured about 15 times (4.3 s against 0.28 s on his machine), so the penalty has shrunk a little, but it is nowhere near gone. The fix costs memory: each counter now occupies 64 bytes instead of 4.
+
+## What I did not test, and where this can mislead
+
+**One machine, one run of the whole suite.** This is a single laptop chip on Windows. I did not pin the clock speed or control the power plan, and a laptop can throttle. The repeated stride runs agreed within about 5%, but I did not repeat the entire suite across sessions, so small differences in the charts should not be over-read.
+
+**Large-array latency includes address translation.** Programs address memory in 4 KB pages, and the CPU keeps a small table of recent page lookups. Past a few MB, my pointer chase misses that table as well as the data caches, so the 128 ns figure is cache plus page lookup. I did not separate the two, and huge pages would likely lower it.
+
+**The prefetcher explanation is a guess.** The 128-byte-pair idea fits the stride data, but I never ran a test that would rule other explanations out.
+
+**I skipped two of the seven original examples.** Cache associativity (example 5) and the odd counter-increment timings (example 7) need more care than this post had room for. I did run example 4, where one loop increments a single memory location twice and the other increments two locations. The 2010 result was a 2x gap. I measured 255 ms against 158 ms over 500 million iterations, a gap of about 1.6x, so the dependency chain still costs something but less than it did. I don't know why.
+
+**Padding is not free.** Spreading counters 64 bytes apart multiplies their memory use by 16. It is worth it for a handful of hot per-thread counters and wasteful for a large array of them.
+
+## Takeaways
+
+- **Skipping work saves nothing only while memory is the bottleneck.** In 2010 an array loop was dominated by waiting. On a modern chip with a faster memory system, the instructions show up again, and skipping 15 of 16 elements removed over 60% of the time.
+- **A pointer chase is the honest way to measure a cache.** It exposes real latency (about 1 ns in L1, about 128 ns in RAM here). A sequential walk hides most of that behind the prefetcher.
+- **Layout still matters more than arithmetic.** Walking memory in order was around 50 times cheaper per access than hopping randomly through the same 256 MB.
+- **False sharing is still a 10x penalty.** If threads write to separate variables that sit within 64 bytes of each other, give each variable its own cache line.
+- **Re-measure old performance advice.** The qualitative lessons survived 16 years. The specific numbers, and one of the headline conclusions, did not.
+
+## References
+
+[^1]: Igor Ostrovsky, [Gallery of Processor Cache Effects](http://igoro.com/archive/gallery-of-processor-cache-effects/) (2010). Source for the original experiments and for the figures quoted from them: 80 ms against 78 ms for strides 1 and 16, L1 and L2 cliffs at 32 KB and 4 MB on his machine, about a 2x gap for the dependent-increment example, and 4.3 s against 0.28 s for false sharing.
+[^2]: Methodology. Measured 2026-10-07 on an Intel Core Ultra 7 258V (4 performance cores, 4 efficiency cores, as reported by `GetLogicalProcessorInformationEx`), Windows 11. Compiler: gcc 16.2.0 from w64devkit 2.10.0, flags `-O2 -fno-tree-vectorize`. Single-threaded tests were pinned to logical processor 0, a performance core, at high process priority. The false-sharing test used logical processors 0 to 3, all performance cores. Reported values are medians: 9 runs for strides, 5 for the size sweep and false sharing, 7 for the fine-grained chase and the dependent-increment test. Stride arrays are 64M ints. The pointer chase uses one random cycle over 64-byte lines. Clock speed and power plan were not controlled. A build with vectorization enabled gave stride results within about 5% of the scalar build. Source: [cache-effects-bench.c](/files/cache-effects-bench.c).
+[^3]: Intel, [Intel 64 and IA-32 Architectures Optimization Reference Manual, Volume 1](https://www.intel.com/content/www/us/en/content-details/671488/intel-64-and-ia-32-architectures-optimization-reference-manual-volume-1.html). The manual is where Intel documents its hardware prefetchers. The description of the spatial (adjacent-line) prefetcher completing each fetched line to a 128-byte aligned pair comes from a search summary of earlier-generation material. I did not open the manual's section for this chip, so verify it there before relying on it.
