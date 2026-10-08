@@ -1,0 +1,162 @@
+---
+title: "I Pushed the For Down and My Loop Got Slower. Removing the Branch Made It 6x Faster."
+description: "I measured the performance claims behind 'push ifs up and fors down' in C. Hoisting an if is free at -O3, batching a lock saves 44x, and collecting into a batch made one loop slower."
+pubDate: 2026-10-08
+tags: ['systems', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Chart from '../../components/Chart.astro';
+
+"Push ifs up and fors down" is a code-style rule that matklad wrote up in 2023, and a longer essay about it, with the algebra behind it, hit the Hacker News front page this week.[^1][^2] The rule has two halves. Move an `if` out of a function and into its caller, so the branching lives in one place. Move a `for` loop into the function, so one call handles a whole batch instead of one element.
+
+The first half is mostly about clarity. The second half comes with performance promises: batching "amortizes startup cost," lets the compiler vectorize, and removes branches from hot loops. Neither article shows a measurement. I wanted to know how much of that holds up, so I wrote the small C benchmarks that would test each promise, ran them on one machine, and checked what the compiler did.
+
+Most of it holds. One part does not, and the part that fails is the one people reach for first.
+
+## Two words you need
+
+A **branch** is any point where the CPU has to pick between two paths, such as an `if`. To keep its pipeline full, the CPU guesses which way a branch will go before it knows. A wrong guess is a **misprediction**, and the CPU loses time while it refills the pipeline. **Vectorization** means the compiler turns a loop into instructions that process several array elements at once (SIMD). It only works when the loop body is simple and uniform, and a branch inside the loop often blocks it.
+
+## How I ran it
+
+An Intel Core Ultra 7 258V laptop chip, one thread pinned to a performance core, Windows 11, gcc 16.2.0. Every test is built twice, at `-O2` and at `-O3`, since the compiler's choices change a lot between them. Numbers are medians of 5 runs. The source is [one file you can download](/files/push-ifs-fors-bench.c), and the methodology note at the bottom has the details.[^3] I only tested gcc. Rust's compiler, LLVM, may behave differently, and I come back to that at the end.
+
+## Claim 1: hoisting an `if` out of a loop
+
+The test is a loop whose `if` depends on a flag that never changes during the loop:
+
+```c
+for (int i = 0; i < n; i++) { if (flag) a[i] += x; else a[i] -= y; }   // "inside"
+
+if (flag) { for (...) a[i] += x; } else { for (...) a[i] -= y; }       // "hoisted"
+```
+
+<Chart
+  type="bar"
+  height={300}
+  format="plain"
+  caption="Time per array element (ns) for a 4 KB array, with the invariant if left inside the loop or hoisted by hand. At -O2 the hand-hoisted version is 1.6x faster. At -O3 the compiler hoists it itself and both versions are the same, 2.6 to 4x faster than the -O2 builds."
+  label="Grouped bar chart. At O2: inside the loop 0.195 nanoseconds, hoisted 0.124. At O3: inside 0.047, hoisted 0.048"
+  labels={['-O2', '-O3']}
+  series={[
+    { name: 'if inside the loop', data: [0.195, 0.047] },
+    { name: 'if hoisted by hand', data: [0.124, 0.048] }
+  ]}
+  yTitle="ns per element"
+/>
+
+At `-O2` the idiom pays: 0.195 ns per element down to 0.124 ns, a 1.6x gain. At `-O3` it makes no difference at all (0.047 against 0.048 ns), because gcc does the hoisting itself. The disassembly shows why. At `-O3` both versions contain vector instructions and many more jumps than at `-O2`, which fits a loop that has been split into two copies behind a check before the loop. At `-O2` neither build used vector instructions, and the "inside" version still has its branch in the loop body.
+
+So the first promise is real but conditional. Hand-hoisting buys you something when the compiler will not do it for you, and nothing when it will. I also ran the same test on a 64 MB array, where memory speed dominates: the gap shrinks to about 8% at `-O2` and vanishes at `-O3`. The rule helps most in code that is already fast and compute-bound.
+
+## Claim 2: batching amortizes the cost of each call
+
+The second promise is the one I expected to hold up best. Every operation with a fixed entry cost, such as a function call or a lock acquisition, charges that cost once per element when you loop outside, and once per batch when you loop inside.
+
+For the lock I used a Windows slim reader-writer lock (SRWLOCK), uncontended, taking it once per batch of `b` increments:
+
+<Chart
+  type="line"
+  height={320}
+  logY
+  format="plain"
+  caption="Cost per element (ns, log scale) when one lock acquire and release is shared by a batch of b elements. Locking per element costs 14 ns. Locking once per 4,096 elements costs 0.32 ns, about 44 times less."
+  label="Line chart on a log axis. Cost per element for batch sizes 1, 2, 4, 8, 16, 64, 256, 4096: 14.0, 6.7, 3.4, 1.7, 0.94, 0.48, 0.35, 0.32 nanoseconds"
+  labels={['1', '2', '4', '8', '16', '64', '256', '4096']}
+  series={[{ name: 'ns per element', data: [14.01, 6.73, 3.43, 1.66, 0.94, 0.48, 0.35, 0.32] }]}
+  xTitle="Elements per lock acquisition"
+  yTitle="ns per element"
+/>
+
+The curve is almost exactly 14 ns divided by the batch size, plus a floor of about 0.3 ns for the increment itself. Most of the win arrives by batch size 16 (0.94 ns). Past a few hundred elements you are only shaving the floor.
+
+A plain function call behaves the same way, with a twist. I wrote a tiny function (`x * 3 + 1`), marked it non-inlinable, and compared calling it per element against one call that loops over 4,096 elements. At `-O2` the batch is 2.7x faster (0.47 against 0.17 ns per element). At `-O3` it is 7.7x faster (0.49 against 0.064 ns). The per-call cost barely changed between the two builds. What changed is that a batch loop can be vectorized and a call per element cannot. A good part of "push fors down" is that it hands the compiler a loop to work with.
+
+## Claim 3: collect first, then process the batch
+
+Now the part that surprised me. Debasish Ghosh's essay gives this pattern: instead of looping over `Option` values and handling each one, filter them into a plain collection first, then pass the whole thing to a batch function.[^2] In Rust that is `filter_map(...).collect()` followed by `frobnicate_batch(&items)`. The essay also states a limit: filtering first only saves work if the filter is cheap relative to the work it avoids.
+
+I tested it with a filter that is as cheap as filters get, a single integer comparison. The input is random numbers from 0 to 99, and the threshold sets what fraction passes. Three versions:
+
+```c
+// fused: one loop, branch per element
+for (i...) if (a[i] < thr) sum += work(a[i]);
+
+// collect, then batch (the idiom, with a branch while collecting)
+for (i...) if (a[i] < thr) buf[m++] = a[i];
+for (j < m) sum += work(buf[j]);
+
+// collect without a branch, then batch
+for (i...) { buf[m] = a[i]; m += (a[i] < thr); }
+for (j < m) sum += work(buf[j]);
+```
+
+<Chart
+  type="bar"
+  height={320}
+  format="plain"
+  caption="Time per input element (ns) for the three versions, by the share of elements that pass the filter, with a cheap work function. At 50% the branchy collect-then-batch version is 12% slower than the fused loop. The branch-free version is 6.1x faster than the fused loop."
+  label="Grouped bar chart over pass rates of 1, 10, 50 and 90 percent. At 50 percent: fused 2.96 nanoseconds, collect with branch 3.31, collect without branch 0.48"
+  labels={['1% pass', '10% pass', '50% pass', '90% pass']}
+  series={[
+    { name: 'Fused loop, branch per element', data: [0.258, 0.764, 2.956, 1.022] },
+    { name: 'Collect then batch, with branch', data: [0.302, 0.980, 3.309, 1.167] },
+    { name: 'Collect then batch, no branch', data: [0.257, 0.294, 0.482, 0.607] }
+  ]}
+  yTitle="ns per input element"
+/>
+
+Read the first two series first. Splitting the loop in two, the textbook shape of the idiom, never beat the fused loop here. It lost by 12 to 28% at every pass rate. That is the opposite of the promise. The buffer costs extra writes and reads, and the filtering loop still has the same branch as before.
+
+The third series is where the time went. Writing the element unconditionally and advancing the output index by the comparison result removes the branch entirely. With random data at a 50% pass rate, a branch is a coin flip, the predictor loses it half the time, and each loss costs a pipeline refill. Without the branch there is nothing to mispredict. That version is 6.1x faster than the fused loop at 50%.
+
+To check that mispredictions, not batching, are the cause, I ran the control that follows from the explanation: the same filter, a 50% pass rate, on sorted input where the branch is perfectly predictable.
+
+<Chart
+  type="bar"
+  height={300}
+  format="plain"
+  caption="The same 50% filter on random input and on sorted input, at -O2. When the branch is predictable, the fused loop is the fastest version and the branch-free one is the slowest. The 6x win belongs to unpredictable data, not to batching."
+  label="Grouped bar chart. Random input: fused 2.64 nanoseconds, collect with branch 3.08, collect without branch 0.44. Sorted input: fused 0.30, collect with branch 0.42, collect without branch 0.66"
+  labels={['Random input', 'Sorted input']}
+  series={[
+    { name: 'Fused loop, branch per element', data: [2.636, 0.298] },
+    { name: 'Collect then batch, with branch', data: [3.076, 0.416] },
+    { name: 'Collect then batch, no branch', data: [0.444, 0.662] }
+  ]}
+  yTitle="ns per input element"
+/>
+
+On sorted data the picture flips. The fused loop takes 0.30 ns per element, the branch-free version 0.66 ns, 2.2x slower, since it pays the full compaction cost on every element no matter what. The same code that wins 6x on random data loses 2.2x on predictable data. A first version of this control gave a bad number: I had hard-coded the threshold, and gcc turned the branch into branch-free code on its own. I fixed it by reading the values at runtime, which is why the fused random result matches the earlier grid.
+
+Making the work function expensive (16 chained multiply-adds per element) narrows the gap. At 50% the branch-free version is 1.85x faster than fused (2.64 against 4.90 ns). At 90%, where the work dominates, the three versions finish within 19% of each other, and the branchy collect-then-batch version edges out the fused loop by 6%. Repeating everything on a 256 MB array changed little, since the temporary buffer is read and written sequentially and the hardware prefetches it.
+
+## Where this can mislead
+
+**This is gcc, not the Rust compiler.** The articles are written in Rust, whose compiler (LLVM) makes its own unswitching and vectorization choices. Whether the `-O2` result transfers to a release build depends on the optimizer, and I did not test it.
+
+**These are micro-benchmarks.** The work functions are a multiply or a short hash chain. Real code spends more per element, which shrinks every ratio in this post, especially the lock and call overhead.
+
+**The lock was uncontended.** With several threads fighting for it, the per-acquire cost is much higher and batching matters more, but I did not measure that.
+
+**The random input is the hardest case for the predictor.** Real data usually has patterns, which is why the sorted control matters.
+
+**One condition, two numbers.** The 50% case with a cheap work function measured 2.96 ns in the grid and 2.64 ns in the control run. The code that surrounds a loop affects how it compiles, so treat differences under about 10% as noise.
+
+**I tested the performance promises only.** Moving ifs up is mainly an argument about clarity: one place where all the branching lives, so dead branches show up. A stopwatch cannot score that, and I did not try. The algebra in the second essay is not something I evaluated either.
+
+## Takeaways
+
+- **Hand-hoisting an invariant `if` helps at `-O2` (1.6x here) and is redundant at `-O3`.** Check what your compiler does before you restructure code for speed.
+- **Batching removes per-call costs almost exactly in proportion to batch size.** One lock acquire shared by 4,096 elements cost 44 times less per element than one per element, and most of that win arrives by a batch of about 16.
+- **Splitting a filtering loop into collect-then-batch does not make it faster by itself.** With a cheap filter it was 12 to 28% slower than the fused loop here.
+- **The big win came from removing an unpredictable branch, not from the loop structure.** On random data it was 6x. On sorted data the same change was 2.2x slower.
+- **Measure with the data you will really have.** A rule that wins on random input can lose on sorted input, and a compiler can silently change what you think you are measuring.
+
+## References
+
+[^1]: matklad, [Push Ifs Up And Fors Down](https://matklad.github.io/2023/11/15/push-ifs-up-and-fors-down.html) (2023). The original statement of the two rules. Its performance claims are that batching amortizes startup cost, enables vectorization and removes branches from hot loops; it gives no measurements.
+[^2]: Debasish Ghosh, [Push ifs up and fors down: The idiom, its algebra, and its limits](https://debasishg.github.io/blog/push-ifs-up-fors-down/). The longer essay on the Hacker News front page, with the filter-then-batch pattern and a stated limit that filtering before mapping only saves work when the predicate is cheap. It contains no performance measurements.
+[^3]: Methodology. Measured 2026-10-08 on an Intel Core Ultra 7 258V, Windows 11, gcc 16.2.0 from w64devkit 2.10.0, built separately with `-O2` and `-O3`. Each benchmark ran on one thread pinned to logical processor 0, a performance core, at high process priority. Values are medians of 5 runs; clock speed and power plan were not controlled. Claim 1 used a 1,024-integer array (4 KB) and a 16M-integer array, 512M element operations per run. Claim 2 used a non-inlinable function over a 4,096-integer array and a Windows SRWLOCK, uncontended, over 100M increments. Claim 3 used 64K and 64M random integers in 0 to 99 from a xorshift generator, a threshold giving a 1%, 10%, 50% or 90% pass rate, and a work function of 1 or 16 chained multiply-adds. The sorted control used the 64K array sorted ascending, with the threshold and work size read through volatile variables so the compiler could not specialize the loops. Disassembly was checked with `objdump`. Source: [push-ifs-fors-bench.c](/files/push-ifs-fors-bench.c).
