@@ -1,0 +1,214 @@
+---
+title: 'Observability from First Principles: Metrics, Logs, Traces and What to Do With Them'
+description: 'What observability actually means, how metrics, logs and traces each answer different questions, how a trace is built, where OpenTelemetry fits, and how SLOs turn signals into alerts.'
+pubDate: 2026-10-08
+updatedDate: 2026-10-08
+tags: ['observability', 'opentelemetry', 'devops', 'tutorial']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Figure from '../../components/Figure.astro';
+
+Sooner or later a service you run gets slow, and someone asks "why?" If you can answer by looking at data the system already emits, you have observability. If the honest answer is "let me add some logging and redeploy," you don't, at least not for that question.
+
+That is most of the idea, and the rest of this guide is the machinery behind it: what the data looks like, how it gets collected, and how you turn it into something that wakes you up only when it should. It assumes you can read a web service's code but have not necessarily operated one under load. Terms get explained the first time they show up.
+
+## Monitoring versus observability
+
+The two words get used as synonyms, and in casual conversation that's fine. The distinction is still useful.
+
+**Monitoring** means watching things you decided in advance to watch. CPU is above 90%, the error rate is above 1%, the disk is nearly full. You knew the question before the incident, and you wrote it down as a dashboard or an alert.
+
+**Observability** is the property that lets you ask questions you did *not* plan for. The OpenTelemetry project phrases it as being able to "understand a system from the outside" by asking questions about it, "without knowing its inner workings."[^1] The same page says this is what lets you handle new problems, the "unknown unknowns."[^1]
+
+A concrete version of the difference: your checkout endpoint gets slow for roughly 3% of users. A pre-built latency dashboard tells you the average moved a little. It cannot tell you that the affected users are all on one payment provider, because nobody thought to put "payment provider" on a graph. Observability means the data carries enough detail that you can slice by that dimension *after* the problem shows up.
+
+So monitoring is a subset of what you do with observable data, not a competing idea. You still want alerts on known failure modes. You also want to be able to go off-script.
+
+## The three signals
+
+**Telemetry** is the OpenTelemetry term for data a system emits about itself and its behavior.[^1] The three main kinds are metrics, logs and traces. They are often called "the three pillars," which makes them sound like equal, interchangeable parts. They aren't. Each is good at one kind of question and bad at others.
+
+### Metrics
+
+A **metric** is a number measured over time: requests per second, memory in use, the 95th percentile of latency. Each distinct combination of a metric name and its labels (also called attributes or dimensions, like `route="/checkout"` and `status="500"`) is stored as its own time series, which is just a list of (timestamp, value) pairs.
+
+Metrics are cheap and compact, which makes them the right tool for dashboards and alerts. They answer "is something wrong, and roughly how bad?" They are bad at "which specific request failed?" because the individual requests were already aggregated into a number.
+
+The catch is **cardinality**, the count of distinct label combinations. Prometheus's own guidance says that "every unique combination of key-value label pairs represents a new time series," and warns against labels holding "user IDs, email addresses, or other unbounded sets of values."[^5] The arithmetic is brutal. A request counter with 5 routes, 4 status classes and 100 pods is 5 × 4 × 100 = 2,000 series. Add a `user_id` label with 10,000 active users and it's potentially 20,000,000. Same code, one extra label.
+
+### Logs
+
+A **log** is, in OpenTelemetry's words, "a timestamped message emitted by services or other components."[^1] It's the oldest signal and the most flexible: free text or structured JSON, as much detail as you care to write.
+
+Logs answer "what exactly happened in this one event?" They are the best place for rich, specific detail. They are weak at aggregate questions (counting lines across millions of entries is slow and expensive) and weak at showing how a single request moved across several services, since each service writes its own file.
+
+Structured logs, meaning key-value fields rather than prose sentences, matter more than any other logging choice. `payment declined for user 42` is hard to query. `{"event":"payment_declined","user_id":42,"provider":"acme"}` can be filtered and counted.
+
+### Traces
+
+A **trace** records the path one request takes through a system.[^1] It is made of **spans**, where a span "represents a single unit of work or operation," such as one HTTP handler, one database query, or one call to another service.[^1]
+
+Traces answer "where did the time go for *this* request, and which service was involved?" That is exactly the question metrics can't and logs make tedious. They cost more to produce and store than metrics, which is why most systems sample them (keep only some fraction).
+
+### Side by side
+
+| | Metrics | Logs | Traces |
+|---|---|---|---|
+| Shape | Numbers over time | Timestamped events | Tree of timed spans per request |
+| Best question | Is it broken? How much? | What happened in this event? | Where did this request spend its time? |
+| Weak at | Per-request detail | Aggregates, cross-service flow | Cheap long-term retention |
+| Main cost driver | Label cardinality | Volume of text | Number of spans kept |
+
+### One incident, three views
+
+Here is an *illustrative* scenario, not a measurement, showing how the signals hand off to each other. Suppose checkout is slow for some users.
+
+1. A **metric** alert fires: p95 latency on `/checkout` is up, error rate is flat. That tells you something is wrong and that it's about slowness, not failures.
+2. You pull up a **trace** for a slow request. Of its 2.4 seconds, 2.1 are inside one span: a call to the payment provider's API. Now you know *where*.
+3. That span has a trace ID. You search your **logs** for it and find the payment service logging `retrying after 429 rate limited` three times. Now you know *why*.
+
+No single signal got you there. The workflow is metrics to notice, traces to locate, logs to explain, and it only works if the three can be tied together, which brings us to how traces are built.
+
+## How a trace is built
+
+Every span carries a few things: a name, start and end timestamps, a parent span ID (empty for the first, or **root**, span), attributes (key-value metadata), and a status that is `Unset` by default and can become `Ok` or `Error`.[^2] It also carries a **span context**, an immutable object holding the **trace ID** that identifies the whole trace and the **span ID** that identifies this span.[^2]
+
+Parent IDs are what turn a flat pile of spans into a tree. Timestamps are what let you draw it as a waterfall.
+
+<Mermaid
+  caption="One request, three services. Every span shares one trace ID. Each span's parent ID points at the span that called it, which is how a tracing backend rebuilds the tree afterward."
+  label="Sequence diagram of a request passing from a browser to an API gateway, then an order service, then a payment service, with a traceparent header forwarded on each call and spans labelled A, B and C with parent relationships"
+  code={`
+sequenceDiagram
+    participant B as Browser
+    participant G as Gateway (span A, root)
+    participant O as Order service (span B, parent A)
+    participant P as Payment service (span C, parent B)
+
+    B->>G: HTTP request
+    G->>O: call, traceparent header (trace id + span A)
+    O->>P: call, traceparent header (trace id + span B)
+    P-->>O: response
+    O-->>G: response
+    G-->>B: response
+`}
+/>
+
+The hard part is that these services share no memory. Service B has no idea which trace it belongs to unless service A tells it. **Context propagation** is the name for that handoff: the span context travels along with the request so spans from different processes and machines can be assembled into one end-to-end view.[^2]
+
+For HTTP, the handoff is standardized by the W3C Trace Context specification as a header called `traceparent`.[^3] It has four dash-separated fields:
+
+```
+00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+```
+
+The first is a version (`00`), then a 32-hex-character trace ID (16 bytes), then a 16-hex-character parent ID (8 bytes, the span that is making this call), then 2 hex characters of flags, of which currently only one bit is used.[^3] Both IDs are forbidden from being all zeroes. That is the whole mechanism: a 55-character string copied into each outgoing call.
+
+It also explains the most common reason traces look broken. If any hop in the chain, a message queue, a background job, a proxy that strips unknown headers, fails to forward that header, the tree is cut there and the downstream spans start a fresh trace.
+
+And it explains how logs join the party. If your logging library writes the current trace ID into each log line, the "search logs by trace ID" step in the incident above becomes possible.
+
+## Where OpenTelemetry fits
+
+You could produce all of this by hand, but every vendor used to have its own agent and its own format. **OpenTelemetry** (often shortened to OTel) is the open, vendor-neutral standard that replaced that. It defines the data model for metrics, logs and traces, a set of language libraries to produce them, and a standalone program to move them around.
+
+Four pieces are worth keeping straight.
+
+**Instrumentation** is the act of making your code emit telemetry. There are two flavors. Zero-code (automatic) instrumentation gets you telemetry from the libraries and runtime you already use, which suits getting started or situations where you can't change the application. Code-based instrumentation uses the OTel API to add detail only your own code knows about, and the two can be used together.[^6]
+
+**The API and the SDK** are deliberately separate packages. The API is the set of interfaces your code calls to create spans and record measurements. The SDK is the implementation that actually does something with them, such as batching and exporting. The spec is blunt that instrumentation code should depend only on the API, never the SDK.[^7] The practical payoff: a shared library can be instrumented with just the API, and an application that doesn't install the SDK isn't affected by it.[^6]
+
+**The Collector** is a separate process, described as "a vendor-agnostic implementation of how to receive, process and export telemetry data."[^9] Its internal pipeline has receivers (take data in), processors (filter, batch, transform) and exporters (send data on).[^9] Putting one between your apps and your backend means you can change vendors, drop noisy data, or fan out to two destinations without touching application code.
+
+**The backend** is wherever telemetry ends up and gets queried: Prometheus for metrics, Jaeger or Tempo for traces, Loki or Elasticsearch for logs, or a commercial platform that does all three. OTel deliberately does not include one.
+
+<Mermaid
+  caption="The usual OpenTelemetry layout. Applications talk to the API, the SDK exports, a Collector in the middle filters and routes, and the backends are replaceable."
+  label="Flow diagram showing application code calling the OpenTelemetry API, the SDK exporting over OTLP to a Collector with receivers, processors and exporters, which then send data to metrics, trace and log backends"
+  code={`
+flowchart LR
+    A[Application code] --> B[OTel API]
+    B --> C[OTel SDK]
+    C -->|OTLP| D
+
+    subgraph D[Collector]
+        direction LR
+        R[Receivers] --> P[Processors] --> E[Exporters]
+    end
+
+    E --> M[Metrics backend]
+    E --> T[Trace backend]
+    E --> L[Log backend]
+`}
+/>
+
+OTLP in the diagram is the OpenTelemetry Protocol, the wire format OTel components use to talk to each other.
+
+## From signals to action: SLIs, SLOs and alerts
+
+Collecting data is half the job. The other half is deciding when a human should be interrupted, and that is where people tend to go wrong, usually by alerting on causes (CPU high, a pod restarted) instead of symptoms (users are getting errors). Google's SRE book frames monitoring around two questions, "what's broken, and why?", and recommends paging on the first, because a symptom is what actually affects someone.[^4] The same chapter offers four **golden signals** to cover for any user-facing service: latency, traffic, errors and saturation (how "full" the service is).[^4]
+
+To make "how broken is too broken" precise, you need three terms.
+
+- An **SLI** (Service Level Indicator) is a measurement of a service's behavior, for example the fraction of requests that succeed.[^1]
+- An **SLO** (Service Level Objective) is the target you set for that SLI, such as "99.9% of requests succeed over 30 days." OpenTelemetry describes it as how reliability is communicated to the rest of the organization.[^1]
+- The **error budget** is whatever the SLO leaves over. At 99.9% over 30 days, you are allowed 0.1% failures, which is 0.001 × 30 × 24 × 60 = 43.2 minutes of total outage-equivalent.
+
+Error budgets change the conversation. A single 5-minute blip no longer demands a page, because it spent about 12% of the budget and you have plenty left. A slow leak that would burn the whole budget in two days does demand one, even if no individual minute looks alarming.
+
+The tool for that is **burn rate**: "how fast, relative to the SLO, the service consumes the error budget." A burn rate of 1 uses exactly the whole budget by the end of the window.[^8] Google's SRE workbook recommends alerting on several burn rates at once, each over a long and a short window, and firing only when both are exceeded. The values below are the workbook's example for a 99.9% SLO:[^8]
+
+| Severity | Long window | Short window | Burn rate | Budget consumed |
+|---|---|---|---|---|
+| Page | 1 hour | 5 minutes | 14.4 | 2% |
+| Page | 6 hours | 30 minutes | 6 | 5% |
+| Ticket | 3 days | 6 hours | 1 | 10% |
+
+You can verify the last column yourself. A 30-day window is 720 hours, so burning at 14.4× for one hour consumes 14.4 / 720 = 2% of the budget, and 6× for six hours is 36 / 720 = 5%. The short window exists so the alert stops firing soon after the problem does. The long window keeps one brief spike from paging anyone. The tradeoffs of tuning these numbers are a deep topic of their own, and I leave it there.
+
+## Where to start, and what goes wrong
+
+If you are adding observability to a system that has none, this order tends to pay off fastest.
+
+1. **Instrument the edges first.** Zero-code instrumentation on your web framework, HTTP client and database driver gives you request rates, errors, latencies and a basic trace tree with almost no code.[^6]
+2. **Cover the golden signals** for each user-facing service as metrics, and alert on symptoms.[^4]
+3. **Write structured logs** and make sure each line carries the trace ID.
+4. **Set one SLO** for one important user journey, and alert on its burn rate. Resist doing this for everything at once.
+5. **Add custom spans and attributes** only where the automatic ones leave a question unanswerable. This is where "payment provider" would get added.
+
+Common failure modes:
+
+- **Label explosion.** An unbounded value, such as a user ID, request ID or raw URL path, used as a metric label. Costs and query times climb quietly until something falls over.[^5] Put high-detail identifiers on spans and logs instead, which are built to hold them.
+- **Logs as the only signal.** It works at small scale, then one day you can't tell which of twelve services caused a slow request.
+- **Broken propagation.** Traces that stop at a queue or a job boundary. Check that context is explicitly carried across anything that isn't a plain HTTP call.
+- **Alerting on causes.** Pages for high CPU that no user ever noticed, followed by alert fatigue, followed by real pages being ignored.
+- **Collecting everything, reading nothing.** Telemetry has a bill, and data nobody queries is pure cost. The first two posts in the follow-up reading below dig into this.
+
+## Takeaways
+
+- Observability is about answering questions you didn't plan for, using data the system already emits. Monitoring is the part where you did plan.
+- The signals do different jobs: metrics to notice a problem, traces to locate it, logs to explain it. They are only powerful when linked by a shared trace ID.
+- A trace is a tree of spans sharing one trace ID, and it only holds together if each hop forwards the `traceparent` header.
+- OpenTelemetry standardizes how telemetry is produced and moved (API, SDK, Collector), not where it is stored.
+- Page on symptoms, define SLOs, and use burn rates so alerts reflect how fast you're spending reliability, not how scary a single graph looks.
+
+## Further reading
+
+On this site:
+
+- [Your Observability Bill Is a Multiplication Problem](/posts/observability-bill-multiplication-problem/) on cardinality and what telemetry costs.
+- [Why increase() Returns 27.5](/posts/why-increase-returns-27-5/) on how Prometheus turns counters into rates.
+
+## References
+
+[^1]: OpenTelemetry, [Observability primer](https://opentelemetry.io/docs/concepts/observability-primer/), for the definition of observability and "unknown unknowns", telemetry, logs, spans, distributed traces, SLI and SLO.
+[^2]: OpenTelemetry, [Traces](https://opentelemetry.io/docs/concepts/signals/traces/), for span contents, span context (trace ID and span ID), status values, and context propagation.
+[^3]: W3C, [Trace Context](https://www.w3.org/TR/trace-context/), Section 3.2 for the `traceparent` header format, field lengths and example.
+[^4]: Google, [Site Reliability Engineering, Chapter 6: Monitoring Distributed Systems](https://sre.google/sre-book/monitoring-distributed-systems/), for the four golden signals, white-box versus black-box monitoring, and symptoms versus causes.
+[^5]: Prometheus, [Metric and label naming](https://prometheus.io/docs/practices/naming/), for the warning on high-cardinality labels. The 2,000 and 20,000,000 series figures are simple multiplication of the stated counts, not measurements.
+[^6]: OpenTelemetry, [Instrumentation](https://opentelemetry.io/docs/concepts/instrumentation/), for zero-code versus code-based instrumentation and native library instrumentation.
+[^7]: OpenTelemetry, [Specification overview](https://opentelemetry.io/docs/specs/otel/overview/), for the API/SDK split and the rule that instrumentation depends only on the API.
+[^8]: Google, [The Site Reliability Workbook, Alerting on SLOs](https://sre.google/workbook/alerting-on-slos/), for the burn rate definition and the multi-window, multi-burn-rate table for a 99.9% SLO. The budget percentages were recomputed from a 720-hour window.
+[^9]: OpenTelemetry, [Collector](https://opentelemetry.io/docs/collector/), for the vendor-agnostic description and the receivers, processors and exporters components.
