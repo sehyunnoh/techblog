@@ -1,0 +1,209 @@
+---
+title: "Postgres Wasn't Ignoring My Index. On My Machine It Used the Index Too Often."
+description: 'Why does Postgres skip indexes? On a 5M-row table the default planner picked a bitmap scan up to 1.85x slower than a sequential scan, and physical column order mattered more than selectivity.'
+pubDate: 2026-10-09
+tags: ['postgres', 'backend', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+import Figure from '../../components/Figure.astro';
+
+The ticket is always the same. A query is slow, there is an index on the column in the `WHERE` clause, and `EXPLAIN` shows `Seq Scan`. The usual reaction is that Postgres is being stubborn, and the usual fix is `SET enable_seqscan = off`.
+
+I built a table, put indexes on it, and timed every way Postgres could answer the same query. I expected a planner that is too timid about indexes. On this machine I found close to the opposite: across a wide range, the planner chose an index-driven plan and a plain sequential scan was faster, by as much as 1.85x.
+
+## How the planner decides
+
+Postgres does not decide by rule. It prices every candidate plan in abstract cost units and runs the cheapest one. The prices come from three inputs: statistics it keeps about each column, a few cost constants, and the physical size of the table.
+
+<Mermaid
+  caption="The planner's pipeline for a single-table filter. Every arrow before 'pick cheapest' is an estimate. The only real measurement happens after, when the query runs."
+  label="Flow diagram: column statistics produce a row count estimate, which feeds a cost calculation for each scan type using cost constants and table size, and the cheapest plan is executed"
+  code={`
+flowchart LR
+    A[Column statistics<br/>pg_statistic] --> B[Estimated matching rows]
+    B --> C1[Cost of sequential scan]
+    B --> C2[Cost of index scan]
+    B --> C3[Cost of bitmap scan]
+    K[Cost constants<br/>and table size] --> C1
+    K --> C2
+    K --> C3
+    C1 --> D{Pick cheapest}
+    C2 --> D
+    C3 --> D
+    D --> E[Execute]
+`}
+/>
+
+A few terms before going further. The **heap** is the table's own storage, the pages that hold the actual rows. An **index** is a separate structure that maps column values to row locations in the heap. **Selectivity** is the fraction of rows a filter keeps, so `val < 100000` on a million distinct values has a selectivity of 10%.
+
+There are three ways to read matching rows. A **sequential scan** reads the whole heap in order and discards what doesn't match. An **index scan** walks the index and fetches each matching row from the heap as it goes. A **bitmap scan** walks the index first, collects all the matching locations into a bitmap, and then visits the heap pages in physical order.[^1] That last property is the point of it: the heap is read in one pass instead of jumping around.
+
+The cost constants matter because they say how expensive each kind of page access is. By default a sequentially read page costs 1.0 and a randomly fetched page costs `random_page_cost`, which is 4.0.[^2] The documentation is candid about the number. Random access to durable storage is "normally much more expensive than four times sequential access," and 4.0 is used because most indexed reads are assumed to be in cache.[^2] So the default is a deliberate bet on a warm cache, not a measurement of any disk.
+
+## The setup
+
+One machine, one Postgres 17.6 server on Windows with default settings, and a 5-million-row table:
+
+```sql
+CREATE TABLE t (id int PRIMARY KEY, val int NOT NULL, seq int NOT NULL, pad text NOT NULL);
+INSERT INTO t
+SELECT g, (random()*1000000)::int, g, repeat('x', 80)
+FROM generate_series(1, 5000000) g;
+CREATE INDEX t_val ON t(val);
+CREATE INDEX t_seq ON t(seq);
+VACUUM ANALYZE t;
+```
+
+The heap is 601 MB and each index on a single `int` is 56 MB. Both indexed columns hold the same kind of values, but `val` is random while `seq` is the insertion order, so their physical layout differs completely. `pg_stats` reports a correlation of 0.007 for `val` and exactly 1 for `seq`. Correlation here means how closely the order of values in the column matches the order of rows on disk.
+
+The query is `SELECT count(pad) FROM t WHERE val < X`. Using `count(pad)` rather than `count(*)` matters: it forces a visit to the heap, because an index-only scan could otherwise answer from the index alone and hide the effect I wanted to measure.
+
+For each selectivity (full methodology in note [^6]) I forced each plan type with the `enable_*` settings, ran one warm-up, then took the median of five `EXPLAIN (ANALYZE, TIMING OFF)` runs. I also let the planner choose with nothing forced. Parallel query was switched off, so sequential scans were not given a multi-worker advantage. The whole table fits in the operating system's file cache, so this is a **warm-cache** test. I did not measure cold reads.
+
+## Measurement 1: a column in random order
+
+<Chart
+  type="line"
+  logY
+  height={360}
+  caption="Median of five runs per point, val column (random physical order), 5M rows, warm cache. Log y-axis because the plans span four orders of magnitude. The sequential scan is nearly flat; the two index-driven plans start far below it and climb through it."
+  label="Line chart of query time in milliseconds against selectivity for sequential, index and bitmap scans on a randomly ordered column; sequential scan stays near 250 to 350 ms while index and bitmap scans cross it at about 1 to 2 percent"
+  labels={['0.002%', '0.01%', '0.1%', '0.5%', '1%', '2%', '5%', '10%', '20%', '40%']}
+  series={[
+    { name: 'Sequential scan', data: [327.2, 348.1, 301.2, 246.2, 262.0, 255.0, 252.2, 254.8, 271.3, 308.9] },
+    { name: 'Index scan', data: [0.3, 1.1, 8.9, 154.8, 267.0, 499.4, 1210.7, 2381.6, 4962.0, 10334.2] },
+    { name: 'Bitmap scan', data: [0.4, 1.3, 9.7, 145.0, 202.7, 285.2, 432.9, 492.6, 511.0, 614.9] },
+  ]}
+  yTitle="Query time (ms, log scale)"
+  xTitle="Fraction of rows matched"
+  format="plain"
+/>
+
+The shape is the textbook one, and so is the left side. Below about half a percent the index plans win by orders of magnitude: 0.3 ms against 327 ms at 100 rows. The sequential scan costs roughly the same wherever you stand, around 250 ms, because it always reads 601 MB.
+
+The crossover is where it gets interesting. A plain index scan loses to the sequential scan at about 1%, and the bitmap scan holds on until somewhere between 1% and 2%. At 10% the bitmap scan took 493 ms to the sequential scan's 255 ms. At 40% the plain index scan took over ten seconds, 33 times the sequential scan, because each matching row pulls a heap page in random order and the 128 MB of shared buffers cannot hold the working set.
+
+What did the planner pick on its own?
+
+| Matched | Planner chose | Time | Sequential scan | Penalty |
+|---|---|---|---|---|
+| 0.1% | Bitmap | 9.8 ms | 301 ms | none (31x faster) |
+| 1% | Bitmap | 198 ms | 262 ms | none |
+| 2% | Bitmap | 282 ms | 255 ms | 1.10x slower |
+| 5% | Bitmap | 436 ms | 252 ms | 1.73x slower |
+| 10% | Bitmap | 464 ms | 255 ms | 1.82x slower |
+| 20% | Bitmap | 503 ms | 271 ms | 1.85x slower |
+| 40% | Sequential | 313 ms | 309 ms | none |
+
+The planner stuck with the bitmap scan from 0.002% to 20% and switched to a sequential scan only at 40%. Checking a few more points with plain `EXPLAIN`, the switch happens between 20% and 30%. The real crossover on this machine was between 1% and 2%, an order of magnitude earlier.
+
+It was not a statistics problem. At 10% the plan reported an estimate of 499,336 rows and returned 500,372, which is within 0.2%. The planner knew exactly how many rows it was getting. It priced the bitmap scan at 122,209 units against 139,423 for the sequential scan, about 12% cheaper, and the real ratio was roughly 1.8 times the other way.
+
+Part of the real cost is visible in the plan output. With the default `work_mem` of 4 MB, the bitmap could not hold exact row locations for every page, so 33,112 of its 76,834 heap pages went "lossy": Postgres remembers only the page, then rechecks every row on it. That removed 1.9 million rows by recheck. Raising `work_mem` to 64 MB made all pages exact and brought the 10% case down to about 400 to 415 ms, an improvement but still well short of the 255 ms sequential scan. The lossy bitmap is one contributor, not the whole story.
+
+## Measurement 2: the same query on an ordered column
+
+Now the same table and the same kind of range filter, on `seq`, the column whose order matches the heap.
+
+<Chart
+  type="line"
+  logY
+  height={360}
+  caption="Same experiment on the seq column (correlation 1.0), starting at 0.01% because the 0.002% point sits at the 0.1 ms resolution of the timer. Neither index plan loses to the sequential scan at any point measured, and the planner chose a plain index scan every time, which was right every time."
+  label="Line chart of query time against selectivity for the ordered column; index and bitmap scans stay far below the sequential scan up to 20 percent and only slightly below at 40 percent"
+  labels={['0.01%', '0.1%', '0.5%', '1%', '2%', '5%', '10%', '20%', '40%']}
+  series={[
+    { name: 'Sequential scan', data: [250.4, 243.9, 239.1, 237.5, 238.7, 244.9, 251.7, 263.8, 386.4] },
+    { name: 'Index scan', data: [0.2, 0.6, 2.4, 5.0, 9.4, 23.3, 45.6, 180.1, 300.3] },
+    { name: 'Bitmap scan', data: [0.2, 0.6, 2.5, 4.9, 9.5, 24.2, 47.3, 170.4, 322.4] },
+  ]}
+  yTitle="Query time (ms, log scale)"
+  xTitle="Fraction of rows matched"
+  format="plain"
+/>
+
+At 10%, the ordered column answered in 46 ms with the index while the sequential scan still took 252 ms. The random column at the same 10% selectivity took 464 ms with the plan the planner chose, about ten times longer. Same table, same row count, same index type, same filter shape. At 40% the index still won here (300 ms against 386 ms), where on the random column it had lost by 33x.
+
+So selectivity alone does not decide anything. The deciding factor is how many distinct heap pages the matching rows land on. In an ordered column, 10% of the rows live in 10% of the pages, and the index scan reads them in order. In a random column, 10% of the rows touch nearly every page, so you pay for the index lookups and still read the entire heap.
+
+Postgres models this explicitly. In `cost_index`, it estimates a best-case and a worst-case I/O cost and interpolates between them using the square of the correlation: `run_cost += max_IO_cost + csquared * (min_IO_cost - max_IO_cost)`.[^3] The source comment even flags the squared weighting with an "XXX is that appropriate?" note.[^3] A bitmap scan does something similar with page count: its cost per page slides from `random_page_cost` toward `seq_page_cost` as the fraction of the table fetched grows.[^3]
+
+You can see what the planner believes about your column with one query:
+
+```sql
+SELECT attname, correlation FROM pg_stats WHERE tablename = 't';
+```
+
+## Measurement 3: stale statistics, and a plan that got faster
+
+The other classic explanation for "wrong plan" is that the statistics are out of date. I tested it, and the result was not what I expected either.
+
+I created a 3-million-row table where every row has `status = 'done'`, ran `ANALYZE`, and then updated 5% of the rows to `'pending'` without re-analyzing. Statistics are only refreshed by `ANALYZE`, whether run by hand or by the background auto-analyze, and are "always approximate even when freshly updated."[^4] I turned autovacuum off for this table so the test would be deterministic. In production it would normally catch up, but the window before it does can be long on a busy table.
+
+With the stale statistics, `WHERE status = 'pending'` was estimated at `rows=1`. The actual count was 150,000. After `ANALYZE` the estimate was 151,605. That is a 150,000x error, caused entirely by `pending` not appearing in the stored most-common-values list.
+
+On the single-table query, nothing changed. Both the stale and the fresh plan were an index scan at 13 to 14 ms once warm. The updated rows were most likely written together at the end of the table, which would make the index scan the right answer regardless.
+
+A join is where the estimate gets used more heavily. Joining those pending rows to `t` and filtering `t.val < 500000`:
+
+| Statistics | Plan chosen | Estimated rows | Time (3 runs) |
+|---|---|---|---|
+| Stale | Nested loop, index probe on `t` per row | 1 | 368, 388, 454 ms |
+| Fresh | Hash join, sequential scan of `t` | 72,955 | 631, 660, 674 ms |
+
+The stale plan was **faster**. The nested loop did 150,000 index probes into `t`, which on a warm cache is cheap, and the fresh, more accurate plan decided to read all 5 million rows. The error pushed the planner toward the plan my warm-cache machine happened to prefer.
+
+That does not make stale statistics harmless. A misestimate and the real cost of the plan it produces are separate things, and I observed only one direction. With cold storage, the same error could go the other way. I did not measure that, so I will not claim it.
+
+## Measurement 4: when the index cannot be used at all
+
+Sometimes the planner is not choosing. The index simply does not apply to the query as written. I built a million-row table with an uppercase hash in a `name` column, and an ordinary B-tree index on it.
+
+| Predicate | Plan | Time |
+|---|---|---|
+| `name = 'F63F...'` | Index scan | 0.07 ms |
+| `lower(name) = lower('F63F...')` | Seq Scan | 450 ms |
+| `name \|\| '' = 'F63F...'` | Seq Scan | 70 ms |
+| `name LIKE '%FBC9F8C8%'` | Seq Scan | 101 ms |
+| `lower(name) = ...` after `CREATE INDEX ON t3 (lower(name))` | Index scan | 0.05 ms |
+
+An index on `name` stores values of `name`, not values of `lower(name)`. Once the column is wrapped in anything, even `|| ''`, the planner cannot use it. The documentation's own example is exactly this one: the query can use an index "if one has been defined on the result of the `lower(col1)` function."[^5] A leading-wildcard `LIKE` has the same problem, since a B-tree is ordered by prefix.
+
+Two details stand out. Without the expression index, the planner guessed 5,000 rows for the `lower(...)` filter, exactly 0.5% of the table, when the true answer was 1, since it has no statistics on an expression nobody indexed. And `lower()` took 450 ms against 70 ms for `|| ''`, so the function call alone costs about 380 ms over a million rows.
+
+The fix is the expression index, with the trade-off the documentation states plainly: it is "relatively expensive to maintain," since the expression is computed on every insert and non-HOT update, but not recomputed during a search.[^5]
+
+## What this does not show
+
+Every number came from one Windows machine, one Postgres version and one warm cache. Cold storage was not measured, and it is the case `random_page_cost = 4.0` was designed around, so I would not assume my crossover transfers to a table that does not fit in memory. Parallel sequential scans were disabled, which if anything makes the gap in Measurement 1 conservative. And it is one query shape: `count(pad)` over a range on a plain `int`. A query with `ORDER BY ... LIMIT` can let an index scan stop early and win big.
+
+I also would not turn this into a settings change. In a `random_page_cost` sweep, a value of 12 made the planner's choice flip between sequential and bitmap scans as selectivity rose, not move in one direction, which is the per-page cost interpolation from the source at work. Tuning one constant to fix one query is how you end up with a different one.
+
+## A diagnostic routine that survives all of this
+
+When the plan looks wrong, in order:
+
+1. Run `EXPLAIN (ANALYZE, BUFFERS)` and compare `rows=` with `actual rows=`. If they differ by more than about ten times, fix the statistics first (`ANALYZE`, or an expression index).
+2. If the estimates are right, check `correlation` in `pg_stats`. A low value explains a mid-selectivity index plan that is slower than it looks.
+3. Check the predicate lets the index apply: no function around the column, no leading wildcard, matching types.
+4. Only then time the alternatives with `SET enable_seqscan = off` in one session, to see whether the planner's choice was the slow one. It is a measuring tool, not a fix.
+
+## Takeaways
+
+- A `Seq Scan` next to an index is not a bug report. On my 5M-row table, a sequential scan beat every index plan once more than 1 to 2% of a randomly ordered column matched.
+- The planner knew the row count to within 0.2% and still chose a bitmap scan that ran up to 1.85x slower. Accurate estimates do not guarantee accurate costs.
+- Physical order matters as much as selectivity. The same 10% filter took 46 ms on the ordered column and 464 ms on the random one. Check `pg_stats.correlation`.
+- A badly wrong row estimate (1 against 150,000) did not hurt the plan here and even helped on a warm cache. Do not treat estimate error and plan quality as the same thing, but do not count on the luck either.
+- If the predicate wraps the indexed column in a function, no tuning will bring the index back. Index the expression instead: 450 ms became 0.05 ms.
+
+## References
+
+[^1]: PostgreSQL 17 documentation, [Combining Multiple Indexes](https://www.postgresql.org/docs/17/indexes-bitmap-scans.html), for how bitmap scans collect locations and then visit table rows "in physical order."
+[^2]: PostgreSQL 17 documentation, [Planner Cost Constants](https://www.postgresql.org/docs/17/runtime-config-query.html), for `seq_page_cost` (1.0), `random_page_cost` (4.0) and `cpu_tuple_cost` (0.01), and the note that a lower-than-realistic default assumes most indexed reads are cached.
+[^3]: PostgreSQL source, [`src/backend/optimizer/path/costsize.c`](https://github.com/postgres/postgres/blob/REL_17_STABLE/src/backend/optimizer/path/costsize.c) (REL_17_STABLE), `cost_index` for the correlation-squared interpolation and `cost_bitmap_heap_scan` for the per-page cost interpolation between `random_page_cost` and `seq_page_cost`.
+[^4]: PostgreSQL 17 documentation, [Statistics Used by the Planner](https://www.postgresql.org/docs/17/planner-stats.html), for `pg_statistic` being updated by `ANALYZE` and "always approximate even when freshly updated," and `reltuples` not being updated on the fly.
+[^5]: PostgreSQL 17 documentation, [Indexes on Expressions](https://www.postgresql.org/docs/17/indexes-expressional.html), for the `lower(col1)` example and the maintenance cost note.
+[^6]: All timings, row estimates, and plan choices are direct measurements: PostgreSQL 17.6 (EDB Windows x64 binaries), default configuration (`shared_buffers` 128 MB, `work_mem` 4 MB, `random_page_cost` 4, `max_parallel_workers_per_gather` set to 0 for the session), a 5,000,000-row table of 601 MB, warm OS file cache, one warm-up run and the median of five runs per data point, measured 2026-10-09. The planner's picks beyond the measured selectivities (the flip between 20% and 30%, and the `random_page_cost` sweep) came from `EXPLAIN` without `ANALYZE`.
