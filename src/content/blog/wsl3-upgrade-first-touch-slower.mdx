@@ -1,0 +1,132 @@
+---
+title: "WSL3 Is Reported 5 to 60% Faster. On My Machine, Touching Fresh Memory Got 3.5x Slower."
+description: "A blog post says WSL 3 beats WSL 2 by 5 to 60%. I upgraded my own machine from WSL 2.4.12 and repeated its tests: syscalls and first-touch memory got slower, not faster."
+pubDate: 2026-10-10
+tags: ['systems', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+Microsoft shipped WSL 3.0 on 29 September 2026, and a benchmark write-up titled "WSL3 Performance is about 5-60% faster than WSL2 depending on the workload" reached the Hacker News front page this week.[^1][^2] The headline range is wide enough that I wanted to see where in it my own workloads would land. So I ran the same kinds of tests on my machine before and after upgrading.
+
+They did not land inside the range. Two of the six things I measured got clearly slower, one of them by a factor of 3.5. I will say up front what that does and does not prove, because my comparison is not the same as the author's, and most of this post is about why that matters.
+
+## What WSL is, in two paragraphs
+
+WSL (Windows Subsystem for Linux) lets you run Linux programs on Windows. WSL 2 and later do this by starting a real Linux **kernel** inside a lightweight virtual machine. The kernel is the core of the operating system: it hands out memory, schedules programs onto CPU cores and answers **system calls**, which are the requests a program makes whenever it needs the kernel to do something, such as open a file or read from a pipe.
+
+So when a new WSL release changes "performance," a lot of that is the Linux kernel version riding inside it, plus a few settings Microsoft passes to that kernel at boot. WSL 3 moves to Linux 6.18. That single fact explains most of what follows.[^2]
+
+## What the original post measured
+
+The author compared WSL 2.6.3 (kernel 6.6.87.2) against WSL 3.0.2 (kernel 6.18.40.1) on a small HP desktop with an Intel Core i5-8500T, limiting the VM to 2 virtual CPUs and 4 GB of memory.[^1] The headline numbers came from `perf bench`, a set of kernel microbenchmarks:
+
+| Test | WSL 2.6.3 | WSL 3.0.2 | Reported change |
+|---|---|---|---|
+| system call (getppid) | 1,474,691 ops/s | 1,533,399 ops/s | +4.0% |
+| pipe ping-pong | 48,445 ops/s | 54,589 ops/s | +12.7% |
+| memcpy, 1 GB | 7.84 GB/s | 12.64 GB/s | +61.4% |
+| Go build, sys time | 57.39 s | 48.22 s | -16.0% |
+
+The author credits the memcpy jump to a kernel boot setting, `page_reporting.page_reporting_order=5`, and the scheduler gains to changes in kernel 6.18. The post gives no run counts or error margins, and it did not test those explanations by switching the setting off, so they are reasonable guesses rather than findings.[^1]
+
+## What I could actually compare
+
+My machine is a laptop with a Core Ultra 7 258V, 16 GB of memory, Windows 11 and an Ubuntu 24.04 distribution, with the default of 8 virtual CPUs. Before touching anything I ran my own benchmarks on the WSL version already installed. That turned out to be 2.4.12, with kernel 5.15.167.4, which is older than the original post's starting point.
+
+<Mermaid
+  caption="The original post compared two adjacent steps. My baseline sits further back, so my upgrade crosses many WSL releases and two kernel generations at once."
+  label="Timeline of WSL versions. Original post: WSL 2.6.3 with kernel 6.6 versus WSL 3.0.2 with kernel 6.18. This post: WSL 2.4.12 with kernel 5.15 versus WSL 3.0.1 with kernel 6.18"
+  code={`
+flowchart LR
+    A["WSL 2.4.12<br/>kernel 5.15<br/>my baseline"] --> B["WSL 2.6.3<br/>kernel 6.6<br/>their baseline"]
+    B --> C["WSL 2.9.13<br/>last release<br/>before 3.0"]
+    C --> D["WSL 3.0.1<br/>kernel 6.18<br/>my result"]
+    C --> E["WSL 3.0.2<br/>kernel 6.18<br/>their result"]
+`}
+/>
+
+I wrote small C programs for the kernel-level tests instead of using `perf`, because `perf` was not installed and installing it would have needed root. They do the same jobs: call `getppid` in a tight loop, bounce one byte between two processes through a pair of pipes, and copy 1 GB with `memcpy`. For the last one I ran two variants. In the **warm** variant the destination memory has already been touched once, so the pages exist. In the **first-touch** variant the program copies into memory it has never written to, so the kernel has to produce each page on demand. That split comes from the original post's own explanation of its biggest number, since the page-reporting setting it credits is about how free memory is handed back to and requested from the host.
+
+For a build workload I used `go build -a -o /dev/null cmd/go` with an empty build cache, which rebuilds the Go standard library and the `go` command. It stands in for the original post's GoReleaser build and has the practical advantage of needing no downloads. Go was 1.27.2.
+
+Each microbenchmark ran 11 times and the build ran 5 times. The numbers below are medians. The sources are linked in the methodology note.[^3]
+
+## Syscalls got slower, and it reproduced
+
+The system call test is the simplest one, so it is the best place to look first.
+
+<Chart
+  type="bar"
+  height={280}
+  format="plain"
+  caption="getppid calls per second (millions), median of 11 runs. WSL 2.4.12 managed 23.0 million. WSL 3.0.1 managed 14.5 million on the first run and 15.2 million when I repeated the whole set later, about a third fewer."
+  label="Bar chart: WSL 2.4.12 23.0 million per second, WSL 3.0.1 first run 14.5 million, WSL 3.0.1 second run 15.2 million"
+  labels={['WSL 2.4.12', 'WSL 3.0.1 (run 1)', 'WSL 3.0.1 (run 2)']}
+  series={[{ name: 'million syscalls per second', data: [23.0, 14.5, 15.2] }]}
+  yTitle="million calls / s"
+/>
+
+That is a drop of 37% on the first run and 34% on the second. The ranges do not overlap: the slowest 2.4.12 run (21.7 million) beats the fastest 3.0.1 run (16.2 million). The original post saw a 4% improvement here, in the other direction.
+
+I do not know why, and I want to be clear about that. The 3.0.1 kernel reports speculative-execution protections that include enhanced IBRS and a branch-history mitigation (`BHI_DIS_S`).[^4] Protections like these add work to every transition into the kernel, so they are a plausible suspect. But I could not read the same settings on the old kernel after the upgrade, so I cannot say they are new, and a different kernel version, different microcode and a different CPU all push in the same direction. It is a hypothesis.
+
+Pipe ping-pong, the context-switch-heavy test, did not move beyond its own noise: 36.9k round trips per second before, 38.1k and 36.8k after. The original post's 12.7% gain is not visible on my machine.
+
+## Memory: warm is fine, first touch is not
+
+<Chart
+  type="bar"
+  height={300}
+  format="plain"
+  caption="Copying 1 GB with memcpy, median of 11 runs (GB/s). Into memory that was already touched, WSL 3.0.1 was within noise of WSL 2.4.12 (25.4 against 24.3). Into memory touched for the first time it dropped from 9.3 to 2.6, a 72% fall."
+  label="Grouped bar chart. Warm memcpy: WSL 2.4.12 24.3, WSL 3.0.1 25.4. First-touch memcpy: WSL 2.4.12 9.3, WSL 3.0.1 2.6"
+  labels={['Warm (pages already touched)', 'First touch (pages fresh)']}
+  series={[
+    { name: 'WSL 2.4.12', data: [24.3, 9.3] },
+    { name: 'WSL 3.0.1', data: [25.4, 2.6] }
+  ]}
+  yTitle="GB/s"
+/>
+
+Once memory has been touched, copying through it is the same speed in both versions, as you would expect from a CPU-bound operation that never leaves the VM. Nothing here supports a 61% bandwidth gain.
+
+The first-touch case is where the gap opens. A fresh page has to be created, zeroed and mapped before the first write can finish. On 2.4.12 my copy ran at 9.3 GB/s including all of that. On 3.0.1 it ran at 2.6 GB/s, and a repeat of the whole set gave 2.6 again. The runs were consistent: all eleven 3.0.1 results fell between 1.9 and 3.0 GB/s, and ten of the eleven 2.4.12 results fell between 7.8 and 9.4. The odd one was 2.75, so the older version is not perfectly steady either, but it is nowhere near the new one.
+
+This is the same area the original post points at. Page reporting lets the guest tell the host which free memory it is not using, so the host can take it back. The cost shows up later, when the guest wants those pages again and the host has to supply them. That would slow down exactly my first-touch test while leaving the warm test untouched, which is the pattern in the chart. I did not test any of this. The 3.0.1 boot command line does contain `page_reporting.page_reporting_order=5`, but I never saw the old kernel's command line, so I cannot even say the setting changed.
+
+## The build workload barely moved
+
+For the Go build, real (wall-clock) time was 9.3 s on 2.4.12 and 10.0 s on 3.0.1, a 7% increase. The five runs on the new version ranged from 9.5 to 11.8 s, against 9.0 to 9.4 s before, so the direction looks real but the spread is large. System time, the part spent in the kernel, went from 7.1 s to 9.2 s (+30%), with overlapping ranges at the edges. User time, the part spent running the compiler itself, was the same: 45.2 s against 44.8 s.
+
+That split is what you would predict if the kernel got slower at kernel things while the compiler did not change. The original post saw system time fall by 16%. Mine rose. The difference may come from build workload, CPU, or the kernel step I skipped, and I cannot tell which.
+
+## Where this can mislead
+
+**My baseline is not their baseline.** This is the biggest problem. The original post compared 2.6.3 with 3.0.2. I compared 2.4.12 with 3.0.1, so my upgrade crossed many intermediate releases and a jump from kernel 5.15 to 6.18. If the regressions I saw happened between 2.4.12 and 2.6.3, the original post could never have seen them. My numbers say nothing about WSL 3 against its immediate predecessor.
+
+**I measured the old version once.** I took the 2.4.12 baseline before upgrading and then could not go back. WSL has no rollback command (I tried), installing the old package over the new one failed, and the remaining route needed `wsl --uninstall`, which I chose not to run. So there is no second pass on the old side. The new side I ran twice, and both runs agreed, but a background change on the machine between "before" and "after" would look exactly like a version effect.
+
+**Different machine, different shape.** I used 8 virtual CPUs and a recent laptop chip with different microcode, against 2 virtual CPUs and an older desktop chip. Syscall and first-touch costs depend on both.
+
+**Different tools.** My C programs approximate `perf bench`, they do not replicate it, and `cmd/go` is not GoReleaser. Absolute numbers will not match the original post's even where the direction does.
+
+**No cause established.** Every mechanism I mention here, mitigations and page reporting, is a guess that fits the pattern. Testing it needs the old kernel's boot command line and a run with the setting toggled, and I have neither.
+
+## Takeaways
+
+- **"X% faster" in a WSL release comparison often describes a kernel version change.** The headline range is real for the pair the author tested and may not apply to the pair you have.
+- **On my machine, WSL 3.0.1 made `getppid` about a third slower** (23.0 to 14.5 million calls per second, reproduced at 15.2) compared with 2.4.12.
+- **Warm memory copies were unchanged, but copying into never-touched memory fell from 9.3 to 2.6 GB/s.** Which of those a program resembles decides whether the upgrade feels faster or slower.
+- **A compile-heavy workload showed no gain.** Wall time was roughly 7% worse and user time identical, so the compiler itself did not benefit.
+- **Before upgrading a machine you care about, save a baseline from the exact versions on either side,** and keep a way back. I now have half of an A/B test and no way to finish it.
+
+## References
+
+[^1]: tonym.us, [WSL2 vs WSL3 Benchmarks: Performance, Memory, and Syscall Scaling](https://tonym.us/wsl2-vs-wsl3-benchmarks.html). Source of the 2.6.3 against 3.0.2 numbers in the table, the hardware, the VM limits and the author's explanations. The page reports no run counts, variance or isolation tests. The numbers were read from the article through a page summarizer, so check the original before quoting them.
+[^2]: Microsoft, [WSL 3.0.1 release notes](https://github.com/microsoft/WSL/releases/tag/3.0.1) (29 September 2026), listing the previous release as 2.9.13. The Linux 6.18 kernel move is described in news coverage of the launch and confirmed by `wsl --version` on my machine, which reports kernel 6.18.40.1 after the upgrade.
+[^3]: Methodology. Measured 2026-10-10 on an Intel Core Ultra 7 258V laptop, 16 GB RAM, Windows 11 build 26300.9550, Ubuntu 24.04.2 under WSL with default settings (8 virtual CPUs, no `.wslconfig` limits). Before: WSL 2.4.12.0, kernel 5.15.167.4. After: WSL 3.0.1.0 (kernel 6.18.40.1), installed with `wsl --update`. Microbenchmarks compiled with gcc `-O2`, 11 runs each, medians reported: 5 million `getppid` calls, 500,000 pipe round trips, and `memcpy` of 1 GiB (5 copies for the warm case, one for first touch). Go 1.27.2 build of `cmd/go` with `-a` and an empty cache, `-p=8`, 5 runs. The 3.0.1 set was run a second time later for repeatability, and that repeat covers microbenchmarks only. Sources: [wsl-kernel-bench.c](/files/wsl-kernel-bench.c) and [wsl-gobuild.sh](/files/wsl-gobuild.sh).
+[^4]: Read from `/sys/devices/system/cpu/vulnerabilities/` on the 3.0.1 kernel: spectre_v2 "Mitigation: Enhanced / Automatic IBRS; IBPB: conditional; PBRSB-eIBRS: SW sequence; BHI: BHI_DIS_S". I did not read this directory before the upgrade.
