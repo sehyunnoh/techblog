@@ -1,0 +1,214 @@
+---
+title: 'Git SHA-256 Repositories, Step by Step: Create One, Migrate History, and What Breaks'
+description: 'How to create a SHA-256 Git repository, move an existing SHA-1 history into one with fast-export, and the exact errors you hit when the two formats meet. Every command was run on Git 2.55.'
+pubDate: 2026-10-10
+updatedDate: 2026-10-10
+tags: ['devops', 'security', 'tutorial']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+
+Git identifies every commit, file and folder by a hash, a fixed-length fingerprint of its contents. Since the beginning that hash has been SHA-1, and Git's own plans for version 3.0 say the default will switch to SHA-256.[^1] You can use SHA-256 today. This guide shows how to create a repository that uses it, how to move an existing history into one, and what stops working when a SHA-256 repository meets anything that still speaks SHA-1.
+
+Why you might want this is a separate question, and I covered it in [an earlier post on SHA-1 collisions](/posts/sha1-collision-vs-second-preimage). Short version: the attacks that broke SHA-1 do not let someone forge a commit you already trust, so migrating is not urgent for most projects. This page is only about how.
+
+Everything below was run on Git 2.55.0 (Windows build) in throwaway repositories on 2026-10-10. Where I did not test something, the text says so.[^7]
+
+## Before you start: which format is your repository?
+
+Run this inside any repository:
+
+```bash
+git rev-parse --show-object-format
+```
+
+It prints `sha1` or `sha256`. A normal repository prints `sha1`. The commit ids are the easiest way to tell the two apart by eye: a SHA-1 id is 40 hexadecimal characters, a SHA-256 id is 64.
+
+You need Git 2.29 or newer for SHA-256 repositories at all. They were marked experimental then,[^2] and a Git 2.42 release report described them as no longer an experimental curiosity.[^2] I tested only 2.55.
+
+## Step 1: create a SHA-256 repository
+
+Add one flag to `git init`:
+
+```bash
+git init --object-format=sha256 myrepo
+cd myrepo
+git rev-parse --show-object-format    # sha256
+```
+
+Git records the choice in the repository's config file. This is the whole difference on disk:
+
+```ini
+[extensions]
+	objectformat = sha256
+[core]
+	repositoryformatversion = 1
+```
+
+The `repositoryformatversion = 1` line marks a repository that uses extensions such as `objectformat`. Git versions that predate SHA-256 support cannot read such a repository.[^3]
+
+Make a commit and look at the id:
+
+```bash
+echo hello > a.txt
+git add a.txt
+git commit -m "first"
+git log --format='%H'
+# 215bbe5364ea8a50d5f7a8ba23b37a27a33fffefe31241480a75ec5b81c2d9ff   (64 characters)
+```
+
+The same file in a SHA-1 repository gave `ab98edf843a8906f1d4e1f4e925d57dc82de40de`, 40 characters. Git never mixes the two inside one repository.
+
+### Making SHA-256 the default for new repositories
+
+You do not have to type the flag every time. Both of these worked for me:
+
+```bash
+git config --global init.defaultObjectFormat sha256     # persistent
+GIT_DEFAULT_HASH=sha256 git init newrepo                 # one command only
+```
+
+I tested the first with `git -c init.defaultObjectFormat=sha256 init` and the second as written, and both produced a repository that reported `sha256`. A server-side bare repository needs its format chosen when it is created, for example `git init --bare --object-format=sha256`, which is what I used for the push test below.
+
+## Step 2: know what will not work
+
+This is the part most guides skip. A SHA-256 repository is an island, and Git tells you so with four different errors. These are the exact messages from my runs.
+
+**Cloning from a SHA-1 server.** There is no `--object-format` option on `git clone` in 2.55, so you cannot ask for a SHA-256 copy of a SHA-1 repository:
+
+```text
+$ git clone --object-format=sha256 old-repo copy
+error: unknown option `object-format=sha256'
+```
+
+**Fetching across formats.** I initialised a SHA-256 repository and pointed it at a public GitHub repository, `octocat/Hello-World`. Reading the remote's refs worked, so the server was reachable, but the fetch failed:
+
+```text
+$ git fetch origin
+fatal: mismatched algorithms: client sha256; server sha1
+```
+
+The reverse also fails: a SHA-1 repository fetching from a SHA-256 one prints `client sha1; server sha256`.
+
+**Pushing to a server of the other kind.** A SHA-256 repository pushing to a SHA-1 bare repository:
+
+```text
+fatal: the receiving end does not support this repository's hash algorithm
+```
+
+**Submodules.** Adding a SHA-256 repository as a submodule of a SHA-1 one is refused:
+
+```text
+error: cannot add a submodule of a different hash algorithm
+fatal: Failed to add submodule 'sub'
+```
+
+(For the submodule error I used a local file path, which also needs `-c protocol.file.allow=always`. That setting is Git's default block on local-path transport and has nothing to do with hashes, so do not mistake it for part of the problem.)
+
+Git's own design notes for the transition list more limits: SHA-256 repositories cannot be read by older Git versions, and features such as signatures, notes and shallow clones need extra care.[^3] I did not test those.
+
+<Mermaid
+  caption="A repository only talks to repositories of the same format. The only bridge in this guide is rewriting the history into a new repository, so every commit gets a new id."
+  label="Diagram. A SHA-1 repository and a SHA-256 repository are connected by clone, fetch, push and submodule arrows all marked as failing. A single arrow through fast-export and fast-import creates a new SHA-256 repository with new commit ids."
+  code={`
+flowchart LR
+    A["SHA-1 repository<br/>40-character ids"] -- "clone, fetch, push,<br/>submodule: all refused" --- B["SHA-256 repository<br/>64-character ids"]
+    A -- "git fast-export<br/>| git fast-import" --> C["new SHA-256 repository<br/>same content, new ids"]
+`}
+/>
+
+## Step 3: move an existing history into a SHA-256 repository
+
+Git has no command that converts a repository in place. The design notes describe a conversion tool as a goal rather than something finished, and the one third-party guide I found agrees that the two formats cannot push to or fetch from each other.[^3][^4] What works today is exporting the history as a text stream and replaying it into a fresh repository, which recomputes every hash.
+
+From a SHA-1 repository:
+
+```bash
+# 1. make an empty SHA-256 repository next to it
+git init --object-format=sha256 ../new
+
+# 2. replay all branches and tags into it
+git fast-export --all | git -C ../new fast-import
+
+# 3. check out a branch so you have working files
+cd ../new
+git checkout -f main
+```
+
+`git fast-export --all` writes every branch and tag as a stream of commands, and `git fast-import` reads that stream and creates the objects. Because the new repository is SHA-256, every object is hashed again with the new function.
+
+I built a small test history first: four commits, a branch, a merge commit, an annotated tag (`v1`) and a lightweight tag (`light`). After the replay:
+
+- **Content was identical.** `diff -r` over the two working directories printed nothing. (My first comparison showed differences, but the cause was line endings: Windows Git rewrote them in the new repository. Setting `core.autocrlf false` in the new repository removed the difference. If you are on Windows and your diff looks wrong, check this before suspecting the migration.)
+- **Metadata was identical.** Author names, emails, timestamps and commit messages matched for every commit, compared with `git log --format='%an|%ae|%at|%s'`.
+- **The shape of the history was identical.** The merge, both parents, the branch and both tags were all present.
+- **Every commit id changed.** The merge commit was `7e45f2ab58ed6bd2e33ec3a482e2dba8c44b6616` before and `aba24c16fed42dee3b031947ff358c0ff7f491f3eef383d2fdb2e203bd359395` after. This is unavoidable: an id is a hash of the content including the parent's id, so changing the hash function changes all of them.
+- **The annotated tag survived as an annotated tag,** with a new tag object id, and the lightweight tag pointed at the new merge commit.
+
+Then I pushed the result into a bare SHA-256 repository and cloned it back, and everything arrived intact. That proves the new repository works as a normal remote. I did that with local paths only, so it says nothing about hosting services.
+
+### Check your own migration
+
+Do this before you delete anything:
+
+```bash
+# same number of commits on every branch?
+git -C old rev-list --count --all
+git -C new rev-list --count --all
+
+# same files?
+git -C old checkout -q main && git -C new checkout -q -f main
+diff -r --exclude=.git old new
+
+# same tags?
+git -C old tag | sort > /tmp/old-tags
+git -C new tag | sort > /tmp/new-tags
+diff /tmp/old-tags /tmp/new-tags
+```
+
+## What the rewrite breaks
+
+Rewriting the ids has consequences that live outside the repository:
+
+- **Anything that mentions a commit id.** Issue comments, pull request links, changelogs, documentation and CI configuration that point at old ids will point at nothing. You can keep a map of old to new ids if you need one, but Git will not make it for you.
+- **Signatures.** A signature covers the exact bytes of the commit, so it cannot survive a rewrite. `git fast-export` has `--signed-tags` and `--signed-commits` options that choose what to do with signed objects.[^5] I did not create signed history, so I did not test what each mode produces. Read the documentation for your version and try it on a copy.
+- **Other repositories that depend on this one.** A SHA-1 repository that uses yours as a submodule stores your old commit id and cannot link to a SHA-256 repository at all, as shown above.
+- **Everyone's clones.** Existing clones are SHA-1 and cannot fetch from the new repository, so every contributor needs a fresh clone.
+- **Large repositories.** I used a four-commit repository. I did not time the replay on a big history, and I did not test Git LFS.
+
+## Where can you host it?
+
+The honest answer is that I could not confirm a current, first-party answer for the big hosts, and you should check before planning around one.
+
+- **GitHub:** the test above shows its public repository served SHA-1 to a SHA-256 client. That is evidence for what that repository uses, not a statement of what GitHub supports in general. I found no first-party announcement of SHA-256 support, and one October 2026 third-party guide says there is none.[^4]
+- **GitLab:** its engineering blog said in 2023 that the Gitaly storage layer supports SHA-256 repositories while other parts of the application still needed work, and a later issue describes the capability as behind a feature flag.[^6] I did not verify the current state.
+- **Self-hosted:** a plain Git server over SSH or a local path works, as the bare-repository test above shows.
+
+If your team lives on a hosted service that does not support SHA-256, the practical answer today is to wait. The migration steps will still work later.
+
+## Quick reference
+
+```bash
+git rev-parse --show-object-format               # sha1 or sha256
+git init --object-format=sha256 repo             # new SHA-256 repository
+git config --global init.defaultObjectFormat sha256   # make it the default
+git fast-export --all | git -C new fast-import  # replay history into a new repo
+```
+
+| You try to | Result in Git 2.55 |
+|---|---|
+| clone with `--object-format` | `unknown option` |
+| fetch SHA-1 from SHA-256 or the reverse | `mismatched algorithms: client X; server Y` |
+| push SHA-256 to a SHA-1 server | `the receiving end does not support this repository's hash algorithm` |
+| add across formats as a submodule | `cannot add a submodule of a different hash algorithm` |
+
+## References
+
+[^1]: Git project, [Breaking Changes](https://git-scm.com/docs/BreakingChanges), which lists the planned Git 3.0 default switch from SHA-1 to SHA-256 together with the other changes bundled in that release.
+[^2]: DevClass, [Git 2.42 released: SHA-256 repositories no longer an experimental curiosity](https://devclass.com/2023/08/22/git-2-42-released-sha-256-repositories-no-longer-an-experimental-curiosity/) (2023). Git 2.29 introduced the experimental support ([Phoronix, 2020](https://www.phoronix.com/news/Git-2.29-With-SHA-256)).
+[^3]: Git project, [hash function transition](https://git-scm.com/docs/hash-function-transition), the design document for the transition. It describes `extensions.objectFormat`, states that SHA-256 repositories cannot be read by older Git versions, and lists a general conversion tool as a goal.
+[^4]: DevToolLab, [Git SHA-256](https://devtoollab.com/blog/git-sha256) (October 2026). A third-party guide, used here only as a second opinion that the two formats cannot push to or fetch from each other and that GitHub had announced no SHA-256 support. Verify against first-party sources.
+[^5]: Git project, [`git fast-export` documentation](https://git-scm.com/docs/git-fast-export), for the `--signed-tags` and `--signed-commits` options. My Git 2.55.0 lists both in its usage output.
+[^6]: GitLab, [SHA256 support in Gitaly](https://about.gitlab.com/blog/sha256-support-in-gitaly/) (August 2023). Written as of 2023, so it may be out of date.
+[^7]: Methodology. All commands run 2026-10-10 with Git 2.55.0.windows.4 in temporary repositories, with the global Git config disabled (`GIT_CONFIG_GLOBAL=/dev/null`) so settings did not leak in. The cross-format fetch against GitHub used `git init --object-format=sha256` plus `git fetch` from `https://github.com/octocat/Hello-World.git`, after `git ls-remote` returned its HEAD. Local-path operations used `-c protocol.file.allow=always`. The migration test history had four commits, one branch, one merge, one annotated tag and one lightweight tag.
