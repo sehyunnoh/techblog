@@ -42,7 +42,8 @@ import { withBase } from '../utils/url';
 
     <ul>
       {SOCIALS.map((s) => <li><a href={s.href} rel="me noopener">{s.label}</a></li>)}
-      <li><a href={withBase('/rss.xml')}>RSS feed</a></li>
+      <li><a href={withBase('/rss.xml')}>RSS feed (Posts)</a></li>
+      <li><a href={withBase('/guides/rss.xml')}>RSS feed (Guides)</a></li>
     </ul>
   </div>
 </BaseLayout>

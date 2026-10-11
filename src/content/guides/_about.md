@@ -27,5 +27,6 @@ place as the thing they explain changes (bump `updatedDate` when you do).
 - Figure/Chart/Mermaid visuals are encouraged when they clarify a mechanism,
   not required on every entry the way they are on Posts.
 - No OG-image generation per entry (falls back to the site's default OG
-  image) and guides are not included in `rss.xml`. Both can be added later
-  if that stops being the right call.
+  image). Guides have their own feed at `/guides/rss.xml`, separate from the
+  Posts feed. Per-entry OG images can be added later if that stops being the
+  right call.

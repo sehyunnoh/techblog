@@ -93,6 +93,12 @@ const jsonLd =
   title={SITE.title}
   href={new URL(withBase('/rss.xml'), Astro.site)}
 />
+<link
+  rel="alternate"
+  type="application/rss+xml"
+  title={`${SITE.title} · Guides`}
+  href={new URL(withBase('/guides/rss.xml'), Astro.site)}
+/>
 <link rel="sitemap" href={withBase('/sitemap-index.xml')} />
 
 <meta property="og:type" content={type} />
