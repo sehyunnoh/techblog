@@ -1,0 +1,164 @@
+---
+title: "A One-Line Git Commit Is 334 Bytes of Data and 17,036 Bytes of Disk"
+description: "A popular note says tiny Git commits cost kilobytes and big ones about 10% of the file. I repeated the tests: the kilobytes are filesystem blocks, and the 10% is only the first copy."
+pubDate: 2026-10-11
+tags: ['devops', 'systems', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+A short note on ratfactor.com, "How big is a Git commit?", made the Hacker News front page this week.[^1] Its author ran a handful of small experiments and landed on a comfortable conclusion: Git is extremely efficient, tiny commits carry a few kilobytes of overhead, and bigger commits end up storing somewhere between 10% and 50% of the original file.
+
+I have a copy of Git 2.55 and a Linux filesystem on this machine, so I repeated the experiments and added the ones the note skipped.[^6] The short version is that the note's numbers are real in shape but misleading in what they seem to say. A one-line commit holds about 334 bytes of data and occupies about 17,000 bytes of disk. And the "10%" for a big file is the cost of the first copy only. The second commit that touches the same file can cost another full copy, until Git packs its objects.
+
+## What a commit writes
+
+A Git repository is, at the bottom, a key-value store. When you commit, Git writes **objects** into the `.git/objects` directory, and each object is named by a hash of its contents. There are three kinds that matter here:
+
+- a **blob**, which holds the contents of one file,
+- a **tree**, which is a directory listing that points at blobs and other trees,
+- a **commit**, which holds the message, the author, the time, a pointer to the root tree and a pointer to the parent commit.
+
+Change one line in one file at the top level, and Git writes three new objects: the new blob, a new tree to point at it, and the commit. Each object is compressed with zlib and stored as its own file, in a subdirectory named after the first two characters of its hash. Objects stored this way are called **loose**.[^2]
+
+<Mermaid
+  caption="One commit that changes one file writes three small files. Later, git gc or automatic maintenance folds loose objects into a pack, and a pack is also what push and fetch move over the wire."
+  label="Flow diagram. Edit and commit write a blob, a tree and a commit as three loose files. Maintenance or gc packs them into one packfile with an index, using deltas between similar objects"
+  code={`
+flowchart LR
+    A["git commit<br/>one line changed"] --> B["blob<br/>file contents"]
+    A --> C["tree<br/>directory listing"]
+    A --> D["commit<br/>message, parent, tree"]
+    B --> E["3 loose files<br/>objects/ab/cdef..."]
+    C --> E
+    D --> E
+    E -->|"git gc or<br/>auto maintenance"| F["packfile + index<br/>deltas between<br/>similar objects"]
+`}
+/>
+
+A **packfile** is Git's other storage format. It holds many objects in one file, and it can store an object as a **delta**, meaning "the same as that other object, except for these changes." That is the feature that makes a repository with a long history much smaller than the sum of its snapshots.[^2][^3]
+
+The ratfactor note measured loose objects only, and its author says so.[^1] Everything below is therefore split into the loose case and the packed case.
+
+## Tiny commits: three ways to measure the same thing
+
+I started with the simplest repository I could build: one file, three commits, on an ext4 filesystem inside WSL (4,096-byte blocks), with Git 2.55.0. The loose object files for one commit came to roughly this, in bytes:
+
+| Object | SHA-1 repo | SHA-256 repo |
+|---|---|---|
+| commit | about 135 | about 160 |
+| tree | 48 | about 62 |
+| blob (4-byte file) | 19 | 19 |
+| **total file bytes** | **about 200** | **about 240** |
+
+So the data Git actually has to remember for a tiny commit is a couple of hundred bytes. The SHA-256 repository is a little larger because every hash it stores is 32 bytes instead of 20.
+
+The ratfactor note reports roughly 8.7 KB of growth per tiny commit, and about 17 KB when the repository had a directory of 50 files.[^1] I could not reproduce those figures. What I got depends entirely on how I measured:
+
+- Summing the sizes of the files Git wrote, `.git` grew by about 450 bytes per commit. That includes the objects plus a few log and ref updates.
+- Asking the filesystem how much space the same files occupy, `du -sk` showed `.git` growing by 24 KiB per commit.
+
+Both are correct. They answer different questions. A filesystem hands out space in blocks of 4,096 bytes, so a 19-byte file occupies a whole block, and every new object also tends to need a new subdirectory, because the first two hex characters of a hash are nearly always different. Three objects plus three directories is six blocks, which is 24 KiB, for about 200 bytes of content.
+
+To see this at a more realistic scale I made a 50-line file and committed a change to one line, 200 times in a row, in both hash formats. I turned off automatic maintenance for this run so every object stayed loose, then ran `git gc` and measured again.
+
+<Chart
+  type="bar"
+  height={300}
+  format="plain"
+  caption="Cost of one single-line commit in bytes. The data in the loose files is 334 bytes (SHA-1). The same files occupy 17,036 bytes of disk. After git gc the whole history costs 301 bytes per commit including the pack index."
+  label="Bar chart. SHA-1: 334 bytes of loose file data per commit, 17036 bytes on disk when loose, 301 bytes per commit packed. SHA-256: 374, 17158 and 378"
+  labels={['Loose, file bytes', 'Loose, space on disk', 'After git gc']}
+  series={[
+    { name: 'SHA-1', data: [334, 17036, 301] },
+    { name: 'SHA-256', data: [374, 17158, 378] }
+  ]}
+  yTitle="bytes per commit"
+/>
+
+The gap between the first two bars is about 50 times, which is why the two outer bars barely show up. The third bar is the interesting one: once the objects are packed, a one-line commit costs about as much as the data it contains. Packing is also where the two hash formats separate a little (301 against 378 bytes per commit), because both the pack and its index store 32-byte hashes instead of 20-byte ones.
+
+If you read "tiny commits carry kilobytes of overhead" as a statement about Git's design, it is not supported by these numbers. The kilobytes are the cost of storing hundreds of small files on a block-based filesystem, and they go away when Git packs.
+
+## Big files: the 10% is one copy
+
+The note's second finding is about large files. A 16 MB text file committed into a fresh repository took about 1.6 MB, around 10% of its size, which the author called impressive.[^1] That is the zlib compression ratio, and it depends completely on what is inside the file. I made five 16 MB-class inputs and committed each once:
+
+<Chart
+  type="bar"
+  horizontal={true}
+  height={300}
+  format="percent"
+  caption="Size of the loose object as a percentage of the file, for one commit. Compression depends on the content, from 0.6% for a repeated line to 100% for random bytes."
+  label="Bar chart of loose object size as a percentage of the original file. Python source text 28.3, executables 39.5, random bytes 100.0, an already gzipped file 99.7, one line repeated 0.6"
+  labels={['Python source (10.7 MB)', 'Executables (16.4 MB)', 'Random bytes (16.4 MB)', 'Gzipped text (2.4 MB)', 'One line repeated (16.4 MB)']}
+  series={[{ name: 'loose object size as % of file', data: [28.3, 39.5, 100.0, 99.7, 0.6] }]}
+  xTitle="% of original size"
+/>
+
+My text sample was the concatenated Python standard library, which compressed to 28%, not 10%. The note's 10% came from a Linux kernel header file, which is evidently friendlier input. Neither number is wrong. The practical reading is that the percentage tells you about the file, not about Git. Anything already compressed (images, archives, most video) is stored at essentially full size, and a repeated line shrinks to almost nothing.
+
+Then I did the thing the note did not: I appended one line to each file and committed again.
+
+| Input | File size (bytes) | Two commits, loose (bytes) | Two commits, after git gc (bytes) |
+|---|---|---|---|
+| Python source | 10,656,652 | 6,021,761 | 2,438,449 |
+| Executables | 16,415,223 | 12,976,123 | 5,582,912 |
+| Random bytes | 16,415,223 | 32,840,819 | 16,422,206 |
+| Gzipped text | 2,408,600 | 4,805,108 | 2,404,006 |
+| One line repeated | 16,415,223 | 191,457 | 41,819 |
+
+A loose repository stores the second version as a complete second object. Edit one line of the Python source and you pay another 3.0 MB. After `git gc --aggressive`, the same two commits together fit in 2.4 MB, which is less than a single loose copy. The random-bytes row shows the delta mechanism most clearly: 32.8 MB loose becomes 16.4 MB, which is one copy plus about 2 KB for the appended line and the extra objects.
+
+So "Git stores about 10% of the file" holds for the first commit of a compressible file. As a guide to the cost of that file's history it fails in both directions. Loose, every edit costs another full copy. Packed, an edit costs a small delta, far less than 10%.
+
+## When do loose objects become a pack?
+
+If packing matters this much, it is worth knowing when it happens without you asking. The `git gc` manual documents `gc.auto` with a default of 6700 loose objects.[^4] In my runs on Git 2.55 the repack came much earlier. In a repository with default settings, I committed one change at a time and watched for the first pack. It appeared at commit 85, when there were about 256 loose objects, through `git maintenance run --auto` calling `git repack -d -l --cruft ... --write-midx`.
+
+The 2.55 manual for `git maintenance` describes a geometric repacking strategy with a threshold of 100 loose objects for its own task, which may be related.[^5] I did not establish which rule fired, so I will not claim it. What I can say is that in a normal repository you do not live in the all-loose state for long, which is why disabling automatic maintenance was necessary for the loose measurements above. On my first attempt I left it on, and the numbers were a mix of loose and packed objects.
+
+Pushes and fetches also move packs, not loose files.[^2] So the size your teammates download is closer to the packed figures than to the loose ones.
+
+## A real repository: this blog
+
+For a check against real content, I cloned the repository that holds this blog (61 commits of posts, components and config) and looked at its pack:
+
+- 473 objects in one pack of 450.9 KiB, which averages 7.4 KiB per commit, but that includes all file contents, not just changes.
+- 154 blobs totalling 1,690,337 bytes uncompressed took 396,449 bytes in the pack (23%).
+- 61 commit objects averaged 869 bytes raw and 543 bytes packed.
+- Running `git gc --aggressive` on top of that saved 0.4 KiB. The repository had already been packed well.
+
+The commit objects themselves, the part people picture when they ask how big a commit is, add up to 33 KB of the 451 KB. The file contents are about 88% of the pack.
+
+## Where this can mislead
+
+**One filesystem.** All the disk-space numbers come from ext4 with 4,096-byte blocks inside WSL. NTFS, APFS, ZFS and network filesystems allocate space differently, and some store small files compactly. The 17,000-byte figure is a property of this setup, not of Git. The 334-byte figure and the packed figures are not.
+
+**Synthetic inputs.** The tiny-commit test edits one line of a 50-line file. The large-file test appends one line. A real change in the middle of a file, a reformatted file or a rename can delta differently, and I did not measure those.
+
+**I did not reproduce the original numbers.** My `du -sb` run gave about 450 bytes of growth per commit, not 8.7 KB. I cannot tell whether the difference is the filesystem, the way the sizes were summed, or something else. The note's figures were read for me by a page summarizer, so check the original before quoting them.[^1]
+
+**Not measured: clone and push sizes.** I measured what sits in `.git`. I did not measure bytes over the network, and hosting services keep their own copies in their own formats.
+
+**Large binary history.** Delta compression works well for appended text. For files whose bytes shuffle on every save, such as many image and document formats, a pack can do much less, and I tested only random bytes, executables and a gzip.
+
+## Takeaways
+
+- **A small commit is hundreds of bytes of data.** In my tests a one-line change was 334 bytes in loose files and about 301 bytes per commit in a pack.
+- **Loose objects waste disk, not data.** The same commit occupied about 17,000 bytes because every object is its own file in its own block-sized allocation. Measure with the tool that matches your question: summed file sizes for what Git stores, `du` for what the disk gives up.
+- **The compression ratio belongs to the file.** 28% for Python source, 39% for executables, 100% for random and already-compressed data, 0.6% for a repeated line.
+- **Do not multiply one commit's size by the number of commits.** Loose, the second edit of a 10.7 MB file cost another 3.0 MB. Packed, both commits together cost 2.4 MB.
+- **If a repository looks too big, count packs, not commits.** Run `git count-objects -v` and look at `count` (loose) against `size-pack`. For a one-time cleanup, `git gc` is what turns the first into the second.
+
+## References
+
+[^1]: ratfactor.com, [How big is a Git commit?](https://ratfactor.com/cards/git-commit-size). Source of the 8.7 KB and 17 KB per-commit figures, the roughly 10% result for a 16.4 MB header file, and the statement that only loose objects were used. The page was read through a summarizer, so numbers should be checked against the original.
+[^2]: Pro Git, [Git Internals: Git Objects](https://git-scm.com/book/en/v2/Git-Internals-Git-Objects) and [Packfiles](https://git-scm.com/book/en/v2/Git-Internals-Packfiles). Describes blobs, trees, commits, loose storage with zlib, and how packfiles use deltas.
+[^3]: Git documentation, [pack-format](https://git-scm.com/docs/pack-format). The packfile and index layout, including delta entries.
+[^4]: Git documentation, [git-gc](https://git-scm.com/docs/git-gc). Defaults of 6700 for `gc.auto` and 50 for `gc.autoPackLimit`.
+[^5]: Git documentation, [git-maintenance](https://git-scm.com/docs/git-maintenance), and the `git help maintenance` page for Git 2.55.0 on my machine, which lists the geometric repacking strategy and a default of 100 for `maintenance.geometric-repack.auto`.
+[^6]: Methodology. Measured 2026-10-11 with Git 2.55.0 on Ubuntu 24.04 under WSL (kernel 6.18.40.1) on an ext4 filesystem with 4,096-byte blocks. Tiny commits: one 4-byte file, three commits, then 200 single-line edits to a 50-line file in a repository created with `--object-format=sha1` and again with `sha256`, with `gc.auto=0` and `maintenance.auto=false` so objects stayed loose until a manual `git gc`. Loose cost is the sum of file sizes under `.git/objects`, or `du -sk` for allocated space. Packed cost is the `.pack` plus `.idx` files divided by commit count. Large files: five inputs (the Python 3.12 standard library sources truncated to 16,415,223 bytes, which came to 10,656,652; `/usr/bin` executables; random bytes; a gzip of the text; one line repeated), each committed once, then with one line appended, then `git gc --aggressive`. The blog repository was cloned with `git clone --no-local` and measured with `git cat-file --batch-all-objects`. The first-pack observation used a default-configured repository and `GIT_TRACE2_EVENT`. Source: [git-commit-size-bench.sh](/files/git-commit-size-bench.sh).
