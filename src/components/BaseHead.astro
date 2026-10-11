@@ -27,6 +27,9 @@ const {
   noindex = false,
 } = Astro.props;
 
+// Runs before the Umami tracker. Kept as a string so Astro emits it verbatim.
+const umamiOptOut = `try{var m=location.search.match(/[?&]notrack=([01])/);if(m){if(m[1]==='1')localStorage.setItem('umami.disabled','1');else localStorage.removeItem('umami.disabled');}}catch(e){}`;
+
 // The sitemap and every built route are trailing-slash URLs (Astro emits
 // dist/foo/index.html for a page at /foo). The canonical tag has to name that
 // same exact URL, not a variant of it, even though trailingSlash: 'ignore'
@@ -159,6 +162,22 @@ const jsonLd =
 }
 {
   UMAMI_WEBSITE_ID && (
-    <script is:inline defer src={UMAMI_SCRIPT_URL} data-website-id={UMAMI_WEBSITE_ID} />
+    <>
+      {/*
+        The site owner's own visits would otherwise count as readers. Open any
+        page once with ?notrack=1 to set Umami's documented opt-out flag in
+        this browser, and ?notrack=0 to clear it. This runs before the
+        tracker loads, which reads the flag itself.
+      */}
+      <script is:inline set:html={umamiOptOut} />
+      {/* data-domains: report only from the real hostname, never localhost or a preview host. */}
+      <script
+        is:inline
+        defer
+        src={UMAMI_SCRIPT_URL}
+        data-website-id={UMAMI_WEBSITE_ID}
+        data-domains={Astro.site?.hostname}
+      />
+    </>
   )
 }
