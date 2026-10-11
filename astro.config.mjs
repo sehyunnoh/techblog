@@ -19,11 +19,16 @@ function loadLastmods() {
     ['src/content/blog', '/posts/'],
     ['src/content/guides', '/guides/'],
   ];
+  // Listing pages change whenever their newest entry does, so they take that
+  // entry's date. The integration's default (the build date) would make every
+  // build look like an update to the home page and both indexes.
+  /** @type {Record<string, string>} */
+  const newest = { '/posts/': '', '/guides/': '' };
   for (const [dir, routePrefix] of sources) {
     for (const file of readdirSync(dir)) {
       if (file.startsWith('_') || !/\.mdx?$/.test(file)) continue;
       const raw = readFileSync(`${dir}/${file}`, 'utf-8');
-      const frontmatter = raw.match(/^---\n([\s\S]*?)\n---/)?.[1];
+      const frontmatter = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1];
       if (!frontmatter || /draft:\s*true/.test(frontmatter)) continue;
       const date =
         frontmatter.match(/updatedDate:\s*['"]?([\d-]+)/)?.[1] ??
@@ -31,8 +36,14 @@ function loadLastmods() {
       if (!date) continue;
       const slug = file.replace(/\.mdx?$/, '');
       map.set(`${routePrefix}${slug}/`, date);
+      if (date > newest[routePrefix]) newest[routePrefix] = date;
     }
   }
+  if (newest['/posts/']) {
+    map.set('/', newest['/posts/']);
+    map.set('/posts/', newest['/posts/']);
+  }
+  if (newest['/guides/']) map.set('/guides/', newest['/guides/']);
   return map;
 }
 
