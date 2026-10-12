@@ -1,0 +1,144 @@
+---
+title: "A Hostile Claude Code Mod and a Harmless One Print the Same validate Output"
+description: "claude plugin validate rejects every way I tried to hide a mods API call, and the runtime blocks raw JavaScript escapes. But its output is a capability list, not a verdict."
+pubDate: 2026-10-12
+tags: ['security', 'ai', 'deep-dive', 'benchmark']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+Claude Code now lets you install **mods**: plugins whose JavaScript runs inside the Claude Code process, with your permissions, and can watch every prompt and tool call. Anthropic's documentation is blunt about the risk. A mod can read your files and secrets, approve tool calls on your behalf, and spend your usage, and it is not sandboxed.[^1] The suggested precaution before installing one is a command, `claude plugin validate`, which reads the mod's source and lists what it does without running it.[^2]
+
+That sounds like a safety check, so I tried to break it. I wrote 16 small mods that hide their behavior in different ways, ran the validator on each, then loaded the interesting ones to see what the runtime allows. I also ran the validator over 27 mods published on GitHub. The validator held up better than I expected. It also turned out to answer a smaller question than the one you probably want answered.
+
+## What a mod is, and what validate prints
+
+A mod is a folder with a manifest and a JavaScript file that registers **hooks**, which are functions Claude Code calls when something happens: a tool is about to run, a prompt is submitted, the spinner is drawn.[^1] To do anything beyond pure computation, a hook calls the **mods API**, written `$` in the code: `$.fs.read` reads a file, `$.http.fetch` makes a network request, `$.process.run` starts a program, `$.env.get` reads an environment variable.
+
+Running `claude plugin validate ./some-mod` prints two lines worth reading:
+
+```text
+  ❯ ./register.js hooks: session.start, tool.call, ui.render{component=Pane}
+  ❯ ./register.js calls: $.fs.read, $.http.fetch, $.store.set, $.ui.open
+```
+
+The first line is the events the mod listens to. The second is the mods API methods its code calls. The documentation says a mod that uses the API "in a way this command can't read" is refused at load time, which is a strong claim: if true, the `calls:` line cannot be dodged.[^3] That is the claim I tested.
+
+<Mermaid
+  caption="Two independent layers sit between a mod's source and your machine. The validator reads source text. The runtime decides what the code can reach once it is loaded. The mods API is the only door in the second layer."
+  label="Flow diagram. Mod source goes through validate, a static check that rejects unreadable API use and prints hooks and calls. If it loads, the hooks module runs in a restricted runtime with no process, require, fetch or eval, and its only door out is the mods API, which acts with the user's permissions"
+  code={`
+flowchart LR
+    A["Mod source<br/>register.js"] --> B["Layer 1: validate<br/>static text analysis"]
+    B -->|"unreadable API use"| X["refused at load"]
+    B -->|"hooks and calls lines"| C["Layer 2: runtime<br/>no process, require,<br/>fetch, eval"]
+    C --> D["mods API<br/>$.fs, $.http,<br/>$.process, $.env"]
+    D --> E["your files, network,<br/>programs, secrets"]
+`}
+/>
+
+## Layer 1: can the validator be tricked?
+
+I generated one mod per technique, so each file was a few lines long, and ran `claude plugin validate` on all of them (Claude Code 2.1.296, Windows 11).[^8] The control case calls four methods in the plain, documented way. Everything else tries to call something without the validator noticing.
+
+| Technique | Result |
+|---|---|
+| Plain calls: `$.fs.read`, `$.http.fetch`, `$.process.run`, `$.env.get('X')` | Listed correctly, plus `env reads: CANARY_SECRET` |
+| Pass `$` to a helper function | Listed as `$.process.run (via h)` |
+| `const ui = $.ui` (alias) | Error: "`$.ui` is used as a value" |
+| `$[n].read('x')` (computed access) | Error: "a computed or optional member access on `$`" |
+| `const r = $.fs.read` (method as value) | Error: "used as a value ... instead of called" |
+| `$.env.get(k)` with a variable name | Error: takes a literal name, so reads can be listed |
+| `import('node:fs')` | Error: dynamic import |
+| `import fs from 'node:fs'` | Error: only relative paths and `claude-code` |
+
+Six of six attempts to hide a mods API call were rejected outright, and the one indirect pattern that is allowed (a helper) is reported with the helper's name. The environment variable rule is the nicest detail. Because `$.env.get` must take a literal, the validator can print every variable a mod reads, and a mod that builds the name with `join` simply fails.
+
+So far the documentation's claim holds. But the mods API is not the only thing JavaScript can reach.
+
+## Layer 2: what about plain JavaScript?
+
+Next I wrote eight mods that skip the API and reach for ordinary JavaScript capabilities: `process.env`, `globalThis.fetch`, `eval`, `new Function`, the `constructor` trick that turns a function into a way to build code from a string, `process.getBuiltinModule('fs')`, `require` and `Bun`. The validator passed all eight, and for all eight it printed `calls: nothing on $`.
+
+That would be alarming if the code ran. So I loaded a probe mod, with a fake secret in the environment (`CANARY_SECRET=canary-not-a-real-secret-12345`), and had it report what it could see. The run used `claude -p "/context"`, which is handled locally, and I checked `total_cost_usd: 0` in the JSON output.
+
+| Probe | Result at runtime |
+|---|---|
+| `typeof process`, `require`, `Bun`, `Deno`, `fetch`, `globalThis.fetch` | all `undefined` |
+| `process.env.CANARY_SECRET` | `process is not defined` |
+| `eval('1+1')`, `new Function(...)`, `constructor('return process')()` | `Code generation from strings disallowed for this context` |
+| `process.getBuiltinModule('fs').writeFileSync(...)` | `process is not defined`, and the target file was not created |
+
+The hooks module runs in a stripped-down JavaScript environment, and the reference documents the time and size limits it works under.[^7] It has no `process`, no `require`, no `fetch`, and it cannot compile code from strings. That is why the validator can afford to ignore those names: they do nothing. Whatever a mod does to the outside world has to go through `$`, which is exactly what the `calls:` line lists. Two layers, each covering a gap the other would leave.
+
+I looked for a hole here and did not find one. That is a statement about eight techniques on one version, not a proof, and I come back to it below.
+
+## What the validator cannot see: intent
+
+Here is the part the documentation does state, but that is easy to read past. The `calls:` line lists the methods a mod calls. It does not list the arguments.
+
+I wrote two mods. The first reads `package.json` and asks the GitHub API for repository metadata, the sort of thing a status-bar mod does. The second assembles the path to Claude's credentials file with `join` and sends its contents in a `POST` to a made-up domain. I did not run either one. The validator output for both was identical, character for character:
+
+```text
+  ❯ ./register.js hooks: session.start
+  ❯ ./register.js calls: $.fs.read, $.http.fetch
+✔ Validation passed
+```
+
+The validator is not wrong here. It reports what the mod can do, and both mods can read files and make network requests. But `Validation passed` sits right under that output, and a green line invites the reading "this is fine." What it passed was the format, not the behavior.
+
+To see whether you could tell them apart by reputation, I validated every mod I could find in three public repositories: Anthropic's own sample mods, a 23-mod collection and a GitHub status-bar mod, 27 in all.[^4][^5][^6] I did not read their code, and I have no reason to think any is hostile. I only wanted the distribution of what they ask for.
+
+<Chart
+  type="bar"
+  horizontal
+  height={320}
+  format="plain"
+  caption="Number of the 27 public mods whose calls line contains each sensitive method. The top bar counts mods with at least one of them (mcp.call included)."
+  label="Horizontal bar chart of 27 public mods. process.run or process.spawn: 16. At least one sensitive call: 19. env.get or env.set: 10. http.fetch: 4. model.complete: 4. fs.write: 3. settings.read: 2"
+  labels={['Any sensitive call', 'process.run / spawn', 'env.get / set', 'http.fetch', 'model.complete', 'fs.write', 'settings.read']}
+  series={[{ name: 'Mods (of 27)', data: [19, 16, 10, 4, 4, 3, 2] }]}
+  valueLabels
+/>
+
+Sixteen of the 27 start programs. If you treated `$.process.run` as a red flag, you would flag 59% of the mods in this sample, and I have no basis to call most of them anything but ordinary. Nineteen of 27, 70%, ask for at least one of process, network, environment, settings, file write, model or MCP access. The signal that matters is rarely which methods appear, and almost always what goes into them.
+
+## A policy built on the same list
+
+This matters beyond personal caution, because the list is also an input to enforcement. The administrator documentation includes an example policy mod that receives the same data as the validator, in an event called `plugin.register`, and refuses any user's mod whose code calls `process.run` or `process.spawn`.[^3] That is a legitimate control, and it works as documented. It is also, on my sample, a rule that would have refused 16 of 27 mods.
+
+The documentation also notes one limit that applies to any such list. Deny rules for Claude's own tool calls do not cover a mod's `$.fs` and `$.process` calls: with `Read(.env)` denied, a mod can still read that file with `$.fs.read`.[^3] The `calls:` line is accurate about this. It just tells you the door exists, not who walks through it.
+
+## Where this can mislead
+
+**One version, one OS.** Everything ran on Claude Code 2.1.296 on Windows 11. The documentation says events and methods can change between releases, and the validator's rules are exactly the kind of thing that does.[^2]
+
+**Sixteen techniques is a small attack surface.** I tested the ways I could think of to hide an API call or reach a JavaScript capability. Rejecting all of them says the obvious tricks fail. It does not say a determined attacker has no path, and I did not try to find one beyond these. If you find a mod that does something its `calls:` line does not show, the right place to report it is Anthropic, not a blog comment.
+
+**The runtime probe ran inside one hook.** I loaded the probe through `--plugin-dir` and read what a `session.start` hook could see in a non-interactive session. Other hooks, the interactive terminal and the Desktop app were not tested.
+
+**The sample of 27 is not the population.** It covers three repositories that turned up in a search, and I counted `validate` output only. I did not read the code, so I cannot say which of the process or network calls are benign.
+
+**Two mods were never run.** The matching-output pair is a static result. I did not execute the hostile one, and I would not suggest you do.
+
+## Takeaways
+
+- **`validate` is a good inventory and a poor verdict.** It reliably lists the mods API methods, hooks and environment variables a mod uses, and it refuses code that tries to hide them. Read it as "what could this mod do?" and never as "is this mod safe?"
+- **The two layers cover each other.** In my tests the validator rejected 6 of 6 attempts to obscure API use, and the runtime blocked 8 of 8 raw JavaScript escapes that the validator let through.
+- **Arguments are where the risk is, and the validator does not print them.** A file read of `package.json` and a file read of a credentials file produce the same line. Before installing a mod from someone you do not know, open its source and read the paths and URLs.
+- **Do not make `process.run` a blanket alarm.** In this sample, 59% of mods call it. Policies keyed on method names alone will block most useful mods or train people to ignore the warning.
+- **The cheapest safeguard is still the documented one.** Install from authors you trust, run `validate` on a clone before you load it, and know that `--safe-mode` turns installed mods off for a session.[^1]
+
+## References
+
+[^1]: Anthropic, [Mods overview](https://code.claude.com/docs/en/plugins/mods/overview). Defines a mod, lists what a mod can reach (files, secrets, every prompt and tool call, approving tool calls, spending usage), states mods are not sandboxed, and documents `--safe-mode` and the `validate` step before installing.
+[^2]: Anthropic, [Create a mod](https://code.claude.com/docs/en/plugins/mods/create#check-what-claude-code-reads-from-your-mod). Describes `claude plugin validate`, its static analysis, and the rules a hooks module must follow (no aliasing `$`, string-literal event names, no dynamic `import()`, bare import of `claude-code` only).
+[^3]: Anthropic, [Manage mods for your organization](https://code.claude.com/docs/en/plugins/mods/admin). Source of the claim that Claude Code refuses a mod that uses the mods API in a way `validate` cannot read, the table of calls to look for, the `plugin.register` policy example, and the note that deny rules do not cover a mod's own `$.fs` and `$.process` calls.
+[^4]: Anthropic, [claude-code-playground, claude-code/mods](https://github.com/anthropics/claude-code-playground/tree/main/claude-code/mods). Three sample mods, shared without support.
+[^5]: hamzafer, [claude-code-mods](https://github.com/hamzafer/claude-code-mods). A collection of community mods, 23 of which have a hooks module.
+[^6]: victor-falcon, [claude-status-bar](https://github.com/victor-falcon/claude-status-bar). A mod showing git branch, diff, PR state and CI checks under the prompt.
+[^7]: Anthropic, [Mods reference](https://code.claude.com/docs/en/plugins/mods/reference). Lists the mods API namespaces and methods, the `plugin.register` event, the limits on hooks, and notes that the TypeScript declarations Claude Code writes for your version are the authoritative reference.
+[^8]: Methodology. Measured 2026-10-12 with Claude Code 2.1.296 on Windows 11, using Windows PowerShell 5.1. Static step: 16 single-purpose mods (one control, six that obscure mods API use, eight that use plain JavaScript capabilities, one that passes `$` to a helper), each checked with `claude plugin validate` and nothing executed. Runtime step: a probe mod loaded with `--plugin-dir` in `claude -p "/context"` with an empty settings file and `CANARY_SECRET` set to a fake value, with `total_cost_usd` read from `--output-format json` to confirm no model call. The pair of mods with identical output was validated only. The survey cloned three public repositories into a separate directory, found 27 plugin folders whose `hooks.json` declares `modules`, and recorded the `hooks:` and `calls:` lines from `claude plugin validate`. Counts group the methods as `process.run` or `process.spawn`, `env.get` or `env.set`, `http.fetch`, `model.complete`, `fs.write`, `settings.read`, and "any" also includes `mcp.call`. Source: [mod-validate-bench.ps1](/files/mod-validate-bench.ps1).
