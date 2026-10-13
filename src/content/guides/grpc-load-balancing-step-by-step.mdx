@@ -1,0 +1,202 @@
+---
+title: 'gRPC Load Balancing, Step by Step: Why One Connection Sends Every Call to One Server'
+description: 'How gRPC decides which backend gets each call, why a TCP-level load balancer leaves servers idle, and four ways to fix it. Every distribution number comes from a local experiment you can rerun.'
+pubDate: 2026-10-13
+updatedDate: 2026-10-13
+tags: ['backend', 'devops', 'architecture', 'tutorial']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+You deploy a gRPC service behind a load balancer, scale it from three pods to six, and watch the dashboard. Three pods are busy. Three are idle. The load balancer is healthy and the pods are healthy, and nothing is misconfigured in any way you can point at. This guide explains why that happens, how to see it for yourself, and what to change.
+
+The short version: ordinary load balancers spread **connections**, but gRPC puts many calls on one long-lived connection. Whoever picks the connection picks the server for every call that follows, for as long as it lives. The fixes all work by moving the decision from the connection to the call, or by making connections shorter-lived.
+
+I measured the behavior on one machine with three backends, and the numbers below come from that script.[^1] Where something comes from documentation instead, the text says so. Where I did not test it, it says that too.
+
+## Why gRPC is different from a web request
+
+A **load balancer** sits in front of several copies of a service (the **backends**) and decides which copy handles each request. For plain HTTP/1.1 traffic, a request usually needs its own connection, or at least a connection that handles one request at a time. A balancer that picks a backend whenever a connection opens is therefore also picking one per request, more or less.
+
+gRPC runs on HTTP/2,[^2] where one connection carries many calls at the same time (this is called **multiplexing**).[^6] A client opens a connection once and keeps it, because reconnecting costs latency.[^3] The gRPC design document says load balancing in gRPC is meant to happen per call and not per connection, so that even if all requests come from a single client, they are still spread across all servers.[^4] Whether that happens depends on who is doing the balancing and at which layer.
+
+## How a gRPC client picks a server
+
+Inside the client, three pieces cooperate. A **resolver** turns the name you dialed into a list of addresses. A **load balancing policy** decides what to do with that list: it creates a **subchannel** (a connection to one address) for each address it wants, and for each call it decides which subchannel carries it.[^4] The default policy is `pick_first`. It tries the addresses in order, stays on the first one that connects, and sends every call there.[^4] The other common built-in is `round_robin`, which connects to every address and gives each successive call to the next ready subchannel.[^4]
+
+<Mermaid
+  caption="The client-side pipeline from the gRPC load balancing design. The policy, not the resolver, decides which connection each call uses. With the default pick_first, only one subchannel is ever used."
+  label="Flow diagram. The application dials a name. The resolver returns addresses and a service config. The load balancing policy creates subchannels, one connection per chosen address. For each call it picks one subchannel, and that subchannel connects to one server."
+  code={`
+flowchart LR
+    A["App dials a name"] --> R["Resolver<br/>name to addresses<br/>plus service config"]
+    R --> P["LB policy<br/>pick_first or round_robin"]
+    P --> S1["Subchannel 1<br/>one connection"]
+    P --> S2["Subchannel 2"]
+    P --> S3["Subchannel 3"]
+    S1 --> B1["Server 1"]
+    S2 --> B2["Server 2"]
+    S3 --> B3["Server 3"]
+`}
+/>
+
+The resolver can also hand back a **service config**, a small JSON document that names the policy, among other things.[^5] If you do not choose, you get `pick_first`. That default is the quiet reason many deployments are unbalanced from day one.
+
+## Where balancing can happen
+
+There are four places to put the decision, and the gRPC project's own write-up lists them with their trade-offs.[^6]
+
+| Where | How it works | Good at | Costs |
+|---|---|---|---|
+| **L4 proxy** (works on TCP connections) | Copies bytes between connections and never reads HTTP/2 | Low latency, low resource use | Cannot make per-call decisions |
+| **L7 proxy** (works on HTTP/2 calls) | Parses HTTP/2 and picks a backend per call | Per-call routing, handles uneven calls, session affinity | More processing, more latency, more cost |
+| **Client-side** | The client knows all backends and picks one per call | No extra hop | The client must be complex and trusted, and policy is implemented per language |
+| **Look-aside** | A separate balancer server tells clients where to go | Server state in one place | A balancer service to run |
+
+"L4" and "L7" refer to layers in the networking model. L4 is the transport layer, which sees TCP connections. L7 is the application layer, which understands HTTP/2 and therefore individual calls. The older look-aside policy, `grpclb`, is deprecated in favor of **xDS**, a protocol by which a control plane sends balancing configuration to clients and proxies.[^4]
+
+<Mermaid
+  caption="Three common shapes. An L4 balancer picks a server when a connection opens. An L7 proxy and a client-side policy both pick per call, at different places."
+  label="Flow diagram with three rows. Row one: client opens one connection to an L4 balancer, which attaches it to one server for its whole life. Row two: client sends calls to an L7 proxy, which spreads each call across servers. Row three: client holds connections to all servers and picks one per call itself."
+  code={`
+flowchart LR
+    C1["Client A"] -->|"one connection"| LB4["L4 balancer<br/>picks when the connection opens"] --> S4["One server<br/>for the life of the connection"]
+    C2["Client B"] -->|"every call"| LB7["L7 proxy<br/>picks per call"] --> S7["Servers 1 to N"]
+    C3["Client C<br/>round_robin"] -->|"direct connections,<br/>one call at a time to each"| S8["Servers 1 to N"]
+`}
+/>
+
+### What this means on Kubernetes
+
+A Kubernetes **Service** with a cluster IP is an L4 mechanism. In the default iptables mode, the Kubernetes documentation says, when a client connects to the Service's virtual IP a backend is chosen, by session affinity or randomly, and packets are redirected there.[^7] The choice happens when the connection opens. For gRPC, a client that opens one connection to a ClusterIP Service gets one pod for as long as that connection lasts.
+
+A **headless Service** (cluster IP set to `None`) does the opposite: kube-proxy does not handle it, there is no load balancing or proxying by the platform, and DNS returns the individual pod addresses.[^7] That alone does not balance anything. It gives a client-side policy a list of pods to balance across.
+
+## Measure it: five setups, three backends
+
+I wrote a script that starts three gRPC servers on localhost. Each answers a trivial call with its own number, so the client can count where every call lands. No `.proto` files are needed. The client sends 3,000 calls in each setup, and I count how many each backend served. An L4 proxy is a small asyncio program that hands each new TCP connection to the next backend and never looks inside the traffic.[^1]
+
+| Setup | Calls per backend (b0, b1, b2) |
+|---|---|
+| E1. Direct, three addresses, default `pick_first` | 3000, 0, 0 |
+| E2. Direct, three addresses, `round_robin` | 1000, 1001, 999 |
+| E3. Through the L4 proxy, one channel | 3000, 0, 0 |
+| E4. Through the L4 proxy, 30 channels of 100 calls | 1000, 1000, 1000 |
+| E5. Through the L4 proxy, one channel, servers close connections after about 2 seconds | 1040, 991, 969 |
+
+Read the pattern as a sentence. E1 and E3 are the failure: one connection means one backend gets everything. E2 shows the client-side fix, with `round_robin` splitting calls almost exactly evenly. E4 shows why L4 balancers look fine in a test with many clients: the proxy spreads connections evenly, and the only reason the calls are even is that I used 30 separate connections. Your real traffic may be a handful of long-lived connections from a few busy clients, and that looks like E3.
+
+(To get a separate connection per channel, the script sets `grpc.use_local_subchannel_pool`, because by default channels in one process share connections through a global pool.[^8] That is also something to remember in your own tests.)
+
+### E5: forcing a reconnect
+
+E5 is the fix for when you cannot change the proxy. gRPC servers can be told to close any connection after a maximum age by sending an HTTP/2 **GOAWAY** message, a polite "finish what you have and reconnect elsewhere." Calls already in flight are allowed to complete.[^3] The design document says this option can force clients to reconnect to an L4 balancer periodically so load spreads more quickly, and adds a random 10% jitter to the age so that many connections do not all expire together.[^3] The default is no limit.[^3] I set it to two seconds.
+
+<Chart
+  type="bar"
+  stacked
+  height={340}
+  format="plain"
+  caption="Calls served by each backend in each second of E5. Every backend takes the whole load for about two seconds, then the client reconnects through the proxy and lands on the next one. Over 3,000 calls the totals come out nearly equal, but at any moment one server is carrying everything."
+  label="Stacked bar chart of 48 one-second buckets, with three series for backends b0, b1 and b2. In any second one backend serves about 62 calls, and the active backend rotates b0, b1, b2 about every two seconds."
+  labels={['0s','1s','2s','3s','4s','5s','6s','7s','8s','9s','10s','11s','12s','13s','14s','15s','16s','17s','18s','19s','20s','21s','22s','23s','24s','25s','26s','27s','28s','29s','30s','31s','32s','33s','34s','35s','36s','37s','38s','39s','40s','41s','42s','43s','44s','45s','46s','47s']}
+  series={[
+    { name: 'Backend 0', data: [62,63,14,0,0,0,45,75,23,0,0,0,39,65,20,0,0,0,54,63,3,0,0,0,60,66,12,0,0,0,43,63,26,0,0,0,48,63,9,0,0,5,62,57,0,0,0,0] },
+    { name: 'Backend 1', data: [0,0,48,56,24,0,0,0,44,64,13,0,0,0,44,65,15,0,0,0,60,63,12,0,0,0,49,60,20,0,0,0,37,62,22,0,0,0,54,62,1,0,0,6,62,48,0,0] },
+    { name: 'Backend 2', data: [0,0,0,0,50,63,26,0,0,0,49,62,22,0,0,0,50,63,8,0,0,0,50,63,3,0,0,0,40,62,18,0,0,0,41,63,15,0,0,0,62,57,0,0,0,14,64,24] },
+  ]}
+/>
+
+In 25 of the 48 seconds exactly one backend served every call, and in the rest the traffic was moving from one to the next. The totals, 1,040, 991 and 969, look balanced, but only over a long enough window. If your servers do heavy work per call, a two-second burst on one of them is a real load, and the cost is a reconnect, with its TCP and TLS setup, every couple of seconds per client. Choose the age with that in mind.
+
+**What I did not measure well.** The median latencies were 0.27 ms (direct, `pick_first`), 0.29 ms (direct, `round_robin`), 0.47 ms (L4 proxy, one channel) and 1.80 ms (E5). The proxy rows are slower mostly because my proxy is a Python program, which says nothing about a production L4 or L7 proxy. Treat the latency column as noise from this setup, not as a finding.
+
+## Fixing it: four options
+
+### Option 1: client-side `round_robin`
+
+If your clients can see the individual backends, tell them to balance. In Python, the service config goes in as a channel option:
+
+```python
+import grpc, json
+
+service_config = json.dumps({"loadBalancingConfig": [{"round_robin": {}}]})
+
+channel = grpc.insecure_channel(
+    "dns:///my-service.default.svc.cluster.local:50051",
+    options=[("grpc.service_config", service_config)],
+)
+```
+
+The `dns:` scheme with an empty authority is the default resolver form, and the config JSON is the same in every language, with each language having its own way to pass it.[^5][^9] The `grpc.service_config` option is ignored if the resolver returns a service config of its own.[^8] On Kubernetes, pair this with a headless Service so the DNS name returns pod addresses and not a single virtual IP.[^7]
+
+I tested the policy in E2 with fixed addresses. I did **not** test how quickly a DNS-based client notices pods being added or removed, and that is the part that decides how long a scale-up stays lopsided. Check your language's documentation for how often it re-resolves.
+
+### Option 2: put an L7 proxy in the middle
+
+A proxy that understands HTTP/2 can spread calls even when every client holds one connection. Envoy, the proxy used in the gRPC project's own examples, offers several algorithms: weighted round robin, weighted least request (which with equal weights samples two random hosts and picks the one with fewer active requests), ring hash and Maglev (both consistent hashing, which sends the same key to the same host), and random.[^10] The cost is the one in the table: one more hop and more processing. I did not test Envoy or any L7 proxy.
+
+### Option 3: keep the L4 balancer and expire connections
+
+If the L4 balancer cannot be replaced, set `MAX_CONNECTION_AGE` and a grace period on the servers, as in E5. In Python the options are named like this:
+
+```python
+from concurrent import futures
+import grpc
+
+server = grpc.server(
+    futures.ThreadPoolExecutor(max_workers=8),
+    options=[
+        ("grpc.max_connection_age_ms", 30000),
+        ("grpc.max_connection_age_grace_ms", 5000),
+    ],
+)
+```
+
+Both options default to disabled.[^3][^11] A longer age means fewer reconnects but slower rebalancing after a scale-up. The right number depends on how long your calls run and how fast you need new pods to fill.
+
+### Option 4: xDS
+
+For larger fleets, gRPC clients can take their balancing configuration from an xDS control plane, the same protocol Envoy speaks.[^12] The project's feature table lists round robin, ring hash, least request, client-side weighted round robin, outlier detection and session affinity, with a different first-supported version in each language, and notes that if you change a policy you must make sure every client supports it.[^12] I did not run xDS, so I can only point to the table.
+
+## When a backend disappears
+
+Spreading calls is half the job. The other half is surviving a server that stops. gRPC's pieces are documented separately:
+
+- **Connection recovery.** `round_robin` sends calls only to subchannels that are ready, and asks a disconnected one to reconnect with backoff.[^4][^13]
+- **Keepalive.** Keepalive pings detect dead connections. In gRPC core, the client's default is disabled and the server's is 2 hours, and pings sent more often than the server allows get the connection closed with a GOAWAY.[^14] Set both sides together.
+- **Retries.** A service config can add a retry policy. `maxAttempts` includes the original call, values above 5 are treated as 5, and you list the status codes that may be retried, such as `UNAVAILABLE`.[^15]
+
+I tested one failure case, E6. Sixteen callers made 3,200 calls through `round_robin`, and I stopped backend 1 half a second in, five times with no retry policy and five times with one. Without retries, 4 runs had no failed calls and 1 run had a single failure (an `UNAVAILABLE`). With up to three attempts there were no failures in any run. That difference is one call in five runs, which is too small to conclude anything about retries. What it does show is that, for a graceful stop on localhost, the client moved off the dead backend almost without loss. A server that is killed outright, or a network that drops packets, is a harder case and I did not test it.
+
+## A short checklist
+
+1. **Find out what your client is doing.** If you never set a policy, it is `pick_first`. If the target is a ClusterIP Service, it is also behind an L4 balancer, and one connection means one pod.
+2. **Count calls per backend, not connections.** E1 and E3 look healthy by connection count and terrible by call count.
+3. **Pick one fix on purpose.** Client-side `round_robin` plus a headless Service, an L7 proxy, or connection expiry on the servers. Each has a cost you can name.
+4. **Set keepalive on both sides together.** Mismatched settings close connections.
+5. **Test a scale-up.** Add backends and watch how long they stay idle. That is the number that matters, and my script cannot tell you yours.
+
+## Where this guide can mislead
+
+Everything measured here ran on one Windows 11 machine over the loopback interface, using the Python `grpcio` 1.76.0 library, no TLS, and an L4 proxy I wrote myself.[^1] Other languages share the same core design, but defaults and APIs differ. I did not test Kubernetes, DNS-based resolution, Envoy, xDS, weighted policies, streaming calls (which behave differently because one call can last for hours), or a hard server failure. I ran the whole script twice. E1, E3 and E4 matched exactly, E2 differed by up to 2 calls and the E5 totals by up to 35, and the E6 failure counts are small and noisy. The documentation snippets reflect the repositories as read on 2026-10-13 and will drift.
+
+## References
+
+[^1]: Methodology. Measured 2026-10-13 with Python 3.10 and `grpcio` 1.76.0 on Windows 11, all traffic over 127.0.0.1. Three gRPC servers answer `/bench.Echo/Ping` with their index, using generic handlers so no `.proto` is needed. E1 and E2 use the `ipv4:` target with three addresses and no/`round_robin` service config. E3 to E5 go through an asyncio TCP proxy that assigns each new connection to the next backend. E4 uses 30 channels with `grpc.use_local_subchannel_pool`. E5 sets `grpc.max_connection_age_ms` to 2000 and `grpc.max_connection_age_grace_ms` to 500. E6 starts 16 threads of 200 calls with a 5 ms server delay and calls `server.stop(0)` on backend 1 after 0.5 s, five repetitions per variant. E1, E3 and E4 matched exactly across two complete runs, E2 differed by up to 2 calls and E5 by up to 35. Source: [grpc-lb-bench.py](/files/grpc-lb-bench.py).
+[^2]: gRPC, [gRPC over HTTP2](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md). Describes gRPC carried over HTTP/2 framing.
+[^3]: gRPC proposals, [A9: Server-side Connection Management](https://github.com/grpc/proposal/blob/master/A9-server-side-conn-mgt.md). Clients keep connections open after use, L4 load balancers balance TCP connections and not RPCs, `MAX_CONNECTION_AGE` and `MAX_CONNECTION_AGE_GRACE` default to infinite, GOAWAY with `max_age`, outstanding RPCs complete, and a random 10% jitter on the age.
+[^4]: gRPC, [Load Balancing in gRPC](https://github.com/grpc/grpc/blob/master/doc/load-balancing.md). Per-call balancing as the design goal, the resolver, policy and subchannel workflow, `pick_first` as default, `round_robin`, and `grpclb` deprecated in favor of xDS.
+[^5]: gRPC, [Service Config](https://github.com/grpc/grpc/blob/master/doc/service_config.md). The `loadBalancingConfig` field and its JSON form.
+[^6]: gRPC blog, [gRPC Load Balancing](https://grpc.io/blog/grpc-load-balancing/), June 2017. Proxy and client-side approaches, thick client, look-aside, L3/L4 versus L7 proxies, and their trade-offs.
+[^7]: Kubernetes, [Virtual IPs and Service Proxies](https://kubernetes.io/docs/reference/networking/virtual-ips/) and [Service: Headless Services](https://kubernetes.io/docs/concepts/services-networking/service/#headless-services). A backend is chosen, by session affinity or randomly, when a client connects to the virtual IP. Headless Services get no cluster IP, no kube-proxy handling and no platform load balancing, and DNS returns the pod addresses.
+[^8]: gRPC core, [channel argument names](https://github.com/grpc/grpc/blob/master/include/grpc/impl/channel_arg_names.h). `grpc.service_config` (ignored if the resolver returns a service config), `grpc.use_local_subchannel_pool` (otherwise a global pool is used), `grpc.max_connection_age_ms` and `grpc.max_connection_age_grace_ms` (both default to disabled).
+[^9]: gRPC, [Name Resolution](https://github.com/grpc/grpc/blob/master/doc/naming.md). The `dns:[//authority/]host[:port]` scheme as the default, and the `ipv4:` scheme supported by C-core.
+[^10]: Envoy, [Load balancers](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/load_balancing/load_balancers). Weighted round robin, weighted least request with power of two choices, ring hash, Maglev and random.
+[^11]: gRPC proposals, [A9](https://github.com/grpc/proposal/blob/master/A9-server-side-conn-mgt.md) and the channel argument names in note 8 for the default values.
+[^12]: gRPC, [xDS features in gRPC](https://github.com/grpc/grpc/blob/master/doc/grpc_xds_features.md). The feature table by language and version, and the note about upgrading all clients before changing a policy.
+[^13]: gRPC, [Connection Backoff Protocol](https://github.com/grpc/grpc/blob/master/doc/connection-backoff.md). Exponential backoff with jitter on failed connection attempts.
+[^14]: gRPC, [Keepalive User Guide](https://github.com/grpc/grpc/blob/master/doc/keepalive.md). Client keepalive disabled by default, server default 2 hours with a 20 second timeout, and GOAWAY with `too_many_pings` or `ENHANCE_YOUR_CALM` for mismatched settings.
+[^15]: gRPC proposals, [A6: Client Retries](https://github.com/grpc/proposal/blob/master/A6-client-retries.md). Retry policy parameters, `maxAttempts` including the original call and capped at 5, and the retryable status codes.
