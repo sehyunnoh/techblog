@@ -1,0 +1,209 @@
+---
+title: 'REST vs GraphQL vs gRPC vs OData: What Each Is, What It Costs, and How to Choose'
+description: 'Four ways to build an API, compared on who decides the response shape, what the contract looks like, how errors and caching work, and how big the bytes are, with a size measurement you can rerun.'
+pubDate: 2026-10-13
+updatedDate: 2026-10-13
+tags: ['backend', 'web', 'architecture', 'tutorial']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+An **API** is the agreed way one program asks another program for data or for an action. REST, GraphQL, gRPC and OData are four popular ways to define that agreement, and they get compared in blog posts as if they were four brands of the same product. They are not. One is an architectural style, one is a query language, one is a remote-call framework, and one is a standard that fixes the details REST leaves open. Choosing well starts with seeing that difference.
+
+This guide explains each one in plain terms, runs the same question through all four, and measures one thing I could measure honestly on a laptop: how many bytes the same data takes on the wire. It ends with a way to choose and the mistakes that cause the most pain. Where I did not test something, the text says so.
+
+## The short version
+
+| | REST | GraphQL | gRPC | OData |
+|---|---|---|---|---|
+| **What it is** | An architectural style for HTTP APIs[^1] | A query language and a rule for how a server runs it[^2] | A remote procedure call framework, protobuf by default[^3] | An OASIS standard for REST-style data APIs[^4] |
+| **Who decides the response shape** | The server | The client, per request | The server (the method you call) | The client, with URL query options |
+| **Contract** | None built in. OpenAPI is the usual add-on[^5] | A typed schema | A `.proto` file | A machine-readable `$metadata` document |
+| **Transport** | HTTP | HTTP, usually one URL | HTTP/2, always POST[^6] | HTTP |
+| **Payload** | Anything, usually JSON | JSON | Protocol Buffers (binary) | JSON |
+| **Normal HTTP caching** | Yes, for GET | Rarely, requests are usually POSTs | No, calls are POSTs | Yes, for GET |
+| **Browser can call it directly** | Yes | Yes | Not as plain gRPC. Needs gRPC-Web and a proxy[^7] | Yes |
+| **Streaming** | Possible over HTTP, not part of the style | Not covered by the HTTP draft | Four call kinds, including bidirectional[^3] | Paging with `@odata.nextLink`, no streaming calls |
+
+Every cell has caveats that the sections below fill in. Read the table as a map, and not as a scorecard.
+
+## One question, asked four ways
+
+Suppose a screen needs the name of customer 42 and their three newest orders. Here is how each style expresses that.
+
+**REST** puts each kind of thing at its own address, so the plain version is two requests:
+
+```http
+GET /customers/42
+GET /customers/42/orders?sort=-createdAt&limit=3
+```
+
+Many teams add a convenience option such as `?include=orders` to save the second trip. That works, but nothing standardizes the option name, so every API invents its own.
+
+**GraphQL** sends one request to one endpoint, and the request is a description of the data you want:
+
+```graphql
+query {
+  customer(id: 42) {
+    name
+    orders(first: 3, orderBy: CREATED_DESC) { id status totalCents }
+  }
+}
+```
+
+The reply has the same shape as the question, and only the fields you named.
+
+**gRPC** has no URLs for data. You call a named method that the server author defined in a contract file:
+
+```protobuf
+service Shop {
+  rpc GetCustomerWithOrders(GetCustomerRequest) returns (CustomerWithOrders);
+}
+message GetCustomerRequest { int64 customer_id = 1; int32 order_limit = 2; }
+```
+
+If another screen needs a different slice, the server team adds another method. The server decides the shape.
+
+**OData** answers with URL conventions that the standard defines, so the client shapes the reply without a custom endpoint:
+
+```http
+GET /odata/Customers(42)?$select=Name&$expand=Orders($select=Id,Status,TotalCents;$orderby=CreatedAt desc;$top=3)
+```
+
+The standard says options for an expanded related collection go in parentheses, separated by semicolons, and may include `$filter`, `$select`, `$orderby`, `$skip`, `$top`, `$count`, `$search` and `$expand`.[^8]
+
+Notice where the control sits. In REST and gRPC the server fixes what each call returns. In GraphQL and OData the client chooses, and the server has to survive whatever the client chooses. Most of the trade-offs below follow from that one fact.
+
+## REST: HTTP used as designed
+
+Roy Fielding's dissertation defines REST as a set of constraints: client and server are separate, each request carries everything needed to understand it (stateless), responses say whether they can be cached, components talk through a uniform interface, and layers like proxies can sit between them.[^1] The uniform interface itself has four parts: resources have identifiers, you change them through representations, messages describe themselves, and hypermedia drives what the client does next.[^1]
+
+In daily use, "a REST API" usually means resource URLs, HTTP verbs and JSON. Martin Fowler's maturity model describes the steps: one endpoint tunneling calls (level 0), separate resources (level 1), correct use of HTTP verbs and status codes (level 2), and links in responses that tell the client what it can do next (level 3).[^9] An API with separate resources and correct verbs but no links sits at level 2 and is still commonly called REST. A strict reading of Fielding asks for level 3: Fowler reports that Fielding has said level 3 is a precondition of REST.[^9]
+
+What you get for free is HTTP's own rules. A **safe** method is one whose meaning is essentially read-only, and an **idempotent** method is one where repeating the request has the same effect as sending it once. RFC 9110 puts GET in the safe group and PUT and DELETE (along with the safe methods) in the idempotent group.[^10] That is why a client or proxy can retry a failed GET or PUT without asking anyone.
+
+It is also why REST caches so well. A response to a GET can be stored by browsers and CDNs (content delivery networks, servers that keep copies of responses close to users). A response to a POST is cacheable only when it carries explicit freshness information and a `Content-Location` header equal to the request URL.[^10] The next two styles lean on POST, and that is where they lose this free cache.
+
+The costs are the ones in the table. Fixed response shapes mean a screen may download fields it never shows (over-fetching) or make several requests to assemble one view (under-fetching). There is no machine-readable contract unless you write one, and OpenAPI is the common choice for that.[^5]
+
+## GraphQL: the client writes the query
+
+The GraphQL specification defines a query language and exactly how a server executes a query against a typed schema, which is a list of the types and fields the server offers.[^2] Over HTTP, the rules live in a separate draft specification: a server must accept POST, may accept GET, and a GET must never run a mutation, meaning an operation that changes data.[^11]
+
+**Errors are reported in the body, and that surprises people.** The draft says that if a query executes and some fields fail, the server should still reply `200 OK`, because the specification treats a result with partial data as a successful execution.[^11] It recommends 4xx codes only for requests that cannot be processed at all, such as invalid JSON (400) or a query that fails validation (422).[^11] It even proposes a custom code, `294 Partial Success`, for responses that carry both data and errors, and says plainly that no official HTTP code fits.[^11] The practical consequence: a dashboard that counts only non-2xx responses will miss most GraphQL failures. You have to look inside the `errors` array.
+
+**The N+1 problem.** Say a query asks for 20 customers and each one's orders. A naive server runs one database query for the customers and then one more per customer, 21 queries for one request. The `DataLoader` library exists for this. It collects the individual loads that happen in one tick of the event loop and sends them as a single batch.[^12] Without something like it, GraphQL's flexibility turns into database load.
+
+**Security needs deliberate limits.** Because the client writes the query, the OWASP cheat sheet lists the risks: unlimited query depth and size can cause denial of service, one request can carry many batched operations that slip past per-request rate limits, introspection (the feature that lets anyone ask the server for its full schema) can expose private fields, and authorization has to be checked on every object, not just at the front door.[^13] Its recommendations are depth and amount limits, query cost analysis, timeouts, pagination, limits on batching, introspection turned off in production, and authorization checks on both edges and nodes.[^13]
+
+## gRPC: calling functions on another machine
+
+gRPC is a **remote procedure call** framework: the client calls what looks like a local function, and the framework sends it to a server. You describe the service in a `.proto` file, and tools can generate client and server code from it. Protocol Buffers are the default format for that description and for the data.[^3]
+
+**It is HTTP/2 underneath.** The protocol document describes gRPC carried over HTTP/2 framing. Every call is a POST to a path of the form `/Service/Method`, the content type is `application/grpc`, and each message is prefixed with a 1-byte compression flag and a 4-byte length.[^6] The result status travels in **trailers**, headers sent after the body, as a `grpc-status` value. The same document notes that a gRPC error response uses HTTP status 200, and that is why a server should answer 415 to any request whose content type is not gRPC: otherwise another HTTP/2 client could read an error as a success.[^6] Like GraphQL, gRPC reports failure in a place plain HTTP monitoring does not look.
+
+**Four call shapes.** A call can be unary (one request, one response), server streaming, client streaming, or bidirectional streaming where both sides send message sequences independently.[^3] This is the biggest capability the other three do not have. Clients also set a **deadline**, and a call that runs past it ends with `DEADLINE_EXCEEDED`.[^3] The protocol carries it as a `grpc-timeout` header.[^6] Cancellation, by either side, ends the call immediately, and the documentation warns that changes made before cancellation are not rolled back.[^3]
+
+**How protobuf stays small.** Field names are not sent. The encoding uses the field's number as the key, and the name and type are known only by whoever holds the `.proto` file.[^14] Each field is written as a tag, computed as `(field_number << 3) | wire_type`, followed by the value, and integers use **varints**, which take fewer bytes for smaller numbers.[^14] The guide's example: setting field 1 to 150 takes three bytes, `08 96 01`.[^14] Field numbers 1 through 15 fit in a one-byte tag.[^15] The rule that follows is strict: field numbers should never be reused, and a deleted field's number must be reserved, because reuse makes decoding ambiguous.[^15]
+
+**Browsers are the sore spot.** Plain gRPC is not what web pages call. Web clients use gRPC-Web, which reaches the service through a special proxy, Envoy by default.[^16] The gRPC-Web README says unary and server-side streaming are supported, client-side and bidirectional streaming are not, and in the binary `grpcweb` mode only unary calls work.[^16] If your callers are browsers or third parties with ordinary HTTP tooling, that is a real cost. A bridge exists in the other direction too: grpc-gateway reads annotations in the `.proto` and generates a reverse proxy that offers the same service as a REST JSON API.[^17]
+
+## OData: REST conventions, written down
+
+OData stands for Open Data Protocol, and OData version 4.01 was approved as an OASIS Standard on 23 April 2020.[^18] It standardizes the things REST leaves to each team: headers, status codes, URL conventions, media types, payload format, batch requests and change tracking.[^4] If REST is "use HTTP sensibly," OData is "use HTTP exactly like this."
+
+A service publishes a `$metadata` document describing its data model in machine-readable form, and responses point back to it with `@odata.context`.[^4] A collection reply puts the items in `value` and gives a `@odata.nextLink` for the next page. A created entity returns `201 Created` with a `Location` header, and updates and deletes return `204 No Content`.[^4]
+
+The appeal is that generic tools and clients can work against any OData service, and a new filter does not need a new endpoint. The cost is that you have handed clients a query language over your data. In ASP.NET Core OData, for example, the query options are converted into a LINQ expression and then into SQL by the data layer.[^19] Microsoft's documentation shows how a service decides what to allow: you switch on `Select`, `Filter`, `OrderBy`, `Expand` and `Count` individually, set a maximum `$top`, and can restrict a single action to specific options with `AllowedQueryOptions`.[^19] I did not find OData-specific abuse guidance in the sources I read, but the reasoning behind OWASP's GraphQL advice applies the same way to any API where the client can ask for nested, filtered data. Treat that as my inference, and set the limits.
+
+## Measured: how big is the same data on the wire?
+
+Size is the number people quote most and understand least, so I measured it. The script builds 50 order records (an id, a customer id, a status, a total in cents, a timestamp and an item count) and encodes them each way. Protobuf is encoded by a small hand-written encoder that I checked against the documented `08 96 01` example, so the result needs no installed libraries. Sizes are bytes, once raw and once after gzip at level 6.[^20]
+
+<Chart
+  type="bar"
+  horizontal
+  height={380}
+  format="plain"
+  caption="Bytes needed for the same 50 orders. Protobuf is about five times smaller raw, but after gzip the gap shrinks to about 1.6 times. The GraphQL and OData envelopes add 20 and 76 raw bytes to the plain JSON array."
+  label="Horizontal grouped bar chart. Raw bytes then gzip bytes. REST JSON with ISO dates: 5,876 and 1,039. REST JSON with epoch integers: 5,276 and 893. GraphQL response: 5,896 and 1,057. OData response: 5,952 and 1,114. gRPC unary protobuf: 1,102 and 654. gRPC server stream: 1,247 and 665"
+  labels={['REST JSON, ISO dates', 'REST JSON, epoch integers', 'GraphQL response', 'OData response', 'gRPC unary (protobuf)', 'gRPC server stream']}
+  series={[{ name: 'Raw bytes', data: [5876, 5276, 5896, 5952, 1102, 1247] }, { name: 'After gzip', data: [1039, 893, 1057, 1114, 654, 665] }]}
+/>
+
+Four things stand out.
+
+**Most of the gap is field names and text numbers.** One order is 19 bytes in protobuf and 103 bytes in JSON with epoch integers, because JSON repeats every field name for every record and writes numbers as digits. Writing the timestamp as an ISO date string instead of an integer costs another 600 bytes across the 50 records.
+
+**Compression closes most of it.** Gzip works well on repeated text, so the 5.3 times raw advantage becomes 1.6 times (654 against 1,039 bytes). If your HTTP responses are already compressed, protobuf's size advantage is smaller than the headline suggests. Whether gRPC compression is on in a given deployment is a configuration question, because the protocol carries a per-message flag.[^6]
+
+**GraphQL and OData envelopes are cheap.** The wrapper objects added 20 and 76 raw bytes to a 5,876-byte array, and still added 18 and 75 bytes after gzip. The envelope is not why you would avoid either one.
+
+**The request side differs more than the response.** For the "customer 42 with 3 orders" question, the REST URL was 55 bytes, the OData URL 109, the GraphQL body 106, and the gRPC request 9 bytes of framed protobuf, before HTTP/2 headers.
+
+What I did **not** measure: latency, CPU cost of parsing, behavior under load, or the effect of connection reuse. A smaller payload is not automatically a faster call, and these numbers come from one synthetic data set, not from your service.
+
+## How to choose
+
+<Mermaid
+  caption="A first-pass decision path. It is a starting point, because most real systems end up mixing styles, but each branch names the question that actually separates them."
+  label="Decision flowchart. Start: who calls the API. Third parties or browsers with plain HTTP tooling lead to REST. Internal services that need streaming, strict contracts or low overhead lead to gRPC. Many screens needing different slices of connected data with clients you control lead to GraphQL. Data-centric CRUD with generic query tools lead to OData. Otherwise REST."
+  code={`
+flowchart TD
+    A["Who calls the API?"] --> B{"Mostly other services<br/>you run?"}
+    B -->|"Yes, and you need streaming,<br/>strict contracts or small messages"| G["gRPC"]
+    B -->|"No: browsers, partners,<br/>plain HTTP tools"| C{"Do clients need very<br/>different slices of connected data?"}
+    C -->|"Yes, and you control<br/>the clients"| Q["GraphQL"]
+    C -->|"No"| D{"Is it mostly CRUD and filtering<br/>over a data model, with generic tooling?"}
+    D -->|"Yes"| O["OData"]
+    D -->|"No"| R["REST"]
+`}
+/>
+
+| If this describes you | Lean toward | Why |
+|---|---|---|
+| A public API for strangers, or one that must be cacheable by a CDN | REST | Everything speaks HTTP, GET caches for free |
+| Microservices calling each other, streaming data, or latency-sensitive calls | gRPC | One contract, generated clients, streams, deadlines |
+| A web or mobile app with many screens, each wanting a different slice | GraphQL | One request per screen, the client names the fields |
+| An internal data API where users filter and sort in many ways, especially on .NET | OData | The query language is already specified |
+| You are unsure | REST | Cheapest to learn, easiest to debug with curl |
+
+Combining is normal. A common arrangement is gRPC between internal services with REST or GraphQL at the edge facing clients, and grpc-gateway exists to serve a REST face from a gRPC service.[^17] The important part is to choose per boundary, not per company.
+
+## Mistakes that cost the most
+
+- **Treating HTTP 200 as success in GraphQL or gRPC.** Both report errors somewhere else: the `errors` array in one, the `grpc-status` trailer in the other.[^6][^11] Monitor those fields.
+- **Shipping GraphQL or OData with no limits.** Depth, cost, page size and batching limits are part of the design, and OWASP's list is a good checklist.[^13] An unlimited `$top` or `$expand` is the same class of mistake.
+- **Reusing a protobuf field number.** It makes old and new messages decode into the wrong fields. Reserve deleted numbers.[^15]
+- **Choosing gRPC for a browser-first product without budgeting for the proxy.** gRPC-Web adds a component to run and removes client and bidirectional streaming.[^16]
+- **Calling an API REST and then using POST for everything.** That is level 0 in Fowler's terms and gives up the caching and retry rules that HTTP offers.[^9][^10]
+- **Picking by headline numbers.** The size measurement above shows how the gap shrinks once compression is on. Measure your own payloads before using a speed or size argument to decide.
+
+## Where this guide can mislead
+
+The four styles are bigger than one page. I did not cover versioning strategy, authentication, GraphQL subscriptions, GraphQL federation, OData's `$apply` aggregation or batch endpoints, or gRPC load balancing. The GraphQL-over-HTTP specification I cite is a draft, and individual servers may behave differently, for example by returning other status codes for errors. The byte counts come from one synthetic sample of 50 small records. I read the specifications and vendor documentation but did not stand up a server in each style and test latency. If you spot something that is out of date, the sources below are where to check first.
+
+## References
+
+[^1]: Roy T. Fielding, [Architectural Styles and the Design of Network-based Software Architectures, section 5.1](https://ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm). Lists the REST constraints (client-server, stateless, cache, uniform interface and its four sub-constraints, layered system, optional code-on-demand).
+[^2]: GraphQL Foundation, [GraphQL specification](https://spec.graphql.org/). Defines the query language and the execution of operations against a schema.
+[^3]: gRPC, [Core concepts, architecture and lifecycle](https://grpc.io/docs/what-is-grpc/core-concepts/). Unary, server streaming, client streaming and bidirectional streaming, deadlines and `DEADLINE_EXCEEDED`, cancellation not rolling back changes, metadata, and protocol buffers as the default interface definition language.
+[^4]: OData, [Understand OData in 6 steps](https://www.odata.org/getting-started/understand-odata-in-6-steps/). Describes OData as an OASIS standard for RESTful APIs, `$metadata`, `@odata.context`, `value`, `@odata.nextLink`, and the `201`/`204` behaviors.
+[^5]: OpenAPI Initiative, [OpenAPI Specification](https://spec.openapis.org/oas/latest.html). A machine-readable description format for HTTP APIs.
+[^6]: gRPC, [gRPC over HTTP2](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md). Source for POST-only calls, the `/Service/Method` path, `application/grpc` content type, the length-prefixed message (1-byte compressed flag, 4-byte length), `grpc-timeout`, status in trailers via `grpc-status`, and the note that error responses use HTTP 200.
+[^7]: gRPC, [gRPC-Web basics](https://grpc.io/docs/platforms/web/basics/). The tutorial routes browser requests through Envoy.
+[^8]: OASIS, [OData Version 4.01 Part 2: URL Conventions](https://docs.oasis-open.org/odata/odata/v4.01/os/part2-url-conventions/odata-v4.01-os-part2-url-conventions.html). Nested query options on an expanded navigation property are a semicolon-separated list in parentheses, from the allowed set `$filter`, `$select`, `$orderby`, `$skip`, `$top`, `$count`, `$search` and `$expand`.
+[^9]: Martin Fowler, [Richardson Maturity Model](https://martinfowler.com/articles/richardsonMaturityModel.html). The four levels from a single tunneling endpoint to hypermedia controls, and his note that the model is for learning, not for grading systems.
+[^10]: IETF, [RFC 9110, HTTP Semantics](https://www.rfc-editor.org/rfc/rfc9110.html), sections 9.2.1 (safe methods), 9.2.2 (idempotent methods: PUT, DELETE and the safe methods) and 9.3.3 (cacheability of POST responses).
+[^11]: GraphQL Foundation, [GraphQL over HTTP (draft specification)](https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md). POST required and GET optional, no mutations over GET, the `application/graphql-response+json` media type, status code recommendations (200 for execution errors, 400 and 422 for request errors) and the proposed `294 Partial Success`.
+[^12]: GraphQL Foundation, [DataLoader](https://github.com/graphql/dataloader). Batching and per-request caching; loads within a single tick of the event loop are combined into one batch.
+[^13]: OWASP, [GraphQL Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/GraphQL_Cheat_Sheet.html). Depth and amount limiting, query cost analysis, timeouts, pagination, batching abuse, disabling introspection in production, and object-level authorization.
+[^14]: Protocol Buffers, [Encoding](https://protobuf.dev/programming-guides/encoding/). Varints, the tag formula `(field_number << 3) | wire_type`, length-delimited fields, the `08 96 01` example, and the fact that field names are not on the wire.
+[^15]: Protocol Buffers, [Language Guide (proto3)](https://protobuf.dev/programming-guides/proto3/). Field numbers 1 through 15 take one byte, field numbers should never be reused, and deleted field numbers must be reserved.
+[^16]: gRPC, [grpc-web](https://github.com/grpc/grpc-web). Requires a proxy (Envoy by default), unary and server-side streaming supported, client-side and bidirectional streaming not supported, and only unary in `grpcweb` mode.
+[^17]: gRPC Ecosystem, [grpc-gateway](https://github.com/grpc-ecosystem/grpc-gateway). Generates a reverse proxy that translates a RESTful HTTP API into gRPC, configured with `google.api.http` annotations.
+[^18]: OASIS, [OData Version 4.01 standard page](https://www.oasis-open.org/standard/odata-v4-0/). Lists 4.01 as approved as an OASIS Standard on 23 April 2020. I did not verify any ISO status.
+[^19]: Microsoft, [OData query options in ASP.NET Core OData 8](https://learn.microsoft.com/en-us/odata/webapi-8/fundamentals/query-options). Query options become a LINQ expression that the data provider converts, enabling options individually, `SetMaxTop`, and `AllowedQueryOptions`.
+[^20]: Methodology. Measured 2026-10-13 with Python 3 on Windows 11 using only the standard library. 50 order records with a fixed random seed (42), each with six fields. JSON is compact (`separators=(",", ":")`). Protobuf is hand encoded (fields 1 to 6, varints for integers and the status enum) and the encoder is asserted against the documented `08 96 01` example. gRPC unary is one message with a repeated field plus the 5-byte frame header, and server streaming is 50 framed messages. gzip is level 6 with a fixed timestamp. Request sizes are for the strings shown in this guide. Source: [api-payload-bench.py](/files/api-payload-bench.py).
