@@ -1,0 +1,133 @@
+---
+title: "A 1.4 KB Electron App Costs 125,000 Tokens to Analyze, and the Renderer Call Is Missing"
+description: "I graded the REA reverse-engineering tool against four tiny Electron apps with known answers. It got the main process right, missed script written inside HTML, and returned 125k tokens."
+pubDate: 2026-10-13
+tags: ['security', 'ai', 'deep-dive', 'benchmark']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+REA is an open-source tool that lets an AI agent reverse engineer software: it inspects an app, then reports what the app does along with the evidence and the things it could not determine.[^1] It plugs into agents through **MCP** (Model Context Protocol), a standard way for an agent to call outside tools and receive their output as text.[^2] When I looked on 2026-10-13, the repository was six months old and showed 186,343 stars and 45,199 forks. That is an unusual amount of attention for its age. I did not try to explain it, and nothing below depends on it.
+
+What I wanted to know was narrower. If an agent asks REA about an app, how accurate is the answer, and how much of the agent's context window does the answer eat? Auditing a real application would leave me unable to say what the right answer was. So I wrote a tiny Electron app where I planted every fact myself, ran REA on it, and graded the result like an exam.
+
+## The test: an app with known answers
+
+**Electron** builds desktop apps from web technology. An app has a **main process** (Node.js code with full access to the machine) and one or more **renderer** processes (the web pages shown in windows).[^3] The two talk through **IPC**, inter-process communication: the main process registers a handler for a named channel, and the renderer sends a message to that name. Who can call which channel is exactly the kind of question a security review asks.
+
+My app has 1,048 bytes of main-process code and a 269-byte page. I planted these facts:
+
+| Planted fact | Where |
+|---|---|
+| Three IPC channels: `notes:save`, `notes:sync`, `open-external` | `main.js` |
+| A window with `nodeIntegration: true` and `contextIsolation: false`, a combination Electron's security guide warns about[^4] | `main.js` |
+| One API URL that is actually used | `main.js` |
+| One URL inside a comment, never used | `main.js` |
+| A function that runs `child_process.exec('rm -rf ...')` but is never called | `main.js` |
+| A `Bearer` token header built by string concatenation | `main.js` |
+| The renderer calling `ipcRenderer.invoke('notes:save', ...)` | `index.html` |
+
+I ran `rea analyze-javascript-application` (REA 6.4.0, Windows 11, Node.js 24.14.1). This is the one analysis route that needs no paid reverse-engineering engine, and the documentation says it inspects the files "without executing its code."[^5]
+
+## What it got right
+
+The main process came back accurately. All three channels appeared as handlers, `nodeIntegration` was recorded as a literal `true` and `contextIsolation` as a literal `false`, and the real API URL showed up. The URL in the comment did not appear anywhere in the output, which is what you want: a tool that treated every URL-shaped string as a finding would bury the real ones.
+
+It was also careful about what it did not know. The `child_process` import was recorded, but marked `unresolved` and with no verdict about whether it ever runs. The output carries a list of limitations that includes "missing findings do not establish absence" and that "runtime registration, reachability, defaults, and enforcement remain unproven."[^5] That is honest, and I will lean on it below.
+
+Two planted facts never appeared. The string `Bearer` and the `rm -rf` command are not in the output at all, so the details of the unused function and the header construction are invisible. For a static tool that does not evaluate code that is an understandable limit, but a reader of the report cannot tell the dangerous argument from a harmless one.
+
+## The renderer call that was not there
+
+The last planted fact is the one that mattered. The page's button handler calls `ipcRenderer.invoke('notes:save', ...)`, which is the other half of the `notes:save` handler REA found. The output reported `renderer_transmissions: 0` and `paired_renderer_transmissions: 0`. The word `ipcRenderer` appears nowhere in the 396 KB result.
+
+REA had visited the file. Its progress log says it was parsing `index.html`. But my script sat inside a `<script>` tag in that HTML, and the statistics show exactly one parsed JavaScript file, `main.js`. So I moved the identical code into a separate `renderer.js`, loaded with `<script src="renderer.js">`, and tried two more ways of writing it inside the HTML.
+
+<Mermaid
+  caption="What I observed, not what the source code necessarily does: the same renderer code is read or ignored depending only on where it is written. Only the external file reached the pairing step that matches a renderer call to a main-process handler."
+  label="Flow diagram. index.html leads to three inline forms (script tag, module script, onclick attribute), all of which end in no renderer call recorded, and one script src form that leads to renderer.js, which is parsed and paired with the notes:save handler in main.js"
+  code={`
+flowchart LR
+    H["index.html"] --> A["Inline script tag"]
+    H --> B["Inline module script"]
+    H --> C["onclick attribute"]
+    H --> D["script src=renderer.js"]
+    A --> X["0 renderer calls recorded"]
+    B --> X
+    C --> X
+    D --> P["renderer.js parsed"]
+    P --> M["1 call, paired with<br/>notes:save handler"]
+`}
+/>
+
+| Where the renderer code lives | Renderer calls found | Paired with a handler | JS files parsed |
+|---|---|---|---|
+| Inline `<script>` | 0 | 0 | 1 |
+| Inline `<script type="module">` | 0 | 0 | 1 |
+| `onclick="..."` attribute | 0 | 0 | 1 |
+| External `renderer.js` | 1 | 1 | 2 |
+
+The three inline forms came back identical in every IPC field. The external file was the only one found. The documentation lists "local HTML script entrypoints" and JavaScript files by extension among the things REA reads, so this is consistent with it, and I did not find the inline case mentioned either way.[^5] The limitations list does say HTML is parsed "as inert text," but nothing in the report says that script written inside HTML is skipped.
+
+Why does that matter? Consider the report from the agent's side. It sees three main-process handlers, `nodeIntegration` on, and zero renderer callers. A natural reading is "nothing calls these channels." The honest reading is "this tool did not find a caller," and the output's own limitation line supports it, but an agent summarizing under token pressure will not necessarily keep that sentence. Real apps usually ship through a bundler that emits external JavaScript, so this gap may touch fewer of them than my toy suggests. I only tested a toy.
+
+## What the answer costs
+
+This is where the second finding sits. The input was 1,442 bytes. The default JSON output was 396,571 bytes, about 275 times larger. REA's own `--token-count` flag, which prints the size of the output in tokens and not the output itself, reported 125,126 tokens for the inline version and 146,158 for the external-file version.[^6] A token is the unit a language model reads, roughly three-quarters of an English word. Either number is a large share of a typical agent's context window, spent on one tiny app.
+
+About three quarters of the bytes are a second, detailed graph of how values flow through the code. The part an agent usually wants is small: the `summary` section, with counts of windows, IPC operations and handlers, is 244 tokens.
+
+<Chart
+  type="bar"
+  horizontal
+  logY
+  height={320}
+  format="plain"
+  caption="Output size in tokens for the same two apps, on a log scale. Pulling only the summary or only the window options cuts the output by more than 99%."
+  label="Horizontal bar chart on a log scale. Full output, renderer in HTML: 125,126 tokens. Full output, renderer in a js file: 146,158. Window options only, HTML app: 646. Window options only, js-file app: 756. Summary only: 244"
+  labels={['Full output, renderer in HTML', 'Full output, renderer in .js file', 'Window options only (js-file app)', 'Window options only (HTML app)', 'Summary only']}
+  series={[{ name: 'Tokens', data: [125126, 146158, 756, 646, 244] }]}
+  valueLabels
+/>
+
+REA's CLI has a `--filter-output` option for this, and the summary alone is a one-line change. The catch is that the summary holds counts, not values. It says one window has two explicit web preferences. It does not say they are `nodeIntegration: true`. To get the values I had to dig out the window node in the full graph, and three details cost me time:
+
+- The filter takes `[start,end]` slices. A single index such as `nodes[17]` silently returns an empty result, because it is read as a slice with no end. I found that by reading the filter code in the CLI library bundled with REA, not from the help text.
+- Node positions are not stable. The window node was at index 10 in the HTML-script app and index 17 in the external-file app, with identical `main.js`. A filter with a fixed index would work on one and quietly fail on the other.
+- A wide slice such as `nodes[0,40]` works on both, at 646 and 756 tokens, but pads the result with an empty object for every node that has no window options.
+
+Without `--full-output` the result is not wrapped in an `ok` and `data` envelope, so the filter path starts at `normalized_result`. With it, the path starts at `data`. Both are fine once you know, and both were guesses until I tried them.
+
+One thing went well. Five runs on the same input gave the same evidence ID and the same size each time. The only bytes that differed between runs were the elapsed-time field at the end of the file (689 ms in one run, 648 ms in another).
+
+## Where this can mislead
+
+**One app, one version, one OS.** Everything is REA 6.4.0 on Windows 11, run against a 1 KB program I wrote. A real application has bundlers, minified code and hundreds of files, and the results could be better or worse in ways I did not measure.
+
+**The missing-renderer finding covers three HTML forms.** I tested an inline script, a module script and an inline attribute. I did not test event listeners attached from an external file, preload scripts, or `contextBridge`, which is the recommended pattern in modern apps and which REA lists as supported.[^5]
+
+**Token counts depend on the tokenizer and the path.** I used the CLI's own counter and did not check which tokenizer it uses. The numbers also shift by a few tokens depending on the path of the analyzed folder, because the path is echoed in the output. My first runs gave 125,114 where the final script gave 125,126.
+
+**I did not test the headline use cases.** REA's README cites a reconstruction that passes 3,205 original test cases. That requires binaries and a paid analysis engine I did not use, and nothing here confirms or contradicts it. The native, Android and web routes are untouched.
+
+**The tool did not claim to find the renderer call.** Its limitations section covers the case in general terms. My criticism is about how easily the specific silence can be misread, not about a false statement.
+
+## Takeaways
+
+- **REA read the main process of a toy Electron app accurately.** It found 3 of 3 IPC handlers, recorded `nodeIntegration` and `contextIsolation` as literals, and ignored a URL in a comment.
+- **Script written inside an HTML file was not analyzed in my tests.** The same renderer call was found when it lived in an external `.js` file and missed in all three inline forms, with no warning specific to that case. A report that says "0 renderer calls" is not evidence that nothing calls your handlers.
+- **Budget for the output size before pointing an agent at it.** A 1.4 KB app produced 125,126 to 146,158 tokens. Use `--filter-output` from the start, and expect to write the filter path by hand.
+- **Do not hardcode array indexes in filters.** Node positions moved between two apps with identical main-process code. Use a slice that covers the range, and ignore the empty entries.
+- **The method is cheap enough to copy.** Write a small program where you know every fact, run the tool, and count the misses. It needed four small files here and found a gap the documentation does not mention.
+
+## References
+
+[^1]: morluto, [rea](https://github.com/morluto/rea), README and `package.json`. MIT license, version 6.4.0, created 2026-04-14. Stars and forks were read from the GitHub API on 2026-10-13 (186,343 and 45,199).
+[^2]: Model Context Protocol, [introduction](https://modelcontextprotocol.io/). The open standard REA uses to expose its tools to agents.
+[^3]: Electron, [Process model](https://www.electronjs.org/docs/latest/tutorial/process-model) and [Inter-process communication](https://www.electronjs.org/docs/latest/tutorial/ipc). Definitions of main and renderer processes and of IPC channels, handlers and `ipcRenderer.invoke`.
+[^4]: Electron, [Security](https://www.electronjs.org/docs/latest/tutorial/security). Guidance on `nodeIntegration` and `contextIsolation`.
+[^5]: morluto, [JavaScript artifact reconstruction](https://github.com/morluto/rea/blob/main/docs/javascript-artifact-reconstruction.md). Describes the analysis as inert-text parsing, lists what is recovered (including "local HTML script entrypoints," IPC operations and `webPreferences`), and defines the pairing behavior. The limitation sentences quoted above come from the `limitations` array in REA's own output.
+[^6]: Methodology. Measured 2026-10-13 with `rea-agents` 6.4.0 on Windows 11, Node.js 24.14.1, using the package installed with `--ignore-scripts` and without running `rea setup`. Four apps share an identical `main.js` and differ only in how `index.html` supplies the renderer call (inline script, external `renderer.js`, inline module, `onclick`). Output size is the CLI's `--token-count` for `analyze-javascript-application --format json`. Filtered sizes use `--filter-output normalized_result.summary` and `normalized_result.graph.nodes[0,40].observations[0,1].properties.web_preferences`. Determinism is five consecutive runs on the external-file app with `--full-output`. The filter slice rule was read from the bundled `incur` library's `Filter.js`. Source: [rea-ipc-bench.sh](/files/rea-ipc-bench.sh).
