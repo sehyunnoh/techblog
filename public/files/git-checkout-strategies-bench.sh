@@ -2,8 +2,8 @@
 # What each stock-git checkout strategy downloads and stores for one big repository.
 # Usage:  bash git-checkout-strategies-bench.sh [workdir] [repo-url] [subdir]
 # Defaults: ./gitbench, https://github.com/rust-lang/rust.git, library/core
-# Needs git >= 2.40 and about 6 GB of free disk. Downloads several GB in total.
-# Tested with git 2.55.0 on Windows 11 (Git for Windows, bash).
+# Needs about 6 GB of free disk and downloads several GB in total.
+# Tested with git 2.55.0 on Windows 11 (Git for Windows, bash); other versions untested.
 set -u
 export GIT_TERMINAL_PROMPT=0
 # Windows: this repository has paths longer than 260 characters, and without this the checkout

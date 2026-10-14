@@ -1,0 +1,208 @@
+---
+title: 'Git Partial Clone and Sparse Checkout, Step by Step: What Each Flag Downloads, What Breaks'
+description: 'How to clone a huge repository without downloading all of it, step by step, with the measured cost of every command and the history commands that quietly download more than a full clone.'
+pubDate: 2026-10-14
+updatedDate: 2026-10-14
+tags: ['devops', 'tutorial', 'benchmark']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+A normal `git clone` downloads every version of every file the repository has ever had. For a small project that is fine. For a big one it can be the slowest step of your build, and a few git features exist to avoid it. They are easy to turn on and easy to misread, because each one removes a different thing, and some of them move the cost to a later command that you do not expect to be slow.
+
+This guide walks through them in the order you would use them: clone a slice, look at what you got, fetch more when you need it, and see which commands get expensive. Every command was run on `rust-lang/rust`, which has 63,674 tracked paths and more than 340,000 commits, using git 2.55.0 on Windows 11.[^1] Each step lists the time and how much the object store (`.git/objects`) grew. I also wrote a [separate post](/posts/git-naive-fetch-600-pb-vs-stock-git) with the whole-clone comparison. This page is about doing it by hand and what surprised me along the way.
+
+## The words you need
+
+A **commit** is a snapshot of the project with a message and a parent. A **tree** is a directory listing. A **blob** is the contents of one file. A repository is mostly blobs, plus the trees and commits that connect them. The server you clone from is the **remote**.
+
+Three features cut the download, and they cut different things:
+
+| Feature | Flag | What it leaves out |
+|---|---|---|
+| Shallow clone | `--depth 1` | Everything except the latest commit's history[^2] |
+| Partial clone | `--filter=blob:none` | File contents (blobs) until something needs them[^2] |
+| Treeless clone | `--filter=tree:0` | Directory listings (trees) too, until needed[^3] |
+| Sparse checkout | `--sparse` | Files in your working directory only, not the download[^4] |
+
+A partial clone works because the remote stays on call: git remembers it as a **promisor remote**, a server that promised to supply the missing objects later on demand.[^2] You will see this in step 2.
+
+## Step 1: clone a slice
+
+The smallest useful clone combines three flags: only the latest commit, no file contents until needed, and a working directory with only the top-level files at first. Then you name the directory you actually want.
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse https://github.com/rust-lang/rust.git rust
+cd rust
+git sparse-checkout set library/core
+```
+
+On Windows, add `-c core.longpaths=true` to the clone if the repository has very long paths. I come back to that in the pitfalls.
+
+Measured: 3.8 seconds, 3.9 MiB in the object store, and 356 files in the working directory. The full repository has 63,674 tracked paths.[^1] `--sparse` starts git in **cone mode**, where you list directories and everything under them is included, along with the files directly in the top-level directory.[^4]
+
+## Step 2: check what you actually got
+
+Do not trust that the flags worked. Three quick checks:
+
+```bash
+git config --get-regexp '^(remote\.origin\.(promisor|partialclonefilter)|core\.sparsecheckout)'
+git rev-parse --is-shallow-repository
+git sparse-checkout list
+```
+
+My output:
+
+```text
+remote.origin.promisor true
+remote.origin.partialclonefilter blob:none
+core.sparsecheckout true
+core.sparsecheckoutcone true
+shallow: true, sparse list: library/core
+```
+
+`promisor true` and the filter line confirm the partial clone. Then compare counts: `git ls-files | wc -l` reports all 63,674 tracked paths while only 356 files exist on disk. That gap is how sparse checkout is supposed to look, so a mismatch is not a bug by itself. It becomes one if you expected the files to be there, which is how I found a different problem later.
+
+## Step 3: see the holes
+
+Git can list the objects it knows about but does not have:
+
+```bash
+git rev-list --objects --missing=print HEAD | grep -c '^?'
+```
+
+It printed 61,703 missing blobs and took 12.5 seconds. Those are the file contents git promised to fetch when needed, about 97% of the files at the tip.
+
+## Step 4: fetch one file on demand
+
+Reading a file outside your sparse set triggers a download of just that file:
+
+```bash
+git show HEAD:compiler/rustc_borrowck/src/lib.rs | wc -l
+```
+
+That printed 2,781 lines in 0.7 seconds and grew the object store by about 0.1 MiB. This is the promisor remote at work, and it is why a partial clone feels normal until the network is slow, because every missing object costs a round trip.
+
+## Step 5: add more directories later
+
+```bash
+git sparse-checkout add library/alloc
+```
+
+0.9 seconds, 0.4 MiB, and the working directory went from 356 to 453 files. `add` grows the set. `set` replaces it with exactly the directories you list, and the documentation notes that running `set` again changes your selection.[^4] To go back to everything:
+
+```bash
+git sparse-checkout disable
+```
+
+That one is not free, as step 9 shows.
+
+## Step 6: you need a bit of history
+
+A shallow clone has one commit. You can deepen it two ways, and they do not behave alike:
+
+```bash
+git fetch --deepen=5
+git fetch --shallow-since=2026-10-11
+```
+
+`--deepen` counts commits from the current boundary, and `--shallow-since` takes everything after a date.[^5] Here is what happened on this repository:
+
+| Command | Commits afterwards | Added to object store |
+|---|---|---|
+| `--deepen=1` | 3 | 0.4 MiB |
+| then `--deepen=5` | 50 | 1.2 MiB |
+| `--shallow-since` three days back (separate copy) | 106 | 1.5 MiB |
+
+Asking for one more commit gave me three, and asking for five more took me from 3 to 50. The depth is counted along every branch of history, and this project merges constantly, so one step back reaches several parents at once. If you want to predict how much history you will get, use a date, not a number.
+
+## Step 7: history commands, and the one that costs more than a full clone
+
+Sparse checkout and `--depth 1` hide how heavy history commands can get. To see that, I made two history-complete clones without checking out any files and ran the same question on each: the last 20 commits that touched `library/core/src/option.rs`.
+
+```bash
+git clone --filter=blob:none --no-checkout https://github.com/rust-lang/rust.git bl
+git -C bl log -n 20 --oneline -- library/core/src/option.rs
+
+git clone --filter=tree:0 --no-checkout https://github.com/rust-lang/rust.git tr
+git -C tr log -n 20 --oneline -- library/core/src/option.rs
+```
+
+<Chart
+  type="bar"
+  height={320}
+  format="plain"
+  caption="Object store size before and after asking for the last 20 commits that touched one file. A blobless clone already holds every tree, so the answer was instant. A treeless clone had to download trees for commit after commit and ended up larger than a full clone."
+  label="Grouped bar chart of two clones, before and after the same git log command. Blobless clone: 452.0 MiB before and 452.0 MiB after. Treeless clone: 143.8 MiB before and 1,740.4 MiB after"
+  labels={['Blobless clone', 'Treeless clone']}
+  series={[{ name: 'Before git log', data: [452.0, 143.8] }, { name: 'After git log', data: [452.0, 1740.4] }]}
+  valueLabels
+/>
+
+| History command on this repository | Blobless clone | Treeless clone |
+|---|---|---|
+| Fresh clone, no checkout | 98.3 s, 452.0 MiB | 105.5 s, 143.8 MiB |
+| `git log -n 20 -- one-file` | 0.2 s, no growth | 856.1 s, 143.8 to 1,740.4 MiB |
+| `git blame` of the same file (3,061 lines) | 548.5 s, +35.3 MiB | not measured |
+
+The treeless clone looked cheap at 143.8 MiB and then downloaded about 1.6 GB while answering a question that only needed 20 results. A full clone of this repository is about 1.1 GB.[^6] GitHub's own guidance says why: with `tree:0`, a path-limited `git log` has to fetch the root tree of almost every commit it walks, and it recommends treeless clones for automated builds, not for developers.[^7] Blame in a blobless clone has a different problem. It fetched only 35 MiB, yet took about nine minutes. Small bytes and a long time point at many round trips to the server, not bulk transfer, though I did not trace the requests to confirm it.
+
+The rule I take from this is simple. Blobless is a reasonable default for a person. Treeless is only for jobs that never ask about history.
+
+## Step 8: when you change your mind
+
+Turn the sparse checkout off in the small clone from step 1:
+
+```bash
+git sparse-checkout disable
+```
+
+118.3 seconds, the object store grew from 6.0 to 57.3 MiB, and the working directory went from 453 to 63,662 files. In other words, switching to "I need everything" costs about what a shallow clone costs. Much of the time is probably spent writing 63,000 files: in my earlier benchmark, a clone that downloaded the same amount took 15 seconds when only 356 files were written. If the filter itself was the wrong choice, the documentation describes `git fetch --refetch`, which re-downloads all objects as a fresh clone would and can reapply a changed filter.[^5] I did not test it.
+
+## Which setup to use
+
+<Mermaid
+  caption="A first-pass choice. The deciding questions are whether anyone needs history and whether a person or a job will use the clone."
+  label="Decision flowchart. Does the job or person need history? If no, use depth 1 with blob none and sparse, for example in CI. If yes, is it a person working interactively? If yes, use blob none with sparse and keep full history. If no, a throwaway job that needs history may use tree 0 but must not run path-limited log or blame."
+  code={`
+flowchart TD
+    A["Need commit history?"] -->|"No"| B["--depth 1 --filter=blob:none --sparse<br/>3.9 MiB in my test"]
+    A -->|"Yes"| C{"A person working<br/>interactively?"}
+    C -->|"Yes"| D["--filter=blob:none, add --sparse<br/>keeps all commits and trees"]
+    C -->|"No, a throwaway job"| E["--filter=tree:0<br/>never run path-limited log or blame"]
+`}
+/>
+
+| Situation | Command | Measured |
+|---|---|---|
+| CI that builds one component from the latest commit | `--depth 1 --filter=blob:none --sparse`, then `sparse-checkout set DIR` | 3.9 MiB, about 4 s |
+| A developer on a very large repository | `--filter=blob:none --sparse`, then `set` | 452.0 MiB without checkout, full history |
+| A bot that only needs commit messages | `--filter=tree:0` | 143.8 MiB, but see step 7 |
+
+## Pitfalls
+
+**Windows long paths.** This repository has paths over 260 characters. In my first attempt the checkout stopped at 17% with `Filename too long`, yet the clone still reported success, and I published wrong working-directory numbers because of it. If you clone on Windows, pass `-c core.longpaths=true` and compare `git ls-files | wc -l` with the number of files on disk afterward. I wrote up that mistake in a correction on the [earlier post](/posts/git-naive-fetch-600-pb-vs-stock-git).
+
+**Sparse checkout does not save bandwidth by itself.** It changes the working directory only. Pair it with a filter if you want a smaller download.[^4]
+
+**Shallow clones do not stay cheap.** GitHub's guide warns against fetching into a shallow clone because it can pull an almost-full history.[^7] In my related measurement, an update into a shallow clone cost about as much as cloning again.
+
+**Missing objects need the server.** Anything that touches an object you do not have is a network request. That is the design, and it means a partial clone can slow down or stall on a bad connection, a firewall or a server that stopped serving the repository. I did not test an offline case.
+
+**Your server has to support it.** Partial clone asks the server to send a subset of objects.[^2] I tested only against GitHub. A self-hosted server may handle it differently.
+
+## What I did not test
+
+One repository, one operating system, one git version, and one server. Times are single runs on my connection and include slow file creation on Windows. I did not measure `git pull`, `git diff`, `git checkout` of another branch, `--refetch`, `--unshallow`, or blame on the treeless clone (the log alone took 14 minutes). The `--deepen` numbers depend on this repository's merge-heavy history and will differ on yours. Run the script below on your own repository before trusting any of my ratios.
+
+## References
+
+[^1]: Methodology. Measured 2026-10-14 with git 2.55.0 on Windows 11 (Git for Windows, `core.longpaths` enabled), against `https://github.com/rust-lang/rust.git` over HTTPS. Object store size is `du -sk` of `.git/objects`. Steps 1 to 6 and 9 use one shallow, blobless, sparse clone of `library/core`, with a separate copy for the `--shallow-since` test. Steps 7 and 8 use fresh `--no-checkout` clones. `git log` and `git blame` ran with a 900 second timeout, which neither reached. Source: [git-partial-sparse-guide-steps.sh](/files/git-partial-sparse-guide-steps.sh).
+[^2]: Git, [git-clone documentation](https://git-scm.com/docs/git-clone). `--depth`, `--filter=blob:none`, `--sparse`, `--no-checkout`, and partial clone as the server sending a subset of reachable objects, with the missing ones supplied by a promisor remote.
+[^3]: Git, [git-rev-list, object filtering](https://git-scm.com/docs/git-rev-list). Defines `--filter=tree:<depth>`, where depth 0 omits all trees and blobs not explicitly requested.
+[^4]: Git, [git-sparse-checkout documentation](https://git-scm.com/docs/git-sparse-checkout). Cone mode, `set`, `add` and `disable`, and the description of sparse checkout as a change to the working tree.
+[^5]: Git, [git-fetch options](https://git-scm.com/docs/git-fetch). `--deepen` (commits from the current shallow boundary), `--shallow-since`, `--unshallow` and `--refetch` (fetch all objects as a fresh clone would, to reapply a changed filter).
+[^6]: Stock-git measurements from my earlier post, [Anthropic Says Naive Git Costs 600 PB a Day](/posts/git-naive-fetch-600-pb-vs-stock-git): full clone 1,108.9 MiB for the same repository.
+[^7]: GitHub, [Get up to speed with partial clone and shallow clone](https://github.blog/open-source/git/get-up-to-speed-with-partial-clone-and-shallow-clone/). Trade-offs of shallow, blobless and treeless clones, the warning about fetching from a shallow clone, and the recommendation to use treeless clones for automated builds.
