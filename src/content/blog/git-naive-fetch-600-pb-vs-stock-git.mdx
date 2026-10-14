@@ -1,0 +1,123 @@
+---
+title: "Anthropic Says Naive Git Costs 600 PB a Day. Stock Git Cut a 1.1 GB Clone to 3.9 MB"
+description: "Anthropic replaced git for its monorepo. I measured what shallow, partial and sparse checkouts do to a 343,479-commit repository, and where stock git still runs out."
+pubDate: 2026-10-14
+tags: ['devops', 'benchmark', 'deep-dive', 'architecture']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+On 13 October 2026, Anthropic published an engineering post about leaving git. Merges to its monorepo had grown more than tenfold, from around 2,500 code changes a day in May to over 30,000 a day by September, and source control had become the biggest bottleneck. They built an in-house system called **Scion** and moved the whole repository over in five months.[^1]
+
+One sentence in the post makes the case in numbers. A compressed working copy of the repository is over 25 GB, CI performs about 25 million checkouts a day, and "fetched naively, that would be over 600 PB of git traffic per day."[^1] The arithmetic holds: 25 million times 25 GB is 625 PB. What I wanted to know is what "naively" leaves out. The same post says git already has tools for working with a slice of a repository, namely shallow clones, sparse checkouts and promisor remotes, and says Anthropic used "all of them," internal mirrors and repository snapshots included, before building Scion.[^1] So how far do those tools actually get you? I measured it on a big public repository.
+
+## A few git terms, quickly
+
+A **repository** stores three kinds of things. **Commits** are snapshots with a message and a parent. **Trees** are directory listings. **Blobs** are the contents of files. A normal **clone** downloads all of it, for every commit in history.
+
+Three features cut that down, and they cut different things:
+
+- A **shallow clone** (`--depth 1`) keeps only the latest commit and drops history.[^2]
+- A **partial clone** (`--filter=blob:none`) keeps the full history but leaves out file contents until something needs them. The server that can supply the missing pieces later is called a **promisor remote**.[^2] A stricter filter, `tree:0`, leaves out the trees as well.[^3]
+- A **sparse checkout** limits which files appear in your working directory.[^4]
+
+The documentation describes sparse checkout in terms of the working tree only. It does not say whether it reduces what you download. I measured that too.
+
+<Mermaid
+  caption="What each feature removes, with the sizes I measured in this post for one checkout of library/core from rust-lang/rust. Sparse checkout alone shrinks the working directory but not the download. Only the combination gets small."
+  label="Flow diagram of sizes. Full clone, 1,108.4 MiB, with all 343,479 commits. Shallow clone removes history: 50.4 MiB. Shallow plus sparse removes files from the working directory only: still 50.4 MiB downloaded. Shallow plus blobless plus sparse downloads only the needed file contents: 3.9 MiB."
+  code={`
+flowchart LR
+    A["Full clone<br/>1,108.4 MiB<br/>343,479 commits"] -->|"drop history<br/>--depth 1"| B["Shallow<br/>50.4 MiB"]
+    B -->|"limit working dir<br/>sparse-checkout"| C["Shallow + sparse<br/>50.4 MiB downloaded<br/>8.4 MiB on disk"]
+    B -->|"also skip blobs<br/>--filter=blob:none"| D["Shallow + blobless + sparse<br/>3.9 MiB"]
+`}
+/>
+
+## The experiment
+
+I used `rust-lang/rust`,[^5] a repository with 343,479 commits and, at the tip, 11,395 files taking 154.5 MiB of working directory. It is nowhere near Anthropic's scale, and I come back to that below. For each strategy I cloned into a fresh directory, did a checkout, and then measured the size of the object store (`.git/objects`), the working directory, and the wall time.[^7] The last three strategies add a sparse checkout of one directory, `library/core`, which stands in for a CI job that builds one component.
+
+| Strategy | Seconds | Object store (MiB) | Working dir (MiB) | Files |
+|---|---|---|---|---|
+| Full clone | 222 | 1,108.4 | 154.5 | 11,395 |
+| Shallow (`--depth 1`) | 28 | 50.4 | 154.5 | 11,394 |
+| Blobless (`--filter=blob:none`) | 124 | 525.0 | 154.5 | 11,394 |
+| Treeless (`--filter=tree:0`) | 130 | 219.1 | 154.5 | 11,394 |
+| Shallow + sparse | 26 | 50.4 | 8.4 | 356 |
+| Shallow + blobless + sparse | 4 | 3.9 | 8.4 | 356 |
+| Blobless + sparse, full history | 82 | 473.7 | 8.4 | 356 |
+
+<Chart
+  type="bar"
+  horizontal
+  logY
+  height={340}
+  format="plain"
+  caption="Object store size after each clone, on a log scale. The full clone is about 284 times the smallest. Sparse checkout on its own changed nothing in the object store (50.4 MiB both with and without it)."
+  label="Horizontal bar chart on a log scale. Full clone 1,108.4 MiB. Blobless 525.0. Blobless plus sparse with full history 473.7. Treeless 219.1. Shallow 50.4. Shallow plus sparse 50.4. Shallow plus blobless plus sparse 3.9"
+  labels={['Full clone', 'Blobless', 'Blobless + sparse (full history)', 'Treeless', 'Shallow', 'Shallow + sparse', 'Shallow + blobless + sparse']}
+  series={[{ name: 'Object store (MiB)', data: [1108.4, 525.0, 473.7, 219.1, 50.4, 50.4, 3.9] }]}
+  valueLabels
+/>
+
+## What the numbers say
+
+**History is most of the size.** A shallow clone is 50.4 MiB against 1,108.4 MiB for the full clone, about 22 times smaller, and it still delivers all 11,394 files of the tip. The whole working directory is 154.5 MiB uncompressed, so the shallow clone is roughly a compressed copy of it, which is the quantity Anthropic describes when it talks about a compressed working copy.[^1] I am inferring that their "naive" figure means each checkout downloads about that much, not a full clone, because 25 million full clones of a history close to 100 GB would come to more than 2,000 PB.
+
+**Sparse checkout alone does not reduce the download.** Shallow plus sparse downloaded 50.4 MiB, exactly what plain shallow did. It reduced the working directory from 154.5 MiB and 11,394 files to 8.4 MiB and 356 files, and that is all. If you hope a sparse checkout will save bandwidth, it will not, unless a partial clone is also asking the server to skip the files you do not need.
+
+**The combination is where it gets small.** Shallow, blobless and sparse together downloaded 3.9 MiB in 4 seconds. That is about 284 times less than the full clone and about 13 times less than the shallow clone. The checkout fetched only the file contents inside `library/core`, which left 356 files, 3.1% of the 11,394 at the tip.
+
+**Keeping history is expensive in a different way.** Blobless with full history is 525.0 MiB, and with sparse it is still 473.7 MiB. The repository has 343,479 commits, and git still has to send the commits and the trees that describe every one of them. Treeless drops that to 219.1 MiB, at a cost GitHub's own guidance spells out: commands that need history then have to fetch trees on demand, and it recommends treeless clones for automated builds, not for daily developer work.[^6]
+
+### Staying up to date
+
+A fresh clone is one cost. Most CI jobs also update an existing copy. I started from the tag `1.85.0`, then fetched the current tip.
+
+| Strategy | Seconds | Added to object store (MiB) |
+|---|---|---|
+| Shallow, then `fetch --depth 1` | 15 | 45.1 |
+| Shallow + blobless + sparse, then `fetch --depth 1` | 3 | 4.1 |
+
+In both cases the update cost about as much as starting over: 45.1 MiB against 50.4 MiB for a fresh shallow clone, and 4.1 MiB against 3.9 MiB for a fresh minimal one. GitHub's guide makes the same warning about fetching into a shallow clone, which can pull an almost-full history.[^6] One caveat matters here. Tag 1.85.0 is far behind the tip, so this is closer to a worst case than to a nightly refresh. I did not measure a daily update.
+
+## How far does this go at Anthropic's scale?
+
+As a back-of-envelope illustration, not a prediction: if a CI job at Anthropic needed the same fraction of its tree that my `library/core` job needs (3.9 MiB out of the 50.4 MiB a shallow clone costs, 7.7%), 625 PB a day would become roughly 48 PB a day. Their jobs may need much more of the tree, and a repository of 25 GB compressed and almost 100 GB of history may not scale like mine.
+
+But even the optimistic number is large, and it exposes the part my measurements cannot reach. Stock git sends every one of those bytes from a server. Anthropic's post describes tiered caches in front of that server, each with a hit rate over 99%, plus a design in which each unit of work is a server-side changeset and clients fetch only what they need on demand.[^1] That is a claim about CPU, memory and caching, and it is outside what a single `git clone` can show. They also report that their new infrastructure is 200 times smaller than their previous mirroring setup and that CI checkouts are two orders of magnitude faster, without publishing methods or raw data.[^1] I could not check those, and I am not suggesting they are wrong. The measurement here only says that stock git narrows the transfer a lot, and that the remaining problem is serving it at that volume.
+
+## Where this can mislead
+
+**One repository, far smaller than theirs.** `rust-lang/rust` has about 1.1 GB of git data. Anthropic's history alone is almost 100 GB. Behaviors like negotiation, pack generation and server load may not scale linearly, and I did not test that.
+
+**One server.** Everything came from GitHub's servers, which have their own caching and tuning. A self-hosted git server may behave differently, and partial clone has to be supported by the server in the first place.[^2]
+
+**Sizes are on disk, not on the wire.** I measured the object store, which includes index files git builds locally. For the full clone, the progress output reported about 1,002 MiB received while the object store was 1,108.4 MiB, so the table overstates bytes on the wire by roughly ten percent for large clones. The ratios are what to trust.
+
+**Times are single runs over my home connection.** They show the order of magnitude, not a benchmark. The sizes are deterministic apart from the repository moving between runs.
+
+**The sparse job is my choice.** I picked `library/core`. A job that needs a third of the tree would see a much smaller gain.
+
+**I did not test partial-clone side effects.** After a blobless clone, later commands such as `git blame` can trigger more downloads, which the table does not include.[^6]
+
+## Takeaways
+
+- **The 600 PB figure describes naive checkouts, and git's own slicing features change the picture a lot.** In my test, shallow, partial and sparse together cut one checkout from 1,108.4 MiB to 3.9 MiB, and from 222 seconds to 4.
+- **Sparse checkout is not a bandwidth feature.** It shrank the working directory by 95% and the download by 0%. Pair it with `--filter=blob:none` if you want the savings.
+- **Shallow clones are good for throwaway CI, poor for staying current.** An update into a shallow clone cost almost as much as a fresh one.
+- **The hard part moves to the server.** If hundreds of thousands of jobs ask for the small checkout, the remaining cost is serving and caching, which is the problem Anthropic's post says Scion addresses. I did not measure that part.
+- **The experiment is cheap to repeat on your own repository.** The script takes a repository URL and a directory, so you can see your own numbers before you decide anything.
+
+## References
+
+[^1]: Anthropic, [Redesigning source control at Anthropic](https://www.anthropic.com/engineering/redesigning-source-control), published 13 October 2026. Source of the merge volumes, the 25 GB compressed working copy, 25 million CI checkouts per day, the 600 PB figure, the note that git offers shallow clones, sparse checkouts and promisor remotes and that they "used all of" the standard workarounds, the cache-tier and changeset design, and the 200x and two-orders-of-magnitude claims. I read the page on 14 October 2026.
+[^2]: Git, [git-clone documentation](https://git-scm.com/docs/git-clone). `--depth`, `--filter=blob:none`, `--sparse` and `--no-checkout`, and the description of partial clone as the server sending a subset of reachable objects.
+[^3]: Git, [git-rev-list, object filtering](https://git-scm.com/docs/git-rev-list). Defines `--filter=tree:<depth>`, where depth 0 omits all trees and blobs not explicitly requested.
+[^4]: Git, [git-sparse-checkout documentation](https://git-scm.com/docs/git-sparse-checkout). Describes sparse checkout in terms of the working tree and the skip-worktree bit, and recommends cone mode.
+[^5]: rust-lang, [rust](https://github.com/rust-lang/rust). Cloned at commit 2d37576c3d7 on 14 October 2026 (343,479 commits).
+[^6]: GitHub, [Get up to speed with partial clone and shallow clone](https://github.blog/open-source/git/get-up-to-speed-with-partial-clone-and-shallow-clone/). Trade-offs of shallow, blobless and treeless clones, including the warning about fetching from a shallow clone and the recommendation to use treeless clones for automated builds.
+[^7]: Methodology. Measured 2026-10-14 with git 2.55.0 on Windows 11 (Git for Windows), cloning `https://github.com/rust-lang/rust.git` over HTTPS. Each strategy ran in a fresh directory. Object store size is `du -sk` of `.git/objects`, working directory is the clone directory minus `.git`, and files are regular files outside `.git`. Sparse runs use `--sparse` then `git sparse-checkout set library/core` (cone mode). Update runs clone tag `1.85.0` with `--depth 1`, then `git fetch --depth 1 origin HEAD` and checkout, and report the growth of the object store. Source: [git-checkout-strategies-bench.sh](/files/git-checkout-strategies-bench.sh).
