@@ -1,0 +1,107 @@
+---
+title: 'Baalda vs Obsidian: What Baalda Is and Where the Two Actually Differ'
+description: 'Baalda is a new open-source notes app that also keeps plain Markdown files on your disk. A source-checked comparison with Obsidian on collaboration, AI access, price, plugins and maturity.'
+pubDate: 2026-10-15
+updatedDate: 2026-10-15
+tags: ['ai', 'architecture', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+
+Baalda (baalda.com) describes itself as "the team second brain."[^1] In one sentence: it is a desktop notes app, like Obsidian, where every note is a plain Markdown file in a folder you own. What it adds is two things Obsidian does not ship in the base app. Several people can edit the same note at once, and an AI assistant can read and write those notes through a built-in connection, with the same permissions a person would have.
+
+This guide explains how it works, compares it with Obsidian point by point, and marks which claims I checked and which come only from Baalda's own marketing. Everything here is current as of 2026-10-15, and Baalda is changing fast (the site showed v0.1.86), so expect parts of this to age.
+
+One limit up front: **I did not install or run Baalda.** What I know about its behavior comes from its website, its documentation and its public source repository. I have not tested its sync, its permissions or its migration from Obsidian.
+
+## Terms you need
+
+- A **vault** is the folder that holds your notes. In both apps, a vault is just a directory of `.md` files.
+- **Local-first** means the app works fully offline on your own disk, and any server is optional.
+- A **CRDT** is a data structure that lets several people edit the same text at once and merges their changes automatically without conflict dialogs. Baalda uses Yjs, a widely used CRDT library.[^2]
+- **MCP** (Model Context Protocol) is a standard way for an AI tool such as Claude to call tools exposed by another program. Here, it is how an AI assistant reads and edits your notes.
+
+## How Baalda works
+
+The interesting part is a problem Baalda's README states directly. Plain Markdown files are easy for an AI to edit, but real-time collaboration usually stores text as an opaque CRDT state, which a plain file cannot be. Tools tend to pick one. Baalda keeps both: the `.md` file stays the durable source of truth, and a live CRDT sits beside it.[^2]
+
+<Mermaid
+  caption="Baalda's design as the repository describes it. A file watcher turns edits to the .md file into CRDT operations, and operations from teammates are written back to the file. A local AI agent edits the file directly, while a cloud AI goes through the server's MCP endpoint."
+  label="Diagram. Your .md file and a local CRDT are linked by a two-way bridge. The CRDT syncs with a server that stores binary updates in Postgres. Teammates' apps sync with the same server. A local AI agent edits the file directly. A cloud AI connects to the server over MCP."
+  code={`
+flowchart LR
+    F["Your .md file<br/>on disk"] <-->|"watcher and bridge"| C["Local CRDT<br/>in .context/"]
+    L["Local AI agent<br/>Claude Code, etc."] -->|"edits the file"| F
+    C <-->|"sync"| S["Sync server<br/>Postgres, binary updates"]
+    T["Teammate's app<br/>own .md copy"] <-->|"sync"| S
+    A["Cloud AI"] -->|"MCP, same permissions"| S
+`}
+/>
+
+Two details from the source help set expectations. First, each vault gets a hidden `.context/` directory holding a local search index, a config file and the CRDT store, and that config binds the folder to one specific server, so a folder is not meant to be pointed at two servers.[^3] Second, the stack is a Tauri v2 desktop shell with a Rust core, a CodeMirror 6 editor, SQLite for local search, and Hocuspocus plus Postgres on the server.[^2] A server is only needed for sharing. The README says it can be self-hosted.
+
+## What is the same
+
+Both apps keep notes as plain Markdown files on your disk, both work offline, and both support `[[wikilinks]]`, backlinks and tags. Both let you point other tools, including Git or a coding agent, at the same folder, because the files are ordinary files.
+
+## Where they differ
+
+| | Obsidian | Baalda |
+|---|---|---|
+| License | Proprietary. The app is free, including for commercial use. An optional Commercial license is $50 per user per year.[^4] | Apache-2.0, desktop app and server both.[^5] |
+| Paid parts | Sync from $4 per user per month billed annually. Publish $8 per site per month billed annually.[^4] | Free plan: 2 people, 1 synced vault. Team plan: $10 per seat per month, minimum 3 seats. Self-hosting has no plan limits.[^1] |
+| Multi-person editing | Obsidian Sync supports shared vaults, and its page says notes update in real time across a team's devices.[^6] | Keystroke-level merging through a CRDT, with live cursors.[^2] |
+| How conflicts resolve | Sync merges Markdown edits with Google's diff-match-patch. Other files, including canvases, use "last modified wins."[^7] | CRDT operations merge by construction. Offline reconciliation was still "in review" in the project's status file on 2026-09-26.[^8] |
+| Per-file permissions | None that I found in the docs I read. | Viewer or Editor per file, enforced by the server, including for AI access.[^1] |
+| AI access | No built-in MCP that I found. Community plugins fill the gap (counts below). | Built-in MCP endpoint, documented with 22 tools.[^9] |
+| Extensibility | Community plugins and themes. | MCP and files. The site describes no plugin system. |
+| Encryption | Sync is end-to-end encrypted with AES-256.[^6] | The security page does not claim end-to-end encryption, and at-rest encryption is listed as deferred work in the project's specs.[^10] |
+| Platforms | Desktop and mobile. | macOS, Windows and Linux. iOS is planned.[^2] |
+
+## A claim worth checking
+
+Baalda's own comparison page calls Obsidian "single-user by design" and lists real-time collaboration as something Obsidian lacks.[^11] Obsidian's pricing and Sync pages say otherwise: Sync includes collaboration on shared vaults, and shared-vault notes update in real time.[^4][^6]
+
+The honest reading is that the gap is narrower than Baalda's page implies, and it sits in the mechanism and the extras. Obsidian documents text merging with diff-match-patch, which is how it reconciles two versions of the same note.[^7] Baalda documents a CRDT with live cursors and server-side per-file permissions. I could not find presence or cursors mentioned on Obsidian's Sync page, but that is an absence on one page, not proof of absence in the app. If real-time team editing is your only need, try Obsidian's shared vaults before concluding you need something else.
+
+## The AI claim, measured
+
+Baalda's page marks Obsidian's AI support as "Partial, community plugins." That is fair, and I can put a number on it. I counted entries in the community plugin directory published in Obsidian's own releases repository on 2026-10-15:[^12]
+
+- 8,981 community plugins and 883 community themes.
+- 59 plugin listings whose id, name or description contains "mcp," including servers that expose a vault to Claude Desktop, Claude Code and Cline.
+
+So Obsidian is not missing MCP access, it just comes from third parties, one plugin at a time, with whatever permission model each author chose. Baalda's difference is that MCP access goes through the same permission checks as a person, and that it is built into the product. Whether that matters depends on how many people share the notes.
+
+## How young it is
+
+Baalda's repository was created on 2026-07-14, has 187 stars, 34 forks and 2 open issues, and its latest release at the time was v0.1.86.[^13] That is three months old. Its changelog is honest about what that means. The unreleased section adds a version saved automatically before any large deletion, and a recovery tool that lists notes "damaged by past sync bugs (emptied, or full of repeated punctuation)."[^14]
+
+I would not read that as a reason to avoid it. I would read it as a reason to keep a Git backup of any vault you share, which the plain-file design makes easy. Obsidian has years of use behind it, which is the maturity point Baalda's own page concedes.[^11]
+
+## Which one to pick
+
+- **You work alone, or with one or two people who are fine with Sync.** Obsidian. It has the larger ecosystem, mobile apps and a long track record.
+- **A small team shares notes and AI agents edit them.** Baalda is the one built for that, and its free plan covers two people. Run it on a copy of your notes first.
+- **You need the server to be open source and self-hosted.** Baalda. Obsidian's Sync is a paid hosted service.
+- **You need end-to-end encryption.** Obsidian Sync claims it, and Baalda does not.
+
+Baalda says moving an Obsidian vault is a straight folder copy that keeps wikilinks intact.[^11] I did not test that, so try it on a copy rather than your only vault.
+
+## References
+
+[^1]: Baalda, [homepage](https://baalda.com/) and [pricing](https://baalda.com/pricing), read 2026-10-15. Source of the plan details, per-file permissions and MCP claims.
+[^2]: Baalda repository README and `docs/specs`, [github.com/naveedharri/baalda](https://github.com/naveedharri/baalda), read 2026-10-15. Source of the tech stack (Tauri v2, Rust, CodeMirror 6, SQLite FTS5, Yjs, Hocuspocus, Postgres), the file-to-CRDT bridge, and the iOS plan.
+[^3]: Baalda `docs/BRANDING.md` (the `.context/` directory contents) and `docs/DEPLOY.md` (a vault's `.context/config.json` binds the folder to one server).
+[^4]: Obsidian, [pricing](https://obsidian.md/pricing), read 2026-10-15. Free app including commercial use, Catalyst $25 one-time, Commercial $50 per user per year, Sync from $4 per user per month billed annually, Publish $8 per site per month billed annually.
+[^5]: Baalda, [open source page](https://baalda.com/open-source). Apache-2.0 for the desktop app, core and backend. An `ee/` folder is reserved for future commercial features and was empty at the time.
+[^6]: Obsidian, [Sync](https://obsidian.md/sync), read 2026-10-15. Shared vaults, real-time updates, AES-256 end-to-end encryption, plan limits.
+[^7]: Obsidian Help, [Sync troubleshooting](https://obsidian.md/help/sync/troubleshoot). Markdown merges use diff-match-patch, other files use last modified wins.
+[^8]: Baalda `docs/STATUS.md`, entry dated 2026-09-26 for the `feat/offline-reconciliation` branch.
+[^9]: Baalda, [docs](https://baalda.com/docs). Lists a tool reference of 22 MCP tools.
+[^10]: Baalda, [security page](https://baalda.com/security), which does not mention end-to-end encryption, and `docs/specs/00-architecture-overview.md`, which lists encryption under deferred Phase 4 work.
+[^11]: Baalda, [comparison with Obsidian](https://baalda.com/compare/obsidian). This is the vendor's own marketing page.
+[^12]: Methodology. On 2026-10-15 I downloaded `community-plugins.json` and `community-css-themes.json` from [obsidianmd/obsidian-releases](https://github.com/obsidianmd/obsidian-releases) and counted entries, and counted plugin entries whose id, name or description contained "mcp" (case-insensitive). A keyword match is not a quality or maintenance check.
+[^13]: GitHub API for the Baalda repository, queried 2026-10-15: created 2026-07-14, 187 stars, 34 forks, 2 open issues, Apache-2.0. The v0.1.86 figure is from the homepage.
+[^14]: Baalda `CHANGELOG.md`, "Unreleased" section, read 2026-10-15.
