@@ -1,0 +1,155 @@
+---
+title: "Go 1.27 Turned 100 New Connections Into 1. Above 256 KB, Nothing Changed."
+description: "Go 1.27 now drains an unread HTTP/1 response body so the connection can be reused. I counted dials on Go 1.26 and 1.27, and found where the fix stops working."
+pubDate: 2026-10-15
+tags: ['go', 'web', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+The Go team published a short post this week about HTTP/1 connection reuse in Go 1.27.[^1] The headline number is that 100 GET requests to one server took about 710 ms on Go 1.26 and about 150 ms on Go 1.27, almost five times faster, with no change to the calling code. The post says the numbers come from the author's machine and one endpoint, and it explains the mechanism in a few paragraphs.
+
+That is a good setup for a test. The mechanism has hard edges (a size limit, a time limit, a few cases it skips), and a single timing number cannot show where those edges are. So I ran Go 1.26.2 and Go 1.27.0 side by side against a local server, counted every new TCP connection, and varied the response until the fix stopped helping.
+
+The short version: for small responses, 100 requests went from 100 connections to between 1 and 4. For responses over 256 KB, to slow responses, and for `Connection: close`, the count stayed at 100. And the fix is not free. It makes the client download bytes it was going to throw away.
+
+## The problem in plain terms
+
+HTTP/1 sends one response after another down a single TCP connection, and the client is expected to reuse that connection for the next request. This is called **keep-alive** (the HTTP/1.1 specification makes connections persistent by default[^2]). Reuse matters because opening a connection is not free. A fresh TCP connection costs one network round trip (RTT) before any request can be sent, and a TLS connection adds one or two more on top.[^1]
+
+There is a catch. A connection can carry only one response at a time, in order. If your code receives the response headers, decides it only needed the status code, and calls `resp.Body.Close()` without reading the body, the rest of that body is still sitting in the pipe. The next response would arrive behind it, and the client has no cheap way to find where one ends and the next begins. Through Go 1.26, `net/http` took the safe option: it threw the connection away and dialed a new one for the next request.[^1]
+
+Go programs hit this more often than you would expect. A helper that returns `resp.StatusCode` and never touches the body does it. So does decoding JSON with `json.NewDecoder`, which can stop before the trailing bytes of the body.
+
+HTTP/2 does not have the problem, because it splits one connection into independent streams. The Go post disables it with `GODEBUG=http2client=0` to isolate the HTTP/1 behavior, and so does my benchmark (the transport has HTTP/2 off, and the test server is plain HTTP anyway).
+
+## What Go 1.27 does
+
+The old workaround was to drain the body yourself before closing it: `io.Copy(io.Discard, resp.Body)`. Go 1.27 moves that into the transport.[^1] I read the source to see the actual rules, in `net/http/transport.go` from the 1.27.0 release.[^3]
+
+<Mermaid
+  caption="What the transport does when a caller closes a response body in Go 1.27. The limits are constants in transport.go: 256 KB and 50 ms."
+  label="Flow diagram. Caller closes body. If body already at EOF, connection returns to pool. Otherwise, if Content-Length is over 256 KB, close the connection. If not, drain in a background goroutine for up to 50 milliseconds. If drained to EOF, return connection to pool. If not, close it."
+  code={`
+flowchart TD
+    A["Caller calls Body.Close()"] --> B{"Body already<br/>read to EOF?"}
+    B -->|yes| P["Connection goes back<br/>to the idle pool"]
+    B -->|no| C{"Content-Length<br/>over 256 KB?"}
+    C -->|yes| X["Close the connection"]
+    C -->|"no, or unknown"| D["Drain in a background<br/>goroutine, up to 50 ms"]
+    D --> E{"Reached EOF<br/>within 256 KB<br/>and 50 ms?"}
+    E -->|yes| P
+    E -->|no| X
+`}
+/>
+
+Three details from the source matter later:
+
+- The limits are two constants, `maxPostCloseReadBytes = 256 << 10` and `maxPostCloseReadTime = 50 * time.Millisecond`.
+- The size check uses the declared `Content-Length`. If the server sent a chunked response, the length is unknown (-1), so the transport always tries.
+- `Close()` returns right away. The drain runs in the background, and the connection joins the idle pool only after the drain finishes.
+
+That last point predicts a race: if you fire the next request before the drain is done, the pool has no idle connection yet and the client dials a new one. I will come back to it, because the measurements show it.
+
+## How I measured
+
+The benchmark is one Go file with a server and a client in the same process.[^4] The server hands out a response of a chosen size, a slow response that pauses between two chunks, a `Connection: close` response, and two JSON responses. The client makes 100 sequential GET requests per case, closes each body without reading it (except for one control), and records:
+
+- new connections, counted by the server's `ConnState` hook each time a connection enters `StateNew`,
+- wall time for the 100 requests,
+- bytes the client actually received, counted by wrapping the connection.
+
+Loopback has almost no latency, so connection setup is nearly free and the effect would be small. To imitate a real network, a second set of runs adds a 20 ms sleep to every dial. That models only the TCP handshake delay, not TLS and not a slow link, which I will list as a limit below.
+
+Connection counts were stable across repeated runs. Wall times were not: on this machine the same 1.26 case measured anywhere from 54 to 159 ms across runs at zero added latency. I therefore treat the connection count as the main result and the 20 ms timings as the illustration.
+
+## Result 1: small bodies reuse the connection
+
+With a 20 ms dial delay and a body under 256 KB, Go 1.26 opened a new connection for every request, and Go 1.27 almost never did.
+
+<Chart
+  type="bar"
+  height={340}
+  format="plain"
+  caption="New TCP connections opened for 100 sequential requests that each close the body unread, 20 ms added per dial. Go 1.26 opens 100 every time. Go 1.27 opens 1 for a 1 KB or 64 KB body, 11 to 26 right at the 256 KB limit, and 100 again above it."
+  label="Grouped bar chart of new connections per 100 requests. Body 1 KB: Go 1.26 100, Go 1.27 1. 64 KB: 100 and 1. 256 KB minus 1 byte: 100 and 11. Exactly 256 KB: 100 and 26. 256 KB plus 1 byte: 100 and 100. 1 MB: 100 and 100."
+  labels={['1 KB', '64 KB', '256 KB - 1 B', '256 KB', '256 KB + 1 B', '1 MB']}
+  series={[
+    { name: 'Go 1.26.2', data: [100, 100, 100, 100, 100, 100] },
+    { name: 'Go 1.27.0', data: [1, 1, 11, 26, 100, 100] }
+  ]}
+  yTitle="new connections per 100 requests"
+/>
+
+Time follows the connection count. With 20 ms per dial, 100 requests with a 1 KB body took 2,245 ms on Go 1.26 and 29 ms on Go 1.27. That is a far bigger ratio than the roughly 5x in the Go post, which is what you would expect: their requests cross a real network and spend time on the request itself, while mine are local and the only cost left to remove is the dial. At zero added latency the gap was smaller (1.26 around 55 ms, 1.27 around 8 ms for the 1 KB case, in three runs each), because a loopback connect is cheap.
+
+Notice the 11 and 26 at the limit. A body just under 256 KB takes real time to drain, even on loopback, and the next request often started before the drain finished. The client then dialed again, which is the race I described above. So "reused" means "reused if you give the drain time to finish," and a loop that closes a large body and immediately sends the next request will lose some reuse.
+
+## Result 2: where it does nothing
+
+Three kinds of response kept the count at 100 on 1.27, as the source suggests they would.
+
+| Case (20 ms dial, 100 requests) | Go 1.26 conns | Go 1.27 conns | Why |
+|---|---|---|---|
+| Body of 256 KB + 1 byte, or 1 MB | 100 | 100 | `Content-Length` over the limit, so no drain is attempted |
+| Server pauses 100 ms mid-body | 100 | 100 | Drain hits the 50 ms cap and gives up |
+| Server pauses 10 ms mid-body | 100 | 40 | Drain finishes in time only some of the time |
+| `Connection: close` in the response | 100 | 100 | Server closes the connection itself, nothing to reuse |
+
+The 10 ms pause is the interesting row. A drain that needs 10 ms finishes well inside the 50 ms limit, yet 40 of 100 requests still dialed, because the next request raced the drain again. A slow server therefore hurts twice: it can blow the time limit, and it can lose the race even when it does not.
+
+## Result 3: the JSON case
+
+The Go post names JSON decoding as a common trigger. I tested it two ways. The server sent `{"a":1}` followed by a newline, once with a `Content-Length` header and once chunked, and the client called `Decode` once and closed the body.
+
+With a `Content-Length`, both versions used 1 connection. The whole 8-byte body arrived in the first read, so the body had already reached its end by the time `Close` ran, and nothing was left unread. With chunked encoding, Go 1.26 opened 100 connections and Go 1.27 opened 1. My reading is that the chunked response ends with a final zero-length chunk the decoder never asked for, so the body was not yet at its end when `Close` ran. I did not trace that through the source, so take the cause as a likely explanation and the counts as the measurement.
+
+So the JSON problem is real, but it depends on how the server frames the response. Whether a given API hits it is something to measure, not assume.
+
+## The cost: the client now downloads what it was going to discard
+
+Draining means reading. A client that used to receive the first few kilobytes and then drop the connection now receives the whole body, up to the limit.
+
+<Chart
+  type="bar"
+  height={320}
+  format="plain"
+  caption="Kilobytes the client received per request when it closes the body unread. Go 1.26 stops after the first read (about 4 KB). Go 1.27 downloads the whole body when it is within the 256 KB limit."
+  label="Grouped bar chart of kilobytes received per request. 1 KB body: Go 1.26 1.1, Go 1.27 1.1. 64 KB body: 4.0 and 63.5. About 256 KB body: 4.0 and 253.6. 1 MB body: 4.0 and 4.0."
+  labels={['1 KB body', '64 KB body', '~256 KB body', '1 MB body']}
+  series={[
+    { name: 'Go 1.26.2', data: [1.1, 4.0, 4.0, 4.0] },
+    { name: 'Go 1.27.0', data: [1.1, 63.5, 253.6, 4.0] }
+  ]}
+  yTitle="KB received per request"
+/>
+
+For a 64 KB body that is 63.5 KB per request instead of 4 KB. That is about 16 times more data on the wire to save a handshake. On a fast link to a nearby server this is a good trade. On a metered mobile connection, or with a server that returns large bodies you routinely ignore, it may not be. The 256 KB cap bounds the waste per request, and a body above the cap costs the same as before, because the transport refuses to start.
+
+This is also why the Go post's closing advice (let `net/http` handle it, just close the body) holds for small responses but not for large ones. If you already know you want only the status of a possibly large resource, a `HEAD` request avoids sending the body at all.
+
+## Where this can mislead
+
+- **One machine, one OS.** Windows 11 on an Intel Core Ultra 7 258V, loopback only. Windows connect and scheduling costs are not the same as Linux.
+- **Plain HTTP and a simulated delay.** The 20 ms sleep imitates a handshake round trip. Real TLS adds more round trips and CPU, which would make the reuse benefit larger, but I did not measure it.
+- **Sequential requests.** I did not test concurrent clients, where several goroutines share one pool and the race with the drain plays out differently.
+- **Noisy wall times.** Treat the millisecond figures as illustrations. The connection counts are the reliable part, and even those moved by a few at the 256 KB boundary between runs.
+- **Not a reproduction of the Go post's number.** I did not call `index.golang.org`, so I cannot confirm or dispute 710 ms versus 150 ms. I confirmed the mechanism and the limits.
+- **Behavior may change.** The Go post says the drain rules could change in later releases, so the 256 KB and 50 ms values are Go 1.27.0 facts, not promises.
+
+## Takeaways
+
+- If your Go service makes HTTP/1 calls and sometimes closes a body unread, upgrading to 1.27 can remove most of the redundant dials with no code change. In my test, 100 became 1.
+- The fix has a ceiling: bodies over 256 KB, servers that stall mid-body for more than 50 ms, and `Connection: close` responses behave exactly as before.
+- Reuse is not guaranteed even under the limits. A new request that starts before the background drain ends still dials.
+- You pay in bandwidth. Closing an unread 64 KB response now downloads all 64 KB.
+- Keep draining and closing by hand when the response may be large or you need predictable behavior. Otherwise, `defer resp.Body.Close()` is now enough for small responses.
+
+## References
+
+[^1]: Nicholas Husin and Damien Neil, [Better HTTP/1 connection reuse](https://go.dev/blog/http-connection-reuse), The Go Blog, 14 October 2026. Source of the 710 ms vs 150 ms figure (100 GETs to index.golang.org with `GODEBUG=http2client=0`), the 256 KB and 50 ms drain limits, and the note that the behavior may change.
+[^2]: IETF, [RFC 9112: HTTP/1.1](https://www.rfc-editor.org/rfc/rfc9112), section 9.3, persistent connections.
+[^3]: Go 1.27.0 source, `src/net/http/transport.go`: `maxPostCloseReadBytes`, `maxPostCloseReadTime`, `maybeDrainBody` and the `tryDrain` check in `readLoop`. Read from the local 1.27.0 installation.
+[^4]: Methodology. Measured 2026-10-15 on an Intel Core Ultra 7 258V, Windows 11, Go 1.26.2 and Go 1.27.0 (windows/amd64, each selected with `GOTOOLCHAIN`), server and client in one process over 127.0.0.1, HTTP/1.1 only, `ForceAttemptHTTP2` off. Each case made 100 sequential GET requests on a fresh `Transport`, repeated 3 times for the 20 ms runs and 5 to 7 times for the zero-latency runs, reporting the median time. New connections were counted with `http.Server.ConnState` (`StateNew`) and received bytes with a counting `net.Conn` wrapper, both from the last repetition. The 20 ms runs add `time.Sleep(20ms)` before each dial. Source: [http1-reuse-bench.go](/files/http1-reuse-bench.go).
