@@ -1,0 +1,114 @@
+---
+title: "UTC Stops Adding Leap Seconds in 2027. No Runtime I Tested Could Hold One Anyway."
+description: "The BIPM made UTC continuous from 20 May 2027, citing the risk of a negative leap second. I fed 23:59:60 to six runtimes, and none turned it into a moment of its own."
+pubDate: 2026-10-16
+tags: ['systems', 'architecture', 'deep-dive']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+The international body that keeps the world's time has decided to stop adjusting it. Resolution 5 of the 28th General Conference on Weights and Measures says that "continuous UTC will become effective on 20 May 2027."[^1] In practice that means no more leap seconds for centuries.
+
+I wanted to know how much trouble that removes for software, so I took the second that has caused so much trouble, 23:59:60, and fed it to six common runtimes. The short answer is that most of them refuse it, a few quietly move it to a different second, and one folds it into the wrong one. None of them gives it a moment of its own. The danger the BIPM names most urgently is a leap second that has never happened at all.
+
+## A leap second in one paragraph
+
+Three clocks matter here. **TAI** is atomic time, a count of seconds that never stops or jumps. **UT1** is time defined by the rotation of the Earth, which wobbles and slows. **UTC**, the time on your phone, is TAI shifted by a whole number of seconds so that it stays within 0.9 seconds of UT1.[^2] When the gap threatens to grow too large, the standard-keeping bodies add a **leap second** at the end of a June or December: the clock goes 23:59:59, then 23:59:60, then 00:00:00.
+
+That has happened 27 times since 1972, and every one added a second. The IANA leap-second list shows TAI minus UTC rising from 10 seconds to 37.[^3] The last one came at the end of 2016-12-31. The IERS bulletin from July 2026 says no leap second will be added at the end of December 2026, so by then the gap since the last one will be about ten years.[^4]
+
+<Chart
+  type="bar"
+  height={300}
+  format="plain"
+  caption="Leap seconds added per decade, counted from the IANA leap-seconds.list. The pace dropped after 1999, and there have been none in the 2020s so far."
+  label="Bar chart of leap seconds per decade. 1970s 8, 1980s 6, 1990s 8, 2000s 2, 2010s 3, 2020s so far 0."
+  labels={['1970s (from 1972)', '1980s', '1990s', '2000s', '2010s', '2020s so far']}
+  series={[{ name: 'leap seconds added', data: [8, 6, 8, 2, 3, 0] }]}
+  yTitle="leap seconds"
+/>
+
+## What the BIPM actually decided
+
+The resolution sets two numbers. Continuous UTC starts on 20 May 2027, and the allowed difference between UT1 and UTC, written |UT1-UTC|, becomes 3,600 seconds, one hour, which the text says secures UTC for several centuries.[^1]
+
+The reasons it lists are more interesting than the decision. A workshop in March 2025 estimated a 30% chance of a **negative** leap second by 2035, which would mean removing a second, so the clock would go from 23:59:58 straight to 00:00:00. The resolution notes that a negative leap second "has not previously been applied" and is considered to pose a high risk of disruption to critical infrastructure that is largely unprepared.[^1] It also says the different ways global providers hide leap seconds from their servers leave their clocks inconsistent with one another.[^1] The official text is the French version, and what I read is the English translation on the BIPM site.
+
+## What I tested
+
+I wrote the same small probe for each runtime. It tries to build or parse `2016-12-31T23:59:60Z`, the last real leap second, then computes the time between 23:59:59 and the following midnight, and the number of seconds in 2016.[^5]
+
+| Runtime | What it does with 23:59:60 |
+|---|---|
+| Python 3.12 | `datetime(...)` and `fromisoformat` raise `ValueError`. `time.strptime` accepts it, but `calendar.timegm` returns 1483228800, which is midnight |
+| Node 24 | `new Date("...23:59:60Z")` is Invalid Date. `Date.UTC(...)` rolls over to 2017-01-01T00:00:00Z |
+| Go 1.27 | `time.Parse` fails with "second out of range". `time.Date` rolls over to 2017-01-01T00:00:00Z |
+| Java 24 | `LocalDateTime` and `OffsetDateTime` throw. `Instant.parse` accepts it and returns 2016-12-31T23:59:59Z, epoch 1483228799 |
+| C (glibc, Ubuntu 24.04) | `strptime` stores `tm_sec=60`, then `timegm` normalizes to midnight, 1483228800 |
+| PowerShell 5.1 (.NET Framework) | Throws `ArgumentOutOfRangeException` or `FormatException` |
+| GNU `date` 9.4 | "invalid date" |
+
+So there are three behaviors: reject the input, roll it into the next second, or squash it into the previous one. A moment that means "the second between 59 and 00" does not exist in any of them.
+
+<Mermaid
+  caption="UTC around the 2016 leap second has three labeled seconds, but a Unix epoch count has only two values there. Go, Node, C and Python's timegm map the leap second onto midnight, and Java's Instant maps it onto 23:59:59."
+  label="Diagram. UTC labels 23:59:59, 23:59:60 and 00:00:00 in order. Epoch value 1483228799 is reached from 23:59:59, and also from 23:59:60 in Java. Epoch value 1483228800 is reached from 00:00:00, and also from 23:59:60 in Go, Node, C and Python timegm."
+  code={`
+flowchart LR
+    A["23:59:59"] --> B["23:59:60"] --> C["00:00:00"]
+    A --> D["epoch 1483228799"]
+    C --> E["epoch 1483228800"]
+    B -. "Go, Node, C, Python timegm" .-> E
+    B -. "Java Instant" .-> D
+`}
+/>
+
+Java is the only runtime here whose documentation describes how it treats leap seconds at all. Its `Instant` uses a time scale in which every day has exactly 86,400 seconds, and on days with a leap second it spreads the extra second over the last 1,000 seconds of the day.[^6] That is a **leap smear**, a way of absorbing the extra second gradually instead of adding a visible 23:59:60. Under that model, mapping 23:59:60 onto 23:59:59 is the consistent choice. The page does not describe parsing, so that link is my inference.
+
+## The elapsed-time error is real and every runtime has it
+
+I also asked each runtime how many seconds lie between 2016-12-31T23:59:59Z and 2017-01-01T00:00:00Z. Every runtime said 1. The true elapsed time was 2 seconds, because the leap second sat between them. For the whole of 2016, all six returned 31,622,400, which is 366 days of 86,400 seconds. The year actually lasted 31,622,401 seconds.
+
+That one-second error is inherent in how Unix time works. A Unix timestamp counts days at exactly 86,400 seconds, so it has to repeat or skip a value when UTC adds or drops a second. For nearly all programs the error is harmless. It becomes a bug only if you subtract two wall-clock readings and trust the answer.
+
+## Why a missing second is the scary one
+
+Cloudflare's post-mortem of the 2016 leap second shows what that looks like. Their DNS software measured round-trip times by subtracting a start time from the current time. When the clock stepped back at the leap second, one measurement came out negative. That fed into a weighted server-selection function that panics on a negative argument, so some DNS lookups failed. The impact ran from 00:00 to 06:45 UTC, with about 0.2% of DNS queries affected at the peak and under 1% of HTTP requests seeing errors.[^7]
+
+That was a positive leap second, the kind with 27 real examples and years of preparation. A negative one would step the clock the other way, and nobody has ever run one. Google's public documentation describes how its smear would handle it, then says it has not had to.[^8] The BIPM's cost estimate for being ready, "similar to their preparations for the millennium bug," comes from the same resolution.[^1]
+
+Go's documentation today says `time.Now` returns a value carrying both a wall clock and a monotonic clock reading, and that the wall clock is for telling time while the monotonic clock is for measuring it.[^9] Cloudflare's post-mortem traces its bug to assuming time cannot go backwards, which is the assumption a monotonic reading removes.
+
+## A side observation: Linux can forget the 37 seconds
+
+On a Linux kernel, `CLOCK_TAI` should read 37 seconds ahead of `CLOCK_REALTIME`, since that is the current difference between TAI and UTC. In WSL2 on this machine it read 37 seconds on every run except right after the virtual machine booted, which I saw on two separate boots. I polled the second one: at 22.7 seconds of uptime the offset was 0, at 30.7 seconds it was 37, and it stayed there. Something set it in between. `systemd-timesyncd` was already running by then, and I did not find out which component wrote the value.[^5] This is a single machine and a WSL2 kernel, so I would not generalize it, but it is a reminder that the offset is a number some software must be told.
+
+## Where this can mislead
+
+- **Defaults only.** I tested each runtime's standard date and time classes. Libraries such as Rust's `chrono`, Joda-Time, Postgres or the JavaScript Temporal proposal may behave differently.
+- **No live leap second.** The last one was in 2016, so I tested parsing and arithmetic. I did not observe how any operating system's clock behaves at the moment of a real leap second.
+- **One operating system version each.** Windows 11 for most runtimes, and Ubuntu 24.04 on WSL2 for C and GNU `date`. I did not test the Windows kernel's own timekeeping.
+- **Cloudflare's numbers are theirs.** I read their post-mortem and did not reproduce the incident.
+- **The 30% estimate comes from a workshop** summarized in the resolution, and I did not read the workshop's own report.
+
+## Takeaways
+
+- Nothing in your code needs to change for leap seconds to stop. You never saw one as a distinct moment, because the runtimes above cannot represent it.
+- Historical durations still depend on the 27 past leap seconds. Subtracting two UTC timestamps that straddle one is off by a second, in every runtime I tried.
+- Measure durations with a monotonic clock, not by subtracting wall-clock readings. That was the root cause in Cloudflare's incident.
+- If you ever touch TAI or GPS time, find out where the 37-second offset comes from on that machine, because the kernel does not know it by itself.
+- Retiring an event nobody has rehearsed is cheaper than rehearsing it. That is the BIPM's own reasoning, and the comparison to the millennium bug is theirs.
+
+## References
+
+[^1]: BIPM, [Resolution 5 of the 28th CGPM (2026): On the technical actions needed to ensure the continuity of UTC](https://www.bipm.org/en/cgpm-2026/resolution-5). The English page is a translation, and the official text is French. Source of the 20 May 2027 date, the 3,600 second limit, the 30% negative leap second estimate by 2035, the ITU transition to 2035 and no later than 2040, and the inconsistency of provider mitigations.
+[^2]: IANA, [leap-seconds.list](https://data.iana.org/time-zones/tzdb/leap-seconds.list), explanatory header: UTC differs from TAI by whole seconds, and leap seconds keep UT1-UTC under 0.9 seconds.
+[^3]: Same file. Counted on 2026-10-16: 28 entries, the first being the 1972 base offset of 10, so 27 leap seconds, ending at 37 on 1 Jan 2017. Per-decade counts are mine, from the dates in that file.
+[^4]: IERS Earth Orientation Center, [Bulletin C 72](https://hpiers.obspm.fr/iers/bul/bulc/bulletinc.dat), 6 July 2026: no leap second at the end of December 2026, UTC-TAI = -37 s from 2017 January 1.
+[^5]: Methodology. Measured 2026-10-16. Windows 11 with Python 3.12.10, Node 24.14.1, Go 1.27.0, OpenJDK 24 and Windows PowerShell 5.1; C (gcc, glibc) and GNU date 9.4 on Ubuntu 24.04 under WSL2, kernel 6.18.54. The TAI offset was polled every 8 seconds from 22 seconds after a VM boot. Source: [leap-second-probe.sh](/files/leap-second-probe.sh).
+[^6]: Oracle, [`java.time.Instant` (Java SE 24)](https://docs.oracle.com/en/java/javase/24/docs/api/java.base/java/time/Instant.html). The Java Time-Scale and its leap second treatment over the last 1,000 seconds of the day. The page does not say how `23:59:60` is parsed, so that behavior is from my test.
+[^7]: Cloudflare, [How and why the leap second affected Cloudflare DNS](https://blog.cloudflare.com/how-and-why-the-leap-second-affected-cloudflare-dns/). Root cause, 00:00 to 06:45 UTC on 2017-01-01 and the impact figures are from that post.
+[^8]: Google, [Leap Smear](https://developers.google.com/time/smear). A 24-hour linear smear, other providers' different smears, and the note that a negative leap second has not occurred.
+[^9]: The Go Authors, `time` package documentation, section "Monotonic Clocks", read from the Go 1.27.0 toolchain with `go doc time`.
