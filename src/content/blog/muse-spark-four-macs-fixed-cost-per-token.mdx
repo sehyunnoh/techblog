@@ -1,0 +1,150 @@
+---
+title: "Four Macs Run Muse Spark at 36.7 tok/s, and a Fixed 14 ms per Token Sets the Ceiling"
+description: "Apple says decoding is memory-bandwidth bound. I checked that on my own machine, then fit Apple's tables: a fixed 9 to 16 ms per token explains why more Macs help less each time."
+pubDate: 2026-10-17
+tags: ['ai', 'llm', 'systems', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+Meta released Muse Spark Open this week, a model with 816 billion parameters, and Apple published a report on running it across several Mac Studios.[^1][^2] The headline is that four Macs generate over 36 tokens per second. The same report says something more useful in passing: generation speed "is memory-bandwidth bound."[^1]
+
+That sentence is a testable claim. If decoding is limited by how fast weights can be read from memory, then speed should follow from two numbers, the bytes read per token and the bandwidth, and the cluster results should be predictable from them. I checked the rule on my own hardware, then took Apple's tables and asked how close each run gets to the ceiling. The single-machine runs are close to it. The multi-machine runs are not, and the shortfall has a very regular shape: a fixed cost of roughly 9 to 16 milliseconds per token that adding Macs does not shrink.
+
+## The rule in plain terms
+
+A language model produces text one **token** (a word or word fragment) at a time. Each new token, called a **decode** step, needs the model's weights to flow through the processor, and those weights live in memory. A chip can only pull data from memory at some rate, its **memory bandwidth**. If a model needs 54 GB of weights per token and the chip delivers 1,200 GB/s, one token takes at least 45 ms, so the speed cannot exceed about 22 tokens per second. That ceiling is the whole rule.
+
+Two things shrink the bytes per token. A **mixture of experts** (MoE) model has many specialist sub-networks and uses only a few per token, so Muse Spark reads about 42 billion of its 816 billion parameters each step. **Quantization** stores each weight in fewer bits, which Apple did here with a 4-bit format called NVFP4.[^1]
+
+When a model is too big for one machine, there are two ways to split it. **Pipeline parallelism** puts the first half of the layers on one Mac and the second half on another, so they take turns. **Tensor parallelism** splits every layer across the machines, so all of them read memory at once, but they must exchange results many times per token.[^1]
+
+## Does the rule hold on my machine?
+
+My test machine has a Core Ultra 7 258V with 8 LPDDR5X-8533 memory chips, each 16 bits wide, which gives a theoretical peak of 136.5 GB/s.[^3] I wrote a small C benchmark that does what a decode step does: one pass over a 2 GiB buffer of weights, multiplying each by an input vector.[^4] A pass over the whole buffer plays the role of one token for a model that is exactly that big. I ran it with the weights stored as 32-bit floats, 16-bit bfloat16, 8-bit integers and 4-bit integers.
+
+The best sustained read bandwidth I could get was 94.0 GB/s with six threads, which is 69% of the spec sheet. The three final runs were noisier, with peaks of 67.8, 90.5 and 81.6 GB/s, so treat any single number here as plus or minus 15%.
+
+<Chart
+  type="bar"
+  height={320}
+  format="plain"
+  caption="Weights processed per second (billions) for the same 2 GiB buffer stored at different precisions, median of three runs, against the ideal if speed scaled exactly with bytes. Halving the bits roughly doubles the weights per second, within about 10%."
+  label="Grouped bar chart of billions of weights per second. f32 measured 20.3, ideal 20.3. bf16 measured 36.5, ideal 40.6. int8 measured 86.4, ideal 81.2. int4 measured 149.7, ideal 162.4."
+  labels={['32-bit float', '16-bit bfloat', '8-bit int', '4-bit int']}
+  series={[
+    { name: 'measured', data: [20.3, 36.5, 86.4, 149.7] },
+    { name: 'ideal (speed proportional to 1/bytes)', data: [20.3, 40.6, 81.2, 162.4] }
+  ]}
+  yTitle="billion weights per second"
+/>
+
+Eight times fewer bits per weight bought between 6.8 and 8.6 times more weights per second across the three runs. The rule holds here: on a big enough buffer, time per token is bytes divided by bandwidth, with a few percent lost to unpacking the smaller formats.
+
+## Apple's single machines sit close to the ceiling
+
+Take the weights of each model, multiply by its decode speed, and you get the bandwidth the run actually used. I used 54 GB for Qwen 3.8 (27 billion parameters at 2 bytes) and 128 GB for Mistral Medium 3.5 (128 billion at 1 byte), and compared against the chips' stated bandwidth of 1.2 TB/s for the M5 Ultra and 819 GB/s for the M3 Ultra.[^1]
+
+<Chart
+  type="bar"
+  height={320}
+  format="plain"
+  caption="Weight bytes read per second as a percentage of the chips' stated memory bandwidth, from Apple's 8,192-token decode speeds. One machine gets 77 to 89%. Splitting across two and four machines drops it to 73 to 75% and then 57 to 62%."
+  label="Grouped bar chart of percent of stated bandwidth. Qwen: 1 machine M3 82, 1 machine M5 89, 2 machines 75, 4 machines 57. Mistral: 1 machine M3 77, 1 machine M5 82, 2 machines 73, 4 machines 62."
+  labels={['1 machine (M3 Ultra)', '1 machine (M5 Ultra)', '2 machines (M5, tensor)', '4 machines (M5, tensor)']}
+  series={[
+    { name: 'Qwen 3.8 (27B BF16)', data: [82, 89, 75, 57] },
+    { name: 'Mistral Medium 3.5 (128B FP8)', data: [77, 82, 73, 62] }
+  ]}
+  yTitle="% of stated bandwidth"
+/>
+
+A single Mac running a dense model uses 77 to 89% of what the chip claims to deliver. That is a higher fraction than the 69% my own machine reaches against its spec, though the two platforms are not comparable, and it fits the report's line about bandwidth. The bars on the right are the surprise. With the same weights split across four machines, the fraction drops to 57 to 62%. Cluster bandwidth is not being used as well as chip bandwidth.
+
+## A two-number model that predicts the unseen point
+
+Say each token costs a part that shrinks with the number of machines N, the memory reads, plus a part that does not. Then the time per token is `t = A/N + B`. The B term covers whatever repeats on every machine regardless of N: launching GPU work, sampling the next token, and the many small exchanges between machines for every layer.
+
+<Mermaid
+  caption="One decode step with tensor parallelism. The weight reads split across N machines and shrink as A/N. The synchronization after each layer and the per-token overhead stay about the same, which is the B term."
+  label="Flow diagram. For each token, every machine reads its 1/N share of the weights, then all machines exchange partial results, repeated for every layer, then the token is sampled and the next token starts. The reads are labeled A divided by N and the exchanges and sampling are labeled B."
+  code={`
+flowchart LR
+    A["Each machine reads<br/>1/N of the weights<br/>time A/N"] --> B["All machines exchange<br/>partial results<br/>every layer"]
+    B -->|"next layer"| A
+    B --> C["Sample token<br/>launch overhead"]
+    C -->|"next token"| A
+`}
+/>
+
+I fitted A and B using only the two-machine and four-machine tensor runs, then used the model to predict the one-machine speed, which was not in the fit. For Muse Spark there is no one-machine run, so the comparison is against the two-machine pipeline run, which Apple says is "very similar" to a single machine in decode speed.[^1]
+
+| Model, context | A (ms) | B (ms) | Predicted 1-machine tok/s | Measured | Ceiling 1/B |
+|---|---|---|---|---|---|
+| Qwen 3.8, 8,192 | 41.6 | 9.2 | 19.7 | 19.69 | 108 |
+| Qwen 3.8, 65,536 | 45.4 | 9.7 | 18.1 | 17.87 | 103 |
+| Mistral 3.5, 8,192 | 121.0 | 12.5 | 7.5 | 7.70 | 80 |
+| Mistral 3.5, 65,536 | 150.6 | 15.2 | 6.0 | 6.16 | 66 |
+| Muse Spark, 8,192 | 51.2 | 14.4 | 15.2 | 15.74 (pipeline) | 69 |
+| Muse Spark, 65,536 | 52.4 | 15.8 | 14.7 | 14.37 (pipeline) | 63 |
+
+The predictions land within 5% of the measurement in all six cases. Two numbers that I fitted from two points correctly reproduce a third point I held out, so the structure is real even if the explanation of what B contains is not proven. The fixed part is 9 to 16 ms per token, and it grows with model size and context.
+
+The last column is the interesting one. With A shrinking toward zero as machines are added, speed approaches `1/B`, around 70 tokens per second for Muse Spark whatever the cluster size. The fit implies Muse Spark would reach about 48 tokens per second on 8 machines and 57 on 16. Those two points are extrapolations, not measurements, and a Thunderbolt mesh of that many Macs is not something Apple demonstrates.
+
+<Chart
+  type="line"
+  height={320}
+  format="plain"
+  caption="Decode speed (tokens per second) from the fitted model t = A/N + B at 8,192-token context. The points at 1, 2 and 4 machines match Apple's measurements closely. The points at 8 and 16 machines are extrapolations of the fit."
+  label="Line chart of fitted tokens per second for 1, 2, 4, 8 and 16 machines. Qwen: 19.7, 33.3, 50.9, 69.2, 84.4. Mistral: 7.5, 13.7, 23.4, 36.2, 49.8. Muse Spark: 15.2, 25.0, 36.7, 48.0, 56.7."
+  labels={['1', '2', '4', '8', '16']}
+  series={[
+    { name: 'Qwen 3.8', data: [19.7, 33.3, 50.9, 69.2, 84.4] },
+    { name: 'Mistral Medium 3.5', data: [7.5, 13.7, 23.4, 36.2, 49.8] },
+    { name: 'Muse Spark Open', data: [15.2, 25.0, 36.7, 48.0, 56.7] }
+  ]}
+  xTitle="machines"
+  yTitle="tokens per second"
+/>
+
+## Is the MoE reading pattern the problem?
+
+A reasonable suspicion is that Muse Spark, which reads a different handful of experts for every token, wastes bandwidth on scattered reads. I tested that on my machine by reading eight randomly chosen experts of a given size per token against reading the same number of bytes in one contiguous block.
+
+Scattering made no consistent difference at any expert size from 64 KB to 16 MB: the ratio of scattered to contiguous time stayed between 0.92 and 1.12, within the run-to-run noise. What did matter was how much data each step moved. A step that reads 0.5 MB took about 18 µs, which is only 30 GB/s, while a step that reads 128 MB ran at 86 GB/s. Bandwidth alone would put the small step near 6 µs. Small steps leave bandwidth unused because fixed per-step costs dominate, not because of scattering.
+
+That is the same shape as the Apple result, at a much smaller scale. I do not know Muse Spark's expert sizes, because the model's `config.json` is behind Hugging Face's access gate, so I cannot say which row of my table it resembles.
+
+## What "4-bit" weighs
+
+The NVFP4 checkpoint is not 4 bits per parameter. From the dtype counts in its Hugging Face metadata, it stores 773 billion 4-bit weights, 48.3 billion 8-bit scale factors (exactly one per 16 weights, which makes the 4-bit part 4.5 bits per weight), and 48.8 billion parameters left in 16-bit BF16.[^5] The file totals 533 GB for 822 billion parameters in the base model, which is 5.19 bits per parameter, and 18% of the bytes are the BF16 parts. The conversion settings list the attention layers and the projections around each expert block among the modules that were not converted.[^5]
+
+That matters for the ceiling. Reading 42 billion parameters at a pure 4 bits is 21 GB. If Muse Spark's memory term A of 51 ms ran at the 82 to 89% efficiency that the dense models show, it would be moving 50 to 55 GB per token. Either a large share of the active weights are in BF16, or the Muse kernels run at only 34 to 44% of the chip's bandwidth. I cannot tell which from public information.
+
+## Where this can mislead
+
+- **B is a bucket.** It collects synchronization, kernel launches, sampling and any unparallelized layers. The fit says the bucket exists and is stable, not which of those costs fills it.
+- **Two parameters, two points.** The held-out check is encouraging but small. Six cases within 5% is not a proof that the model is right at 8 or 16 machines.
+- **Weights-only bytes.** My efficiencies ignore the KV cache, the memory that remembers the context. That is part of why the 65,536-token numbers look worse.
+- **Stated bandwidth, not measured.** I used Apple's 1.2 TB/s and 819 GB/s as given. Nobody here measured them on those machines.
+- **My machine is not theirs.** A hybrid CPU in a WSL2 virtual machine is noisy. I report best-of runs for peaks and ranges for the rest.
+- **I did not run Muse Spark or touch any Apple hardware.** Everything about the clusters comes from Apple's published tables.
+
+## Takeaways
+
+- Decode speed on one Mac is about bandwidth divided by weight bytes, and Apple's dense runs reach 77 to 89% of the chip's stated number.
+- Adding machines shrinks the memory term but not a fixed 9 to 16 ms per token, so each doubling helps less: 1.45 to 1.7 times from two to four machines.
+- For Muse Spark the fitted ceiling is near 70 tokens per second regardless of cluster size.
+- "4-bit" checkpoints average over 5 bits per parameter, and the attention and expert projections stay in 16-bit, so bytes per token run higher than the headline suggests.
+- Before buying a second Mac for speed, ask what B is for your setup, not what the bandwidth is.
+
+## References
+
+[^1]: Apple Machine Learning Research, [Muse Spark Open with MLX on Mac Studio](https://machinelearning.apple.com/research/mlx-distributed-inference). Source of the decode tables for both context sizes (the page shows one tab at a time; both are in the page source), the 1.2 TB/s and 819 GB/s bandwidth figures, the 493 GB footprint, and the statements that generation is memory-bandwidth bound and that pipeline decode speed is very similar to a single machine.
+[^2]: Meta, [Muse Spark Open](https://research.meta.ai/blog/muse-spark-open), 15 October 2026. 816B total parameters, 42B active.
+[^3]: Memory spec read with `Get-CimInstance Win32_PhysicalMemory` on the test machine: 8 modules, 16-bit data width each, 8533 MT/s, so 8533 million transfers per second times 16 bytes is 136.5 GB/s.
+[^4]: Methodology. Measured 2026-10-17 on an Intel Core Ultra 7 258V (4 performance and 4 low-power cores, AVX2, FMA, AVX-VNNI), Ubuntu 24.04 on WSL2, gcc 13.3 with `-O3 -march=native -fopenmp`. The buffer is 2 GiB, much larger than the 12 MB L3 cache. Work is handed out dynamically because a static split is paced by the slowest core on a hybrid CPU. The reported peak is the best of a thread-count scan (6 threads pinned to cores 0 to 5, `OMP_WAIT_POLICY=active`). The three later runs, medians of seven repetitions each, gave the format comparison and the expert test. The 4-bit kernel omits per-block scales, so its speed is a slight upper bound. Source: [decode-roofline-bench.c](/files/decode-roofline-bench.c).
+[^5]: Hugging Face model metadata for [meta-models/Muse-Spark-Open-816B-A42B-NVFP4](https://huggingface.co/meta-models/Muse-Spark-Open-816B-A42B-NVFP4) and the base model [Muse-Spark-Open-816B-A42B](https://huggingface.co/meta-models/Muse-Spark-Open-816B-A42B), read through the public API on 2026-10-17: dtype parameter counts, `usedStorage` of 533.0 GB, and the list of modules excluded from quantization. The model files and `config.json` require gated access, so layer and expert counts are not known to me.
