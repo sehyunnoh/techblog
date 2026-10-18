@@ -1,0 +1,144 @@
+---
+title: 'How an LLM Answers One Prompt: Tokens, the KV Cache and the Decode Loop, Measured'
+description: 'A beginner-friendly walk through what happens between pressing send and seeing the first word, checked with a 135M-parameter NumPy model and real tokenizer counts.'
+pubDate: 2026-10-18
+updatedDate: 2026-10-18
+tags: ['ai', 'llm', 'tutorial', 'benchmark']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+A large language model does one thing: given some text, it picks the next small piece of text. Everything you see, a paragraph, a code review, a translation, comes from running that step over and over, each time with the previous output added to the input. This guide follows a single request through that loop, one stage at a time, and puts a measurement on each stage so the explanations are not just assertions.
+
+Two honest limits first. The numbers about text come from real tokenizers. The numbers about speed come from a small model I wrote in NumPy with random weights, so the text it produces is noise. It does the same kind of work per token as a real model, just at a much smaller scale, and every timing here is a statement about that toy on my laptop, not about any commercial model. Where a real model's published settings matter, I use them, and I say so.
+
+## The whole path in one picture
+
+<Mermaid
+  caption="One request. The prompt is processed once (prefill), then the model repeats the short loop of scoring, picking and extending until it stops."
+  label="Flowchart. Prompt text goes to the tokenizer, then prefill, which fills the KV cache. Prefill leads to logits, the scores for every possible next token. Sampling picks one token. A check asks whether a stop token or the length limit was reached. If not, decode runs only the new token, reusing the cache, and returns to logits. If so, the tokenizer turns the integers back into text."
+  code={`
+flowchart TB
+  A["Prompt text"] --> B["Tokenizer: text to integers"]
+  B --> C["Prefill: all prompt tokens at once, fills the KV cache"]
+  C --> D["Logits: a score for every token in the vocabulary"]
+  D --> E["Sampling: pick one token"]
+  E --> F{"Stop token or length limit?"}
+  F -->|no| G["Decode: run only the new token, reuse the cache"]
+  G --> D
+  F -->|yes| H["Tokenizer: integers back to text"]
+`}
+/>
+
+## Step 1: text becomes integers
+
+The model never sees letters. A **tokenizer** cuts the text into pieces called **tokens**, each with a fixed integer ID, and the model works on those IDs. Most tokenizers use **byte pair encoding** (BPE), which starts from single bytes and repeatedly merges the pairs that occur most often in a training corpus, until it has a vocabulary of a chosen size.[^1] Common words end up as one token. Rare words are spelled out in fragments.
+
+I ran OpenAI's open-source `tiktoken` library on a few strings with three of its vocabularies.[^2] The English sentence and its Korean translation carry the same meaning:
+
+| Text | Characters | GPT-2 (50k vocab) | cl100k (100k) | o200k (200k) |
+|---|---|---|---|---|
+| English sentence | 160 | 35 | 35 | 35 |
+| Same sentence in Korean | 74 | 157 | 72 | 46 |
+| 4 lines of Python | 50 | 26 | 20 | 20 |
+| 40 digits | 40 | 16 | 14 | 14 |
+
+Two things are worth taking from this. First, token counts depend on which tokenizer a model uses, so "how many tokens is this" has no answer without naming one. The same Korean sentence costs 157 tokens in the oldest vocabulary and 46 in the newest, while the English one does not move. Second, an unfamiliar script is expensive: in cl100k, the Korean sentence needs twice the tokens of the English one even though it has less than half the characters.
+
+The pieces can be odd. In cl100k, the word `strawberry` splits as `str`, `aw`, `berry`, which is one reason models have stumbled on counting its letters: the model never sees them. And the five-syllable greeting 안녕하세요 comes out as five tokens, some of which are partial characters (a Korean syllable takes three bytes in UTF-8, and cl100k sometimes cuts between them). In o200k the same greeting is two tokens, and whole syllables stay together.
+
+## Step 2: through the layers
+
+Each token ID is looked up in a table to get a vector of a few thousand numbers, its **embedding**. That vector then goes through a stack of identical **layers**. A layer does two things: an **attention** step, where the token gathers information from earlier tokens, and a feed-forward step, which transforms each token's vector on its own.[^3] The last layer's output for the final position is multiplied by one more matrix to give the **logits**, a score for every token in the vocabulary.
+
+To make the sizes concrete, here is a real configuration. Qwen2.5-7B publishes 28 layers, a hidden size of 3,584, and a vocabulary of 152,064 tokens in its `config.json`.[^4] Adding up the matrices from those numbers gives about 7.6 billion parameters, which at 2 bytes each is roughly 15.2 GB of weights. Keep that number in mind. Every token generated has to pull most of those 15 GB through the processor.
+
+My toy has 12 layers, a hidden size of 768 and a 32,000-token vocabulary: 134.9 million parameters, or 540 MB in 32-bit floats.[^5]
+
+## Step 3: attention, and why the KV cache exists
+
+Attention is where a token looks back. For every token, each layer computes a **query** ("what am I looking for"), a **key** ("what do I contain") and a **value** ("what do I pass on"). A token's query is compared against the keys of all earlier tokens, and the result weights a mix of their values. That is how the word "it" can pull in information from a noun ten tokens earlier.
+
+Notice what this means for generating text. When the model adds token 513, it needs the keys and values of tokens 1 to 512 in every layer. Those do not change, because earlier tokens never look at later ones. So a real implementation keeps them in memory after computing them once. That stored pile is the **KV cache**.
+
+I measured the difference with the toy. I gave it a 512-token prompt, asked for 40 more tokens, and generated them two ways: recomputing the whole sequence at every step, and using the cache. Both produced exactly the same 40 tokens, which is the check that the cache is a pure optimization.
+
+| Method | Time per new token (median of 10) |
+|---|---|
+| No cache, whole sequence every step | 957 to 1,234 ms |
+| With KV cache | 15 to 22 ms |
+
+That is roughly 50 times, in line with the amount of repeated work. Without the cache, each new token costs about as much as reading the entire prompt again. Four runs gave the ranges above.
+
+The cache has a price, and it is paid in memory. For each token, each layer stores one key and one value vector per KV head:
+
+> bytes per token = 2 (key and value) × layers × KV heads × head size × bytes per number
+
+Qwen2.5-7B has 28 layers, 4 KV heads of size 128, and stores numbers in 2 bytes, so each token adds 56 KiB.[^4] Most modern models share each KV head across several query heads, a trick called **grouped-query attention**, to shrink this.[^6] Qwen uses 28 query heads but only 4 KV heads. If every head kept its own, the cache would be seven times bigger:
+
+| Context length | Qwen2.5-7B (4 KV heads) | If it had 28 KV heads |
+|---|---|---|
+| 8,192 tokens | 448 MiB | 3.06 GiB |
+| 32,768 tokens | 1.75 GiB | 12.25 GiB |
+| 131,072 tokens | 7 GiB | 49 GiB |
+
+Those are per conversation. A server handling many conversations at once multiplies it, which is why KV cache memory, not raw compute, usually limits how many requests fit on one GPU, and why systems such as vLLM manage the cache in fixed-size pages.[^7]
+
+## Step 4: prefill and decode are different jobs
+
+Now the two halves of the diagram at the top. **Prefill** processes the whole prompt in one go: all 512 tokens go through the layers together as one big matrix multiplication, and the cache is filled. **Decode** then produces one token at a time, and each step feeds in just that one token.
+
+In my toy, prefill of 512 tokens took 0.91 to 0.99 seconds, about 520 to 560 tokens per second. Decoding one token took about 18 ms, about 55 tokens per second. Prefill moves roughly ten times as many tokens per second, and the reason is visible if you vary how many tokens go through the model in a single call:
+
+<Chart
+  type="bar"
+  height={320}
+  format="plain"
+  caption="Time per token when a different number of tokens goes through the same 540 MB model in one forward call, median of three runs. Reading the weights once and using them for many tokens makes each token far cheaper."
+  label="Bar chart of milliseconds per token by tokens per call. 1 token: 18.6. 2 tokens: 14.4. 4 tokens: 7.3. 8 tokens: 4.2. 16 tokens: 3.6. 64 tokens: 2.1. 256 tokens: 1.8."
+  labels={['1', '2', '4', '8', '16', '64', '256']}
+  series={[{ name: 'ms per token', data: [18.6, 14.4, 7.3, 4.2, 3.6, 2.1, 1.8] }]}
+  xTitle="tokens in one call"
+  yTitle="milliseconds per token"
+/>
+
+One token costs 18.6 ms and 256 tokens cost 1.8 ms each, about ten times less. The weights are the same 540 MB either way. A single-token step reads all of them to do very little arithmetic, so it is limited by how fast memory can deliver them. A batch of tokens reuses each weight many times after loading it, so it is limited by arithmetic instead. This is the "memory-bandwidth bound" statement in Apple's Muse Spark report, and I checked the same effect on raw memory reads in [an earlier post](/posts/muse-spark-four-macs-fixed-cost-per-token). The split between the two phases is the subject of [Your LLM Is Two Different Machines](/posts/llm-inference-two-machines).
+
+My toy is not near the hardware limit. At 18.6 ms per token it moves 540 MB at about 29 GB/s, while a hand-written C loop on the same machine reached 94 GB/s in that earlier post. NumPy's small operations, Python overhead and extra copies eat the difference. Real inference engines fuse these steps into custom kernels, so treat the toy as a model of the shape of the cost, not its size.
+
+The cache also shows up in the decode time. With the cache already holding 64, 256, 512 and 1,024 tokens, a decode step took 18.3, 19.9, 21.0 and 23.9 ms (median of three runs). Each new token has to read the whole cache as well as the weights, so decoding gets slower as a conversation grows, slowly in this toy because its cache is small next to its weights. For a long-context model whose cache is a large fraction of its weights, the effect is larger.
+
+## Step 5: picking the next token
+
+The logits are raw scores. A function called **softmax** turns them into probabilities that add up to 1. The simplest rule, **greedy decoding**, takes the highest one, and my measurements used it so that the cached and uncached runs could be compared exactly.
+
+Chat products usually sample instead. **Temperature** divides the logits before softmax, so a low value sharpens the distribution toward the top choice and a high value flattens it. **Top-p** (also called nucleus sampling) keeps only the smallest set of tokens whose probabilities add up to p and samples from those, which cuts off the long tail of unlikely tokens.[^8] Neither changes how much computation a step costs. They only change which token is picked from the scores that were already computed.
+
+The picked token is appended to the text, and the loop in the diagram goes round again.
+
+## What this explains
+
+Several everyday observations are direct consequences of the steps above:
+
+- **A long prompt delays the first word, a long answer takes a long time to finish.** The first is prefill, which scales with prompt length. The second is decode, which costs roughly the same per token, plus a slow rise as the context grows.
+- **Many providers charge more for output tokens than for input tokens.** Input goes through prefill at high throughput. Output runs the slow one-token-at-a-time loop. I have not verified any provider's reasons, but the cost structure matches the measurements.
+- **Long context eats memory, not just time.** The table of KV cache sizes is why a model that fits in memory at 8,000 tokens can fail at 128,000.
+- **Non-English text costs more.** In cl100k, the Korean sentence needed twice the tokens, which means twice the prefill work, twice the cache, and twice the per-token price for the same meaning.
+- **Batching many users together is how servers stay efficient.** The chart is the reason: reading the weights once and serving many sequences at once makes each token cheaper.
+
+## Limits of these measurements
+
+The speed numbers are one machine (a Core Ultra 7 258V laptop on Windows 11), one script, and one small model with random weights in 32-bit floats. They show how cost is shaped, not what any production model delivers. Real systems use 8-bit or 4-bit weights, fused attention kernels, paged caches and GPUs with memory many times faster than this laptop's. The tokenizer counts are exact for the three vocabularies named, but other model families use their own, and I did not measure them. The KV cache sizes come from arithmetic on a published configuration, not from watching a real server's memory.
+
+## References
+
+[^1]: Sennrich, Haddow, Birch, [Neural Machine Translation of Rare Words with Subword Units](https://arxiv.org/abs/1508.07909), 2015. The paper that brought byte pair encoding to neural language processing.
+[^2]: OpenAI, [tiktoken](https://github.com/openai/tiktoken), version 0.14.0, using the `gpt2`, `cl100k_base` and `o200k_base` encodings. Counts from [llm-tokenizer-counts.py](/files/llm-tokenizer-counts.py). The English sentence and its Korean rendering are my own and say the same thing; a different Korean wording would shift the numbers a little.
+[^3]: Vaswani et al., [Attention Is All You Need](https://arxiv.org/abs/1706.03762), 2017. The original transformer: attention layers plus position-wise feed-forward layers.
+[^4]: Qwen team, [Qwen2.5-7B `config.json`](https://huggingface.co/Qwen/Qwen2.5-7B/raw/main/config.json), read 2026-10-18: 28 layers, hidden size 3,584, intermediate size 18,944, 28 attention heads, 4 KV heads, vocabulary 152,064, bfloat16. The 7.6B parameter count is my arithmetic from those fields (embedding and output matrices untied, attention and gated feed-forward matrices per layer), and the 56 KiB per token is 2 × 28 × 4 × 128 × 2 bytes.
+[^5]: Methodology. [llm-inference-toy.py](/files/llm-inference-toy.py), measured 2026-10-18 on an Intel Core Ultra 7 258V (8 cores), Windows 11, Python 3.12.10, NumPy 2.5.4, all float32. A 12-layer, 768-wide, 12-head model with a 32,000-token vocabulary and random weights. The cached and uncached greedy generators produced identical tokens. Prefill: 512 tokens, three runs of 908 to 985 ms. Decode with cache: median over the first and last 10 of 40 steps. Without cache: the whole sequence through the model at every step, 4 runs. Context scan: median of 15 single-token steps after prefilling 64, 256, 512 or 1,024 tokens, three runs. Tokens-per-call scan: median of 7 calls on a fresh cache, three runs. One early version of the script divided by a NumPy float64 scalar, which silently upcast the whole model to float64 and made it 15 times slower. The published script keeps everything in float32.
+[^6]: Ainslie et al., [GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints](https://arxiv.org/abs/2305.13245), 2023. Grouped-query attention: several query heads share one key/value head.
+[^7]: Kwon et al., [Efficient Memory Management for Large Language Model Serving with PagedAttention](https://arxiv.org/abs/2309.06180), 2023. Describes KV cache memory as the limit on batch size and manages it in pages.
+[^8]: Holtzman et al., [The Curious Case of Neural Text Degeneration](https://arxiv.org/abs/1904.09751), 2019. Introduces nucleus (top-p) sampling.
