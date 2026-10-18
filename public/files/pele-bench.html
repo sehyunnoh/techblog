@@ -1,0 +1,24 @@
+<!doctype html><meta charset=utf-8><body><pre id=o>running</pre>
+<script type=module>
+const lib=new URLSearchParams(location.search).get('lib');
+let d=await (await fetch('diagrams.json')).json(); const only=new URLSearchParams(location.search).get('only'); if(only) d=d.filter(x=>x.code.startsWith(only));
+const res={lib,n:d.length};
+const t0=performance.now();
+let render;
+if(lib==='pele'){ await import('./b/pele.js'); render=async c=>(await window.r(c)).svg; }
+else { const ent=await import('./b/mmd/e-mmd.js'); const m=window.m;
+  m.initialize({startOnLoad:false,securityLevel:'strict',theme:'base'}); let i=0; render=async c=>(await m.render('x'+(i++),c)).svg; }
+res.loadMs=performance.now()-t0;
+const first=[];const fails=[];const svgs={};
+for(const x of d){const t=performance.now();try{svgs[x.id]=await render(x.code);}catch(e){fails.push(x.id+': '+String(e.message).slice(0,80));}first.push(performance.now()-t);}
+res.fails=fails;res.firstPass=first;
+const warm=[];
+for(let p=0;p<10;p++){const row=[];for(const x of d){const t=performance.now();try{await render(x.code)}catch{}row.push(performance.now()-t);}warm.push(row);}
+res.warmMedianPerDiagram=d.map((_,i)=>{const a=warm.map(r=>r[i]).sort((a,b)=>a-b);return a[a.length>>1]});
+// DOM insertion cost
+const host=document.createElement('div');document.body.append(host);
+const t1=performance.now();for(const k in svgs){host.innerHTML=svgs[k];host.offsetHeight;}res.insertTotalMs=performance.now()-t1;
+res.resources=performance.getEntriesByType('resource').filter(e=>e.name.endsWith('.js')).map(e=>({n:e.name.split('/').slice(-1)[0],tx:e.transferSize,dec:e.decodedBodySize}));
+window.__res=res;window.__svgs=svgs;
+document.getElementById('o').textContent='done';
+</script>

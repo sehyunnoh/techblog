@@ -1,0 +1,124 @@
+---
+title: "Pele Draws Mermaid Diagrams About 100x Faster, but Its Default Bundle Is Not Smaller"
+description: "Pele claims to be 500x faster and 6x smaller than Mermaid.js. I ran both on 39 diagrams from this blog: the speed holds at about 100x, the size only with an opt-in import."
+pubDate: 2026-10-18
+tags: ['frontend', 'web', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+Pele hit the front page of Hacker News this weekend with a comparison table on its home page.[^1][^7] It turns Mermaid diagram text into SVG, and the table says it is "up to 500x faster" than Mermaid.js, 6x smaller, and has no dependencies where Mermaid has 23.[^1] It was developed for Obsidian, and the repository lives under the `obsidianmd` organization, so people took it seriously.
+
+I have a good reason to care. This blog draws every flow diagram with Mermaid, in the reader's browser, and redraws it each time someone flips the light/dark toggle. So I had a real workload sitting on disk: 39 diagrams in 34 posts. I extracted all of them, ran both libraries over the same text, and checked the table row by row. Speed held up, though at closer to 100x than 500x. The size claim did not survive contact with what a page actually downloads. The result that interested me most was something the table does not mention at all.
+
+## What is being compared
+
+**Mermaid** takes a few lines of text such as `A --> B` and draws a diagram. The output is **SVG**, a picture made of XML elements that scales without blurring. Mermaid normally does this in the browser, which is why it ships as JavaScript the reader must download. **Pele** accepts the same syntax and also produces SVG, but it has its own layout code, and colors come from **CSS variables** (named values like `--pele-fg` that a stylesheet can change at any time) instead of a theme object passed in at render time.[^2]
+
+That last difference matters later. For now, here is how I measured.
+
+I used `pele@1.6.0` and `mermaid@11.17.2`, the version this site runs. The 39 diagrams are 33 flowcharts and 6 sequence diagrams, pulled straight out of the post sources.[^5] Both libraries were bundled with esbuild and served over gzip from localhost, and I timed them in Chrome 155 on a Core Ultra 7 258V laptop running Windows. Each library got a fresh page load for its cold numbers, then ten more passes over all 39 diagrams for its warm ones. I repeated the whole thing three times.
+
+One limit up front: Chrome rounds `performance.now()` to 0.1 ms. Pele's fastest diagrams sit right at that floor, so its numbers are good to about plus or minus 0.1 ms, and ratios built on them are rough.
+
+## Speed: real, but not 500x
+
+Both libraries rendered all 39 diagrams without errors. Here are the medians across the three runs, in milliseconds per diagram. Cold means the very first diagram after page load, and warm is the median over ten repeat passes.
+
+| | Pele 1.6.0 | Mermaid 11.17.2 | Ratio |
+|---|---|---|---|
+| First diagram (cold) | 3.2 | 106.5 | 33x |
+| Median, first pass over all 39 | 1.2 | 66.2 | 55x |
+| Median, warm | 0.4 | 52.2 | 130x |
+
+Warm, Pele took 0.4 to 0.5 ms per diagram and Mermaid 51 to 53 ms. The page quotes 0.05 to 0.3 ms for Pele and 6 to 82 ms for Mermaid.[^1] My Mermaid range was 22 to 80 ms, so that side of the table is accurate. Pele's range was 0.2 to 0.9 ms, a little above what the page says, though within what a slower laptop and a coarse timer could explain.
+
+The per-diagram ratio is where "500x" comes from. I divided Mermaid's warm time by Pele's for each of the 39 diagrams. The median ratio was 97, 117 and 129 across the three runs, with individual diagrams between 60 and 183. Nothing reached 500. "Up to" is doing a lot of work in that sentence, and the number likely comes from a different machine or very small inputs.
+
+The cold row is the one readers feel. Mermaid's first diagram took 88 to 156 ms most likely because the library and the chunk for that diagram type are still loading and warming up. Pele's took 3 to 4 ms.
+
+## Size: the table compares the wrong thing
+
+The page lists 230 kB for Pele and 1.6 MB for Mermaid, both gzipped, which is the compression a server applies before sending.[^1] I measured what the browser downloaded instead.
+
+Mermaid splits itself into many files and fetches a diagram type only when it first draws one. On a page with flowcharts and sequence diagrams, mine downloaded 30 files totaling 280 kB. With flowcharts alone it fetched 28 files and 247 kB. All 105 chunks in the bundle add up to 1,005 kB gzipped, which is the pool the 1.6 MB figure presumably comes from, but no page loads the whole pool.
+
+Pele's default entry point includes every diagram type, and it weighed 247 kB in my bundle, close to its advertised 230. So for a flowchart page the two libraries cost the same to download, to within a few hundred bytes.
+
+Pele does offer a way out. Its `pele/core` entry lets you register only the diagram types you use, and the README describes it as the way to reduce the initial bundle.[^2] I registered flowchart and sequence only and rebuilt:
+
+<Chart
+  type="bar"
+  height={300}
+  format="plain"
+  caption="Gzipped JavaScript a page downloads to draw this blog's diagrams. Core registers only the flowchart and sequence types. Flow is a page with flowcharts only, and flow+seq adds sequence diagrams. Pele's default import is the same size as what Mermaid really fetches for flowcharts. Registering only the two diagram types in use cuts Pele to about a quarter."
+  label="Bar chart of kilobytes gzipped. Pele default import 247. Pele core with flowchart and sequence only 60. Mermaid, flowcharts only, 28 files, 247. Mermaid, flowcharts and sequence diagrams, 30 files, 280."
+  labels={['Pele default', 'Pele core', 'Mermaid flow', 'Mermaid flow+seq']}
+  series={[{ name: 'gzipped kB downloaded', data: [247, 60, 247, 280] }]}
+  yTitle="kilobytes (gzip)"
+/>
+
+That build was 60 kB, and it still rendered all 39 diagrams. So the honest version of the size claim is "about 4x smaller, if you opt in," not "6x smaller" out of the box.
+
+## The part the table leaves out: when the SVG gets made
+
+Speed and size are both about the browser. The more interesting fact is that Pele does not need one.
+
+Mermaid needs a document to measure text in, so drawing it before the page ships normally means driving a headless browser, which is what the Mermaid CLI does.[^6] Pele's `render()` is synchronous and has no runtime dependencies.[^2] I called it in plain Node with no DOM: 39 of 39 diagrams rendered, in 31 ms total, cold, including the first-call warmup.
+
+That changes the architecture, not just the timings.
+
+<Mermaid
+  caption="Where the diagram becomes SVG decides what the reader pays for. With Pele at build time, the reader downloads no diagram code and a theme toggle is a stylesheet change."
+  label="Flowchart. Diagram text leads to a decision on where it becomes SVG. In the reader's browser: load the library, render at about 50 ms per diagram, and on theme toggle render everything again. At build time: render once in Node, ship the SVG inside the HTML, and on theme toggle only CSS variables change."
+  code={`
+flowchart TB
+  A["Diagram text in the post"] --> B{"Where does it become SVG?"}
+  B -->|"reader's browser"| C["Download library, 60 to 280 kB"]
+  C --> D["Render, about 50 ms per diagram"]
+  D --> E["Theme toggle: render every diagram again"]
+  B -->|"build time"| F["Render once in Node, under 1 ms each"]
+  F --> G["SVG ships inside the HTML"]
+  G --> H["Theme toggle: CSS variables only"]
+`}
+/>
+
+The theme row is the one I could measure directly. In my comparison page, I flipped to dark mode with both libraries on screen. Pele's diagrams recolored through the stylesheet with no render call at all, and they looked right in dark. Mermaid has to be told its colors up front, so my page redrew all 39 diagrams, which took 3.2 seconds (a single run, and an absurd page, since no post has 39 diagrams). A real post with two diagrams pays something like 100 ms per toggle, which is why this site's Mermaid component exists in its current form.
+
+One more number in the same spirit. Once rendering costs under a millisecond, the time to put the SVG into the page starts to dominate. Inserting all 39 SVGs and forcing layout took a median of 48 ms for Pele's output and 121 ms for Mermaid's. That is 1.2 versus 3.1 ms each, which is small, but it means the 100x speedup does not carry through to the end of the pipeline.
+
+## Does it draw the same diagram?
+
+Fast is only useful if the picture is right. All 39 diagrams rendered without error, which is a floor and not an answer. Pele states that it uses its own layout, so "node positions, spacing, and edge paths differ from Mermaid."[^3]
+
+I compared the SVG viewBox sizes. The median Pele diagram had 88% of Mermaid's area. Eight of the 39 differed by more than 10%, and six of those were between 47% and 62% of Mermaid's area. I looked at a few of them side by side, in light and dark. The text, boxes and arrows match, and they read the same. The differences are spacing and routing, plus one real behavior difference: in a flowchart with two boxed groups, where Mermaid laid the nodes inside each group out left to right, Pele stacked them top to bottom, following the diagram's own direction. Pele's page documents this as intentional.[^3]
+
+I eyeballed only a handful of the 39 pairs, not all of them, so I cannot promise every diagram keeps its meaning. What I can say is that none failed, and the visible changes were layout, not content.
+
+## Trade-offs and pitfalls
+
+- **Different engine, different pictures.** If a post's wording leans on a layout ("the box on the left"), re-check it after switching. Mermaid theme settings also do not apply, and you restyle with `--pele-*` variables instead.[^3]
+- **Narrower syntax.** Arbitrary HTML in labels is unsupported, `click` callbacks are ignored, and Pele limits source length, output size and the number of edges.[^3] None of my 39 diagrams hit those, but a large architecture diagram might.
+- **It tracks Mermaid 12.1.0.** This site runs 11.17.2. The 39 diagrams parsed fine, but a newer syntax feature might not match in the other direction.
+- **Young release.** Version 1.6.0 went up on 2026-10-17, the day before I measured it.[^4] I would pin the version.
+- **One machine, one browser.** These are my numbers on one laptop in one Chrome build, with a timer that rounds to 0.1 ms. The ratios are directional.
+
+## Takeaways
+
+- The speed claim is real: Pele rendered each diagram about 100x faster than Mermaid, 0.4 ms against 52 ms warm. "Up to 500x" did not reproduce.
+- The size claim is not true by default. For a page of flowcharts, Pele's default import is the same download as what Mermaid fetches, about 247 kB. Opting into `pele/core` brought it to 60 kB.
+- Its best feature is not on the speed table. It renders in plain Node, so diagrams can be drawn at build time, ship as plain SVG, and switch themes with CSS alone.
+- Layouts differ from Mermaid's, with a median area of 88% and some diagrams at half. Check anything that depends on a specific arrangement.
+- For this site, the win would come from build-time rendering, not from a faster in-browser swap. I have not switched, and I would want a full visual pass over all 39 first.
+
+## References
+
+[^1]: Pele home page, [pele.run](https://pele.run/), read 2026-10-18. Source of the 500x, 230 kB versus 1.6 MB, 0.05 to 0.3 ms versus 6 to 82 ms, and 0 versus 23 dependency claims.
+[^2]: [obsidianmd/pele](https://github.com/obsidianmd/pele) README, version 1.6.0 (MIT). Covers the synchronous `render()` API, the `pele/core` registration entry, the `--pele-*` CSS variables, and the statement that it targets Mermaid 12.1.0 syntax.
+[^3]: Pele, [Compatibility](https://pele.run/compatibility). Own layout engine, Mermaid theme settings not applied, no arbitrary HTML labels, ignored click callbacks, source and output limits, and subgraph direction behavior.
+[^4]: npm registry metadata for [pele](https://registry.npmjs.org/pele): latest tag 1.6.0, published 2026-10-17 14:23 UTC.
+[^5]: Methodology. Measured 2026-10-18 on an Intel Core Ultra 7 258V laptop (8 cores), Windows 11, Chrome 155, Node 24. `pele@1.6.0` and `mermaid@11.17.2`, bundled with esbuild (minified, Mermaid with code splitting), served over gzip from localhost, so `transferSize` is the compressed download. Workload: all 39 `<Mermaid>` diagrams in this blog's posts as of 2026-10-17 (33 flowcharts, 6 sequence diagrams). Timing: `performance.now()` around `render` (Pele) or `mermaid.render` (Mermaid), each library in a fresh iframe; cold is the first diagram and first pass, warm is the median of ten further passes per diagram. Three runs; the table values are medians of the three. The ratio floors Pele's time at 0.1 ms, the timer resolution. Node timing is one cold run of `render` over all 39 with no DOM. Size ratios come from `transferSize`; the 60 kB build registers only the flowchart and sequence types. Source: [pele-bench.html](/files/pele-bench.html) and [pele-bench-setup.mjs](/files/pele-bench-setup.mjs); open the page with `?lib=pele` or `?lib=mmd` and read `window.__res` in the console.
+[^6]: [mermaid-js/mermaid-cli](https://github.com/mermaid-js/mermaid-cli), the command-line renderer, which uses a headless browser to draw diagrams to files.
+[^7]: Hacker News discussion of [Pele](https://news.ycombinator.com/item?id=50132193), posted 2026-10-17.
