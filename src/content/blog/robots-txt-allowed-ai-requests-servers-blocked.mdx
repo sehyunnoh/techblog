@@ -1,0 +1,134 @@
+---
+title: "robots.txt Allowed 87 AI Requests. The Servers Blocked 25 of Them Anyway."
+description: "I sent three AI user-agent strings to 66 sites and compared robots.txt with what the server did. Sephora allows them on paper and returns 403. BBC denies them and serves the page."
+pubDate: 2026-10-19
+tags: ['web', 'security', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+On October 17 The Verge reported that websites are closing their doors to AI agents.[^1] The story names Delta, which stops agents from booking tickets, and JPMorgan Chase and Charles Schwab, which block them from accounts. It also names Yelp, which lets in only agents that pay for a data license, and says users report that Cars.com and Amtrak stopped working too. It is a good article, and it has no numbers in it. Every claim rests on a company statement or a user report.
+
+A site has an official place to say what it allows, a file called `robots.txt`. So I asked a narrow question: does that file predict what the server actually does? I sent three AI user-agent strings to 66 sites and compared the two. On the 39 sites where the comparison was clean, `robots.txt` allowed 87 requests and the servers refused 25 of them. It denied 19, and the servers answered 12.
+
+## What is being compared
+
+A **user agent** is the name a client announces in an HTTP header, such as a Chrome version string, or `GPTBot`. **robots.txt** is a plain text file at the root of a site that lists which user agents may fetch which paths. Its standard says that these rules "are not a form of access authorization" and that crawlers are "requested to honor" them.[^2] Nothing in the protocol enforces it. A server that wants to refuse a client has to do it on its own, usually by returning **403** (forbidden) or **429** (too many requests), or by sending a tiny page or no reply at all.
+
+I used three user agents, all documented by the companies that run them:
+
+- **GPTBot** is OpenAI's training crawler.[^3]
+- **ChatGPT-User** is OpenAI's fetcher for actions a person triggers in ChatGPT. OpenAI says that because a user starts these, robots.txt rules "may not apply."[^3]
+- **ClaudeBot** is Anthropic's crawler for collecting training content, and Anthropic says its bots honor robots.txt.[^4]
+
+I did not test the agents in The Verge story (Meta's Muse, Grok, OpenAI's Dots). I could not find their user-agent strings, so what follows is how sites treat these three names, not how they treat those products.
+
+## How I measured
+
+For each site I fetched `robots.txt` once, then requested the home page with five user agents: a Chrome string, a second copy of that Chrome string as a control, and the three AI names. I repeated that in three rounds, shuffled the order every time, and waited two seconds between requests. Eleven sensitive sites (banks, airlines, PayPal) got one round only. In total that was 880 home page requests.[^5]
+
+My first pass was wrong, and the way it was wrong is worth knowing. I called a response "blocked" when the status code was 400 or higher. That missed Schwab, which answers all three AI names with a 200 and a 503-byte body, while the Chrome string gets a page of at least 300 kB. It also called Amazon "not blocking" when Amazon sends everyone, Chrome included, a 2 kB stub. Fixing this I found a second bug in my own comparison: I read at most 300 kB per response, so a full 257 kB page from Gap looked "smaller" than a truncated 300 kB one. The final rule treats a 2xx response as a stub only if it is far smaller than the Chrome page, or under 10 kB when the Chrome page hit my read cap.
+
+Not every site could be judged:
+
+| Group | Sites | Why |
+|---|---|---|
+| Usable | 39 | Chrome string got a full page |
+| Chrome string refused | 16 | A plain `curl` with Chrome's user agent got a 403 or 429 anyway, so no baseline (Yelp, NYT, eBay, Etsy and others) |
+| Thin baseline | 7 | Chrome page under 10 kB, possibly a challenge page (Amazon, Delta, Reddit and others) |
+| Flaky or unreadable | 4 | Chrome string got mixed results (DoorDash, OpenAI) or no baseline page (Booking.com, IMDb) |
+
+## Result 1: allowed on paper, refused in practice
+
+Across the 39 usable sites there were 87 pairs of a site and an AI name where robots.txt allowed the request and the server answered at all. In 25 of them the server refused. Another 19 pairs were denied by robots.txt, and 12 of those were answered with a normal page.
+
+<Chart
+  type="bar"
+  height={300}
+  format="plain"
+  caption="Outcome of each (site, AI user agent) request by what robots.txt says about it. The 25 refused requests under 'allows' come from nine sites. The 12 served requests under 'denies' come from six."
+  label="Bar chart of request counts. robots.txt allows: 25 refused, 62 served normally. robots.txt denies: 7 refused, 12 served normally."
+  labels={['robots.txt allows', 'robots.txt denies']}
+  series={[{ name: 'refused or stub', data: [25, 7] }, { name: 'served normally', data: [62, 12] }]}
+  yTitle="requests"
+/>
+
+So 29% of requests that robots.txt allows (25 of 87) were refused, and 63% of those it denies (12 of 19) went through. Two different things are happening here, and they should not be lumped together.
+
+The first is simple. Nine sites say yes and act no: AA, Home Depot, Lowe's, Nike, Schwab, Sephora, Wayfair and Zillow refuse all three names, and Wikipedia refuses ClaudeBot only. Sephora is the cleanest example. Its robots.txt allows all three, its Chrome string gets a 200 with at least 300 kB, and each AI name gets a 403 with a 369-byte body, nine times out of nine.
+
+The second is less of a surprise. Six sites say no and serve the page: BBC and LinkedIn for all three names, Instacart for two, TechCrunch for two, and The Verge and Wired for one each. This is what "not a form of access authorization" means in practice. Part of it is also by design, since OpenAI describes ChatGPT-User as a fetch a person asked for. The BBC and LinkedIn, though, answered GPTBot too, a crawler that OpenAI says follows robots.txt.
+
+## Result 2: the three names are not treated alike
+
+| User agent | Refused (of non-error sites) |
+|---|---|
+| GPTBot | 10 of 36 |
+| ChatGPT-User | 9 of 36 |
+| ClaudeBot | 15 of 37 |
+
+ClaudeBot was refused by six more sites than ChatGPT-User, and four of those refuse it alone: TechCrunch, The Guardian, The Verge and Wikipedia serve GPTBot and ChatGPT-User the same page the Chrome string gets (122,197 bytes on Wikipedia) and answer ClaudeBot with a 403. Wikipedia's is 82 bytes. I do not know why. The obvious guess is a site-specific rule about one crawler's past behavior, but I have no evidence for it.
+
+The refusals also come in more than one flavor. Forbes returned **402**, whose official name is Payment Required, to GPTBot and ClaudeBot and served ChatGPT-User normally. CNN returned **451**, Unavailable For Legal Reasons,[^6] to all three. Wayfair and Expedia returned 429, and Expedia did it to the Chrome string too, so that one is plain rate limiting.
+
+Three sites never said no. Amtrak, United and Best Buy answered the Chrome string every time and did not answer the AI names at all: timeouts and dropped connections, with no status code. For a person that looks like an outage. For an agent it is indistinguishable from one.
+
+## What The Verge named
+
+| Site | robots.txt | What I saw |
+|---|---|---|
+| Delta | allows | AI pages about 4% smaller, but the baseline is thin (8.7 kB), so no conclusion |
+| Chase | allows | Same full page for every user agent |
+| Schwab | allows | 200 with 503 bytes for all three AI names, full page for Chrome |
+| Amtrak | allows | AI names get no response, Chrome gets 240 kB |
+| Yelp | denies | Chrome string also refused, so no comparison |
+| Cars.com | none (403) | Chrome string also refused, so no comparison |
+| Amazon | denies | 2 kB stub for every user agent, Chrome included |
+
+Delta and Chase are the interesting rows. Their home pages treat an AI name like a person, and The Verge says both stop agents from doing real work. That fits a block that happens further in (a login, a search form, a checkout), where this test never went.
+
+## Who is saying no
+
+The response headers give a hint. On refused responses the `Server` header most often said `cloudflare` (72 responses), then `AkamaiGHost` (54), and 30 had no `Server` header at all, with `Varnish`, `DataDome` and `CloudFront` further down.[^5] Those names are content delivery networks and bot-filtering services, companies that sit in front of a site and decide which requests reach it. If that is the layer doing the refusing, then `robots.txt`, which the site's own team writes, and the filter, which is often a product setting or a managed rule, are two separate systems that need not agree.
+
+<Mermaid
+  caption="A request can be stopped at three places, and robots.txt only advises the first. I inferred the edge layer from Server headers. I cannot see inside any of these sites."
+  label="Flowchart. An AI request meets a bot filter at the edge, which may answer 403, 429, or nothing. If it passes, the site application may answer 402, 451, or a thin page, otherwise a normal page. robots.txt is a dotted line of advice toward the requester only."
+  code={`
+flowchart TB
+  R["robots.txt: advice read by the client"] -.-> A["AI request"]
+  A --> B{"Edge filter: CDN or bot service"}
+  B -->|"refuses"| C["403, 429, or no reply"]
+  B -->|"passes"| D{"Site application"}
+  D -->|"rule or paywall"| E["402, 451, or a thin page"]
+  D -->|"allows"| F["Normal page"]
+`}
+/>
+
+## Trade-offs and what this does not show
+
+- **I am not who I claim to be.** My requests carry an AI company's name but come from a home connection. OpenAI and Anthropic both publish the IP ranges their bots use,[^3][^4] so a site can check the claim. Some of these refusals may mean "you say you are GPTBot and you are not," which is a different thing from "we block GPTBot." I could not separate the two.
+- **Versions.** I sent `GPTBot/1.1`, and OpenAI lists 1.4 today. My ClaudeBot string follows the format I remembered and is not copied from Anthropic's page.
+- **Home page only.** Nothing here touches login, search or checkout, which is where The Verge's examples live.
+- **Small and picked by hand.** 39 usable sites, chosen from the article plus popular ones. This is not a sample of the web.
+- **Status and size, not content.** I did not store response bodies, so a "same size" page could still be a different page, and I do not know what Schwab's 503 bytes said.
+- **One IP, one afternoon.** Sites that rate limit or change rules would look different on another day.
+
+## Takeaways
+
+- robots.txt is a statement of intent. Of the AI requests it allowed on 39 sites, 29% were refused, and most of the refusals came from nine sites.
+- Of the requests it denied, 63% were served. If you want to keep AI fetchers out, the file alone does not do it.
+- The three names get different treatment. ClaudeBot was refused most often and alone on four media or reference sites. ChatGPT-User, which OpenAI describes as user-initiated, was refused by 9 of 36.
+- Refusals are not always a 403. I saw 402, 451, 429, a 503-byte page returned with a 200, and silence. An agent that only checks for a 403 will miss most of them.
+- To know what a site does to your agent, test your agent. A claim in a policy file or a news story does not tell you that, and this experiment did not fully either.
+
+## References
+
+[^1]: Emma Roth, [Websites are closing their doors to AI agents](https://www.theverge.com/ai-artificial-intelligence/1013195/ai-agents-blocked-web), The Verge, 2026-10-17. Source of every claim about Delta, Chase, Schwab, Yelp, Cars.com, Amtrak and Amazon in the opening and in the Verge table.
+[^2]: [RFC 9309, Robots Exclusion Protocol](https://www.rfc-editor.org/rfc/rfc9309.html), September 2022, Section 1: "These rules are not a form of access authorization" and crawlers are "requested to honor" them.
+[^3]: OpenAI, [Overview of OpenAI crawlers](https://developers.openai.com/api/docs/bots), read 2026-10-19. GPTBot, OAI-SearchBot and ChatGPT-User purposes, the statement that for ChatGPT-User "robots.txt rules may not apply," the current GPTBot version (1.4), and the published IP lists such as `openai.com/gptbot.json`.
+[^4]: Anthropic, [Does Anthropic crawl data from the web, and how can site owners block the crawler?](https://support.claude.com/en/articles/8896518-does-anthropic-crawl-data-from-the-web-and-how-can-site-owners-block-the-crawler), read 2026-10-19. ClaudeBot, Claude-User and Claude-SearchBot, the robots.txt statement, and the published IP list at `claude.com/crawling/bots.json`.
+[^5]: Methodology. Measured 2026-10-19 from one residential connection, Windows 11, Python 3 `urllib`. 66 sites: the ones named in The Verge article plus popular retail, travel, finance, news and developer sites chosen by hand. One `robots.txt` fetch per site (www host first), parsed with Python's `urllib.robotparser` for the root path. Then home page GETs with five user agents (Chrome 155 string, a second identical Chrome string as control, ChatGPT-User/1.0, ClaudeBot/1.0, GPTBot/1.1), three rounds (one for 11 sensitive sites), order shuffled per site and round, 2 s between requests, one retry on a connection error, at most 15 requests per site. 880 home page requests. A response is "refused" at status 400 or above, or if a 2xx body is under 50% of the Chrome page, or under 10 kB when the Chrome page reached my 300 kB read cap. A site counts as usable if its Chrome baseline is 10 kB or more and returned 200. The `Server` header counts cover all refused AI-name responses on all 66 sites. Source: [ai-ua-probe.py](/files/ai-ua-probe.py), [ai-ua-aggregate.py](/files/ai-ua-aggregate.py), and per-site results in [ai-ua-results.csv](/files/ai-ua-results.csv) (BLK refused, SHORT stub, SAME normal, ERR no response).
+[^6]: [RFC 7725, An HTTP Status Code to Report Legal Obstacles](https://www.rfc-editor.org/rfc/rfc7725.html), the definition of status 451.
