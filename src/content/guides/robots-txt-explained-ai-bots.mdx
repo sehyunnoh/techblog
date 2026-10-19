@@ -1,0 +1,139 @@
+---
+title: 'robots.txt Explained: How Crawlers Read It, Where Python Gets It Wrong, and Its Limits'
+description: 'A reference for robots.txt: the syntax, how a crawler picks a group and a rule, what happens when the file fails to load, how to write rules for AI bots, and what it cannot enforce.'
+pubDate: 2026-10-19
+updatedDate: 2026-10-19
+tags: ['web', 'security', 'tutorial', 'benchmark']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+
+`robots.txt` is a plain text file that a website puts at its root to tell automated visitors where they may go. A **crawler** (a program that fetches pages automatically, like a search engine's bot) is expected to read it first. The file is tiny and the idea is old, from 1994, but the details trip people up all the time. This guide covers what the file says, how a crawler is supposed to read it, and where it stops being useful.
+
+The rules come from RFC 9309, the standard published in September 2022.[^1] I will quote it where the wording matters. I also tested a popular implementation against it, and the result is below.
+
+## The one idea to keep
+
+The standard says so in its introduction: "These rules are not a form of access authorization."[^1] The file is a request. A well-behaved crawler reads it and follows it. A badly behaved one never opens it, and nothing in the protocol stops that. Its security section goes further and warns that listing a path in the file "exposes them publicly and thus makes the paths discoverable."[^1] If a page must stay private, put a login in front of it.
+
+The gap between what a file says and what servers actually do is measured in [this post](/posts/robots-txt-allowed-ai-requests-servers-blocked): on 39 sites, servers refused 29% of the AI requests the file allowed.
+
+## Anatomy of the file
+
+A file is a list of **groups**. Each group starts with one or more `User-agent` lines, naming who the rules are for, and is followed by `Allow` and `Disallow` rules.
+
+```
+User-agent: GPTBot
+User-agent: ClaudeBot
+Disallow: /
+
+User-agent: *
+Disallow: /admin/
+Allow: /admin/help
+Disallow: /*.pdf$
+
+Sitemap: https://example.com/sitemap.xml
+```
+
+- The first group applies to two named crawlers and shuts both out of the whole site (`/` is the root path, so everything under it).
+- The second group, `*`, applies to everyone else. It blocks `/admin/`, carves out one page inside it, and blocks any URL ending in `.pdf`.
+- `Sitemap` is not part of the standard's rules but is widely read, and the standard says it must not break a group.[^1]
+
+Three symbols are supported everywhere: `#` starts a comment, `*` matches any run of characters, and `$` means "the URL ends here."[^1]
+
+## How a crawler decides
+
+There are two decisions, in this order.
+
+**1. Which group applies?** The crawler matches its own name (its **product token**, such as `GPTBot`) against the `User-agent` lines, ignoring case. If several groups name it, their rules are merged into one. If none does, it uses the `*` group. If there is no `*` group either, nothing is restricted.[^1]
+
+**2. Which rule wins?** The crawler compares the URL path to every `Allow` and `Disallow` pattern in that group. Paths are case sensitive and a pattern matches from the start of the path. The most specific match wins, meaning the longest pattern. If an `Allow` and a `Disallow` are the same length, `Allow` wins. If nothing matches, the URL is allowed.[^1]
+
+Two consequences that surprise people:
+
+- **Order does not matter.** Put `Allow: /admin/help` before or after `Disallow: /admin/` and the result is the same, because the longer pattern wins.
+- **Patterns are prefixes.** `Disallow: /admin` also blocks `/administrator` and `/admin-tools`. Add the trailing slash, or end the pattern with `$`, if you mean one path.
+
+## When the file does not load
+
+The crawler has to fetch `https://yourhost/robots.txt` first, and what it gets back changes everything.
+
+<Mermaid
+  caption="What RFC 9309 says a crawler does with each outcome of fetching robots.txt. Note that a 4xx answer opens the whole site and a 5xx answer closes it."
+  label="Flowchart. A crawler fetches robots.txt. If it gets 200, it follows the rules. If it gets a redirect, it follows up to five, then treats the file as unavailable. If it gets a 4xx status, the file is unavailable and the crawler may access anything. If it gets a 5xx status or a network error, the file is unreachable and the crawler must assume everything is disallowed."
+  code={`
+flowchart TB
+  A["Crawler fetches /robots.txt"] --> B{"Result"}
+  B -->|"200"| C["Parse and follow the rules"]
+  B -->|"301 or 302"| D["Follow up to 5 redirects, then treat as unavailable"]
+  B -->|"4xx"| E["Unavailable: crawler MAY access everything"]
+  B -->|"5xx or network error"| F["Unreachable: crawler MUST assume disallow all"]
+`}
+/>
+
+A few more rules from the same standard: crawlers should not reuse a cached copy for more than 24 hours, and must parse at least the first 500 KiB of the file.[^1] The file belongs to one host, so `www.example.com` and `example.com` each need their own, as do `http` and `https`.
+
+The 4xx rule has a sharp edge. A server that answers `/robots.txt` with a 403 or 404 by accident has, as far as the standard goes, published "everything allowed." Of the 66 sites I fetched for a recent measurement, two (Cars.com and Stack Overflow) answered my request for the file with a 403 and a 418. That was a response to my script, not necessarily what a real crawler sees, but it shows how a protection layer can sit in front of the file itself.
+
+## Where Python's parser disagrees with the standard
+
+Python ships a robots.txt parser in its standard library, `urllib.robotparser`, and it is the first thing many people reach for. I ran ten cases through it and through a matcher I wrote from the RFC text (about 50 lines, linked below). Python 3.12.10 disagreed on five.[^2]
+
+| Case | Python 3.12 | RFC 9309 |
+|---|---|---|
+| `Disallow: /a/` then `Allow: /a/b`, fetch `/a/b` | blocked | allowed |
+| Same rules in the other order | allowed | allowed |
+| `Disallow: /p` and `Allow: /p`, fetch `/p` | blocked | allowed |
+| `Disallow: /*.gif$`, fetch `/x/y.gif` | allowed | blocked |
+| `Disallow: /private*/x`, fetch `/private123/x` | allowed | blocked |
+| Two groups for the same bot, rule in the second | allowed | blocked |
+
+The pattern is easy to read once you see it. Python takes the first rule that matches, in file order, where the standard takes the longest. It also treats `*` and `$` as ordinary characters instead of wildcards, and it consults only the first group that names the bot. The other four cases I ran (a `$` anchor on a longer path, a specific group beating `*`, an empty `Disallow`, and the `/admin` prefix) came out the same in both.
+
+This matters because real files use these features. Of the 61 robots.txt files I downloaded, 50 contain a `*` wildcard in a rule, 29 use a `$` anchor and 49 have `Allow` lines.[^3] If you use Python's parser to decide whether you may fetch a page, you can be wrong in either direction. I used it myself in the post linked above, so I re-ran every allow/deny decision with the RFC matcher. All 106 allow/deny decisions behind that post's counts came out identical, because the rules that mattered there were plain prefixes. That was luck of the data and not something to count on.
+
+Google, whose engineers co-authored the RFC, publishes its own parser as open source, which is a reasonable choice if you need one that follows the standard.[^4] For a quick check, the script below runs the comparison yourself: [robots-rfc9309-match.py](/files/robots-rfc9309-match.py).
+
+## Writing rules for AI crawlers
+
+The companies behind AI products now run several bots each, and they do different jobs. Blocking one does not block the others, so you have to name them.
+
+| Bot | Run by | What it does |
+|---|---|---|
+| `GPTBot` | OpenAI | Collects content used to train models[^5] |
+| `OAI-SearchBot` | OpenAI | Finds pages to show in ChatGPT search[^5] |
+| `ChatGPT-User` | OpenAI | Fetches a page when a person asks ChatGPT to, and OpenAI says robots.txt rules "may not apply"[^5] |
+| `ClaudeBot` | Anthropic | Collects content that may be used for training[^6] |
+| `Claude-User` | Anthropic | Fetches sites when a Claude user asks a question[^6] |
+| `Claude-SearchBot` | Anthropic | Improves the quality of Claude's search results[^6] |
+
+To keep out the two training crawlers while staying visible in search and to people using chat tools, name only those two:
+
+```
+User-agent: GPTBot
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /
+```
+
+Two honest limits. First, OpenAI says its user-triggered fetcher may ignore the file, so `Disallow` against `ChatGPT-User` is a request that may not be honored. Anthropic's page says its bots honor the file, though it does not describe the user-triggered bots separately.[^6] Second, naming a bot in your file proves nothing about what it does next. In the files I downloaded, `ClaudeBot` appears in 21, `GPTBot` in 18 and `ChatGPT-User` in 19, and a name can sit in an `Allow` group as easily as a `Disallow` one.[^3]
+
+## What robots.txt will not do
+
+- **It does not hide pages from search.** Google says the file "is not a mechanism for keeping a web page out of Google," and recommends `noindex` or a password instead. A blocked URL can still show up in results, just without a description.[^7]
+- **It does not enforce itself.** If you need a bot gone, refuse it where requests arrive: at the web server, a firewall rule, or a CDN's bot settings. OpenAI and Anthropic both publish the IP ranges their crawlers use, so you can check that a request claiming to be `GPTBot` really comes from OpenAI.[^5][^6] Anthropic adds that IP blocking alone may not give a reliable opt-out, so it recommends the file as the main signal.[^6]
+- **It does not keep a secret.** Anything listed can be read by anyone who opens the file.
+
+A practical habit that follows from this: after you change the file, fetch it the way a crawler would, with `curl -s https://yourhost/robots.txt`, check that the status is 200, and then test the specific URLs you care about with a parser that follows the standard.
+
+## References
+
+[^1]: [RFC 9309, Robots Exclusion Protocol](https://www.rfc-editor.org/rfc/rfc9309.html), IETF, September 2022. Sections 2.2 (syntax, group and rule selection, special characters), 2.3 (access results for 4xx, 5xx and redirects), 2.4 (24 hour cache), 2.5 (500 KiB limit) and 3 (security considerations). I read the plain text version on 2026-10-19.
+[^2]: Measured 2026-10-19 with Python 3.12.10 on Windows. Ten test files and URLs, each run through `urllib.robotparser` and through a matcher written from RFC 9309 section 2.2: [robots-rfc9309-match.py](/files/robots-rfc9309-match.py). Newer Python versions may behave differently; I tested only this one.
+[^3]: Counts from the 61 `robots.txt` files (of 66 sites) that downloaded with readable rules during the measurement described in [the robots.txt post](/posts/robots-txt-allowed-ai-requests-servers-blocked), 2026-10-19. A wildcard means a `*` inside an Allow or Disallow pattern. "Naming a bot" means a `User-agent` line with that exact name.
+[^4]: [google/robotstxt](https://github.com/google/robotstxt), Google's robots.txt parser and matcher as a C++ library, Apache-2.0. Described on its repository page as Google's parser and matcher.
+[^5]: OpenAI, [Overview of OpenAI crawlers](https://developers.openai.com/api/docs/bots), read 2026-10-19. Purposes of GPTBot, OAI-SearchBot and ChatGPT-User, the "robots.txt rules may not apply" statement, and published IP lists.
+[^6]: Anthropic, [Does Anthropic crawl data from the web, and how can site owners block the crawler?](https://support.claude.com/en/articles/8896518-does-anthropic-crawl-data-from-the-web-and-how-can-site-owners-block-the-crawler), read 2026-10-19. ClaudeBot, Claude-User and Claude-SearchBot purposes, the statement that its bots honor robots.txt, the published IP list, and the note that IP blocking may not give a reliable opt-out.
+[^7]: Google Search Central, [Introduction to robots.txt](https://developers.google.com/search/docs/crawling-indexing/robots/intro), read 2026-10-19.
