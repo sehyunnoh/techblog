@@ -1,0 +1,152 @@
+---
+title: "Hermes's Memory Search Beat Embeddings, but Only Through Its Last-Resort Fallback"
+description: "On 1,536 LoCoMo questions, Hermes-style FTS5 session search found the answer turn in its top 10 for 54%, ahead of a small embedding model. Nearly every hit came from an OR retry."
+pubDate: 2026-10-20
+tags: ['ai', 'llm', 'python', 'architecture', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+"Agent memory" is one phrase for three different mechanisms. One is a short file of notes that sits in the system prompt. Another is a search box over old conversations. The third is a service that reads your conversations with a second LLM and writes down conclusions about you. Hermes Agent, the open-source personal agent from Nous Research, ships all three.[^1]
+
+I read how each one works in the source, then measured the two that run locally.[^14] The test set is LoCoMo, a public benchmark of ten long chat histories with 1,536 questions that each point at the exact turn holding the answer.[^2] The results were not what I expected going in. The keyword search beat an embedding model, but it only works at all because of a fallback that fires for almost every query.
+
+## The three places memory can live
+
+Before the numbers, here is where each mechanism sits relative to the model.
+
+<Mermaid
+  caption="Three memory mechanisms in Hermes. The notes are loaded once and sit in every prompt. Search runs only when the agent calls it. The external provider is optional, and only one can be active."
+  label="Diagram: at session start the MEMORY.md and USER.md files are frozen into the system prompt. During the session the agent can call session_search, which queries a SQLite FTS5 index and returns raw messages. Optionally one external provider such as Honcho adds LLM-derived context each turn."
+  code={`
+flowchart LR
+  F[("MEMORY.md 2,200 chars<br/>USER.md 1,375 chars")] -->|"frozen at session start"| P["System prompt"]
+  H[("Session DB<br/>SQLite FTS5")] -->|"agent calls session_search"| T["Tool result:<br/>raw messages"]
+  X["External provider<br/>e.g. Honcho<br/>(LLM calls)"] -.->|"optional, one at a time"| P
+  P --> M["Model"]
+  T --> M
+`}
+/>
+
+The built-in notes are two files with hard caps. The store defaults to 2,200 characters for `MEMORY.md` and 1,375 for `USER.md`.[^3] Both are copied into the system prompt as a frozen snapshot when a session starts, so a write mid-session reaches disk but not the prompt until the next session.[^4] The reason is the prompt cache: a prompt prefix that never changes can be reused cheaply on every turn.
+
+Search is a separate tool. Its own docstring says it makes no LLM calls: every result is an actual stored message.[^5] Underneath is SQLite's FTS5 full-text index. Optionally you can add one external provider, and the manager rejects a second one.[^6] Honcho is the documented example.
+
+## The notes: 3% of a conversation
+
+A 2,200-character cap is small. How small depends on what you ask it to hold, so I measured against LoCoMo. Each conversation averages 72,676 characters of dialogue (about 18,900 tokens with the `o200k_base` tokenizer, across 588 turns). The cap is 3.0% of that.
+
+LoCoMo also ships a list of short facts per conversation, written by an LLM, one per evidence turn. They are a fair stand-in for what a diligent agent would write into its notes. Those facts total 21,698 characters per conversation, 9.9 times the cap.
+
+I then gave the notes the best case I could build. A greedy "oracle" that already knows every question picks the facts that unlock the most questions per character and stops at 2,200. It fits 27.5 facts on average. Those facts let it answer 469 of the 1,536 questions, or 30.5%.
+
+<Chart
+  type="bar"
+  height={300}
+  format="compact"
+  caption="Characters per conversation. The 2,200-character cap holds about 3% of the dialogue and about a tenth of the facts an LLM extracted from it."
+  label="Bar chart. Dialogue 72,676 characters. LLM-extracted facts 21,698. Hermes MEMORY.md cap 2,200."
+  labels={['Dialogue', 'Extracted facts', 'MEMORY.md cap']}
+  series={[{ name: 'characters per conversation', data: [72676, 21698, 2200] }]}
+  yTitle="characters"
+/>
+
+That 30.5% is generous. A real curator does not know tomorrow's questions, and my facts are written one per turn, in a different voice than a person would use for a notes file. Still, 2,200 characters is roughly 430 tokens, which is cheap to carry on every turn. When the file fills up, the add operation fails and tells the model to remove or shorten something in the same batch.[^7] Curation is a continuous editing job, and the editor is the same model that is trying to finish your task.
+
+## The search: it only works because of one retry
+
+For search I replayed the code path in `hermes_state_search.py` against the same data. Each of the 5,882 dialogue turns is one indexed message, and each question is sent as a query. The table is declared without a tokenizer option, so it uses SQLite's default `unicode61`, which does not stem.[^8] Hits are ranked by BM25, SQLite's standard relevance score (rarer words count for more).[^9]
+
+The detail that matters is FTS5's treatment of several words in one query. They are joined by an implicit AND, so a message must contain every word.[^9] A natural-language question almost never matches that way. I sent all 1,536 questions as typed:
+
+- With only the AND query and the trigram fallback, 99.8% of questions returned nothing. Only three of the 1,536 returned any rows at all, and none of them held the evidence.
+- With Hermes's last step, an OR retry that matches any word, 98.6% of questions (1,514) were answered by that retry.
+
+That last step is in the source with a comment that describes this exact failure: a paraphrased query "misses a stored sentence that lacks even ONE word."[^10] So the maintainers know. It is also the only reason the tool returns anything for a question phrased as a sentence.
+
+<Chart
+  type="bar"
+  height={300}
+  format="percent"
+  caption="Share of 1,536 LoCoMo questions where an evidence turn appears in the top k results. Without the OR retry the bars would all be zero. The top-5 and top-10 columns are not what the tool returns by default, which is fewer results with surrounding context, so read them as retrieval reach."
+  label="Grouped bar chart. With the Hermes path: 24.9, 46.0, 54.4 percent. With keywords only: 29.0, 50.6, 58.1 percent. Dense embedding model: 14.2, 35.9, 46.1 percent."
+  labels={['Top 1', 'Top 5', 'Top 10']}
+  series={[
+    { name: 'Hermes path (OR retry)', data: [24.9, 46.0, 54.4] },
+    { name: 'Keywords only, Hermes path', data: [29.0, 50.6, 58.1] },
+    { name: 'Small embedding model', data: [14.2, 35.9, 46.1] },
+  ]}
+  yTitle="questions with an evidence turn in the top k"
+/>
+
+With the retry, the evidence turn is in the top 10 for 54.4% of questions and in the first slot for 24.9%. Multi-hop questions, which need more than one turn, reach 38.3% at top 10.
+
+A natural worry is that an agent would write a better query than the raw question. I tried a stand-in: the same questions with stopwords removed. It moved top-10 from 54.4% to 58.1%, and even then 1,483 of 1,536 queries still needed the OR retry. This is a proxy, not an agent, so treat the gain as a rough bound. Trimming filler words helps by a few points. It does not change which path does the work.
+
+## Lexical search beat a small embedding model
+
+An embedding model turns text into a vector and ranks by similarity, which is supposed to survive rephrasing. So I ran the same questions through `bge-small-en-v1.5`, a small quantized embedding model, over the same turns.[^11] It reached 46.1% at top 10, behind the keyword path's 54.4%.
+
+The overlap between question words and evidence words explains most of the gap. I split the questions by what fraction of their keywords appear in the evidence turn:
+
+<Chart
+  type="bar"
+  height={300}
+  format="percent"
+  caption="Top-10 hit rate by how many of the question's keywords appear in the evidence turn. When no keyword overlaps (337 questions), keyword search finds almost nothing. When a third or more overlap, it beats the embedding model by 20 points or more."
+  label="Grouped bar chart. No overlap, 337 questions: lexical 1.5 percent, embedding 14.5. Up to a third overlap, 606 questions: lexical 47.5, embedding 43.4. A third to two thirds, 528 questions: lexical 90.7, embedding 66.3. Over two thirds, 65 questions: lexical 96.9, embedding 70.8."
+  labels={['No overlap (337)', 'Under 1/3 (606)', '1/3 to 2/3 (528)', 'Over 2/3 (65)']}
+  series={[
+    { name: 'Keyword search', data: [1.5, 47.5, 90.7, 96.9] },
+    { name: 'Embedding model', data: [14.5, 43.4, 66.3, 70.8] },
+  ]}
+  yTitle="top-10 hit rate"
+  xTitle="share of question keywords found in the evidence turn"
+/>
+
+Keyword search finds almost nothing when no words are shared, about half the time when a few are, and nearly always when a third or more are. The embedding model is flatter: a little rescue when words differ, a lower ceiling when they match. The two fail in different places. Of the 1,536 questions, 307 were found only by keywords, 180 only by the embedding model, 528 by both, and 521 by neither. Taking the union of the two covers 66.1% at top 10, a bigger jump than the 3.7 points that stripping stopwords added.
+
+The 521 that neither found are a puzzle. They lean toward questions that need more than one turn (33%, against 24% of the rest), but their evidence turns are about as long as everyone else's (median 157 characters against 172). I do not have a clean explanation for what they share.
+
+## The third architecture, which I did not measure
+
+Honcho is a separate memory backend that Hermes talks to through a plugin. After a conversation turn it can run an LLM pass that derives conclusions about the user, then inject a summary of them into the prompt.[^12] I did not run it. The setup has you create an API key, and the quality of its conclusions depends on a model I cannot inspect.
+
+What the documentation does let me compute is the cost shape. The defaults are a context fetch every turn and an LLM call every second turn, with 1 to 3 passes per call.[^13] Over 100 turns that is 100 API fetches and 50 LLM calls at default depth. At the maximum depth of 3, called every turn, it is 300. That is arithmetic on documented defaults, not a measurement. The point is only that this is the one mechanism whose bill grows with conversation length even when the user asks nothing about the past.
+
+## What this does not show
+
+- **LoCoMo is two people chatting, not a person talking to an agent.** Hermes sessions hold tool calls and long outputs, and the index also covers tool names and call arguments, which my replica does not. Recall on real sessions could be better or worse.
+- **Hit at k is necessary, not sufficient.** Finding the evidence turn does not mean the model answers correctly. I did not run an LLM to grade answers.
+- **The default tool returns fewer results than ten.** It defaults to three, with a window of messages around each.[^5] The top-1 and top-5 numbers are closer to what an agent sees.
+- **The embedding model is small and quantized.** A larger one would do better. I chose one that runs on a laptop CPU, the kind of thing a personal agent would use, and I did not tune it.
+- **The oracle is greedy.** It is not provably optimal, though it only needs to be roughly right to show the cap is the constraint.
+- **The released LoCoMo file differs from its paper's abstract.** The paper reports about 300 turns and 9,000 tokens per conversation; the file I measured averages 588 turns and 18,902 tokens.[^2] I report my own counts.
+
+## Takeaways
+
+- **The notes file is a 2,200-character budget, about 3% of one long conversation.** Even an oracle that knew every question fit only 30.5% of the answers.
+- **Search with an AND query returned nothing for 99.8% of questions typed as sentences.** Hermes works because a final OR retry rescues 98.6% of them.
+- **Writing keywords instead of a sentence added about 4 points** at top 10 (54.4% to 58.1%) in my stopword-stripping proxy.
+- **A small embedding model reached 46.1% against 54.4% for keywords,** but it found 180 questions the keywords missed, and the union covers 66.1%.
+- **The search is strong when words are shared and weak when they are not.** If your agent's users paraphrase heavily, add a semantic layer instead of tuning the lexical one.
+- **The external provider's cost scales with turns, not with questions.** It makes LLM calls on a cadence even when the user asks nothing about the past, so check the cadence settings before enabling it on a long-running agent.
+
+## References
+
+[^1]: NousResearch/hermes-agent, [repository at the commit I read](https://github.com/NousResearch/hermes-agent/tree/1f91fb386a60f5589146b05ee88e911bb58120e8). All source links below are pinned to this commit, dated 2026-10-20.
+[^2]: Maharana et al., [Evaluating Very Long-Term Conversational Memory of LLM Agents](https://arxiv.org/abs/2402.17753) (LoCoMo), and the [released data](https://github.com/snap-research/locomo/blob/main/data/locomo10.json). Questions in categories 1 to 4 with evidence turns: 1,536.
+[^3]: `tools/memory_tool_store.py`, [default character limits](https://github.com/NousResearch/hermes-agent/blob/1f91fb386a60f5589146b05ee88e911bb58120e8/tools/memory_tool_store.py#L186-L190).
+[^4]: `tools/memory_tool.py`, [module docstring on the frozen snapshot](https://github.com/NousResearch/hermes-agent/blob/1f91fb386a60f5589146b05ee88e911bb58120e8/tools/memory_tool.py#L1-L5).
+[^5]: `tools/session_search_tool.py`, [search modes and "No LLM calls"](https://github.com/NousResearch/hermes-agent/blob/1f91fb386a60f5589146b05ee88e911bb58120e8/tools/session_search_tool.py#L1-L8), and the [default limit and window](https://github.com/NousResearch/hermes-agent/blob/1f91fb386a60f5589146b05ee88e911bb58120e8/tools/session_search_tool.py#L802).
+[^6]: `agent/memory_manager.py`, [only one external provider](https://github.com/NousResearch/hermes-agent/blob/1f91fb386a60f5589146b05ee88e911bb58120e8/agent/memory_manager.py#L269-L277).
+[^7]: `tools/memory_tool_store.py`, [add rejected when over the limit](https://github.com/NousResearch/hermes-agent/blob/1f91fb386a60f5589146b05ee88e911bb58120e8/tools/memory_tool_store.py#L377-L386).
+[^8]: `hermes_state_common.py`, [`messages_fts` declaration](https://github.com/NousResearch/hermes-agent/blob/1f91fb386a60f5589146b05ee88e911bb58120e8/hermes_state_common.py#L953-L958), with no tokenizer option, and SQLite, [FTS5 tokenizers](https://sqlite.org/fts5.html#tokenizers) (unicode61 is the default and does not stem).
+[^9]: SQLite, [FTS5 Extension](https://sqlite.org/fts5.html): multiple terms are implicitly ANDed, and the `rank` column defaults to `bm25()`.
+[^10]: `hermes_state_search.py`, [the OR-relaxed retry](https://github.com/NousResearch/hermes-agent/blob/1f91fb386a60f5589146b05ee88e911bb58120e8/hermes_state_search.py#L1176-L1190) and [`_or_relaxed_query`](https://github.com/NousResearch/hermes-agent/blob/1f91fb386a60f5589146b05ee88e911bb58120e8/hermes_state_search.py#L876-L892).
+[^11]: [BAAI/bge-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5) through fastembed 0.9.0, which downloaded the quantized ONNX build. Queries used the model's recommended retrieval instruction prefix.
+[^12]: Hermes docs source, [Honcho Memory](https://github.com/NousResearch/hermes-agent/blob/1f91fb386a60f5589146b05ee88e911bb58120e8/website/docs/user-guide/features/honcho.md#L27), dialectic reasoning.
+[^13]: Same page, [the three cadence and depth settings and their defaults](https://github.com/NousResearch/hermes-agent/blob/1f91fb386a60f5589146b05ee88e911bb58120e8/website/docs/user-guide/features/honcho.md#L78-L82).
+[^14]: Measurement scripts: [agent-memory-fts-recall.py](/files/agent-memory-fts-recall.py), [agent-memory-cap.py](/files/agent-memory-cap.py), [agent-memory-dense.py](/files/agent-memory-dense.py). Windows, Python 3, SQLite 3.49.1, one run (the results are deterministic).
