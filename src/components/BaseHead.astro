@@ -36,7 +36,7 @@ const umamiOptOut = `try{var m=location.search.match(/[?&]notrack=([01])/);if(m)
 // means both forms serve fine.
 const canonicalPath = path === '/' ? path : path.replace(/\/?$/, '/');
 const canonical = new URL(withBase(canonicalPath), Astro.site);
-const fullTitle = path === '/' ? `${SITE.title} — ${SITE.tagline}` : `${title} · ${SITE.title}`;
+const fullTitle = path === '/' ? `${SITE.title} · ${SITE.tagline}` : `${title} · ${SITE.title}`;
 
 /**
  * Post and guide pages get a title/tags card rendered from their own content
