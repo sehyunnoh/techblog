@@ -1,0 +1,165 @@
+---
+title: 'RDF vs Property Graphs, Step by Step: One Fact, Two Models, and What Each Costs'
+description: 'A beginner-friendly comparison of RDF triples (SPARQL, OWL) and property graphs (Cypher), checked on one fact, one class hierarchy and a 1M-edge graph, with runnable code.'
+pubDate: 2026-10-21
+updatedDate: 2026-10-21
+tags: ['data', 'backend', 'architecture', 'python', 'tutorial', 'benchmark']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+If you store facts as a graph, there are two mainstream ways to do it, and the internet explains the difference mostly in adjectives. RDF is "semantic" and "standards-based". Property graphs are "intuitive" and "fast". Those words don't help you decide anything. This guide skips them. It takes one small fact, one class hierarchy and one big random graph, puts each into both models, and shows what actually changes: how many statements you write, what a query looks like, and what the database has to do.
+
+The tools are `rdflib` with SPARQL for RDF, and Kuzu with Cypher for the property graph. Everything is in one script you can run yourself.[^1] A warning up front: Kuzu is an embedded database whose repository was archived in October 2025, so it is read-only now.[^2] I used it because it installs with `pip` and speaks Cypher, not because I'd start a new project on it. The point here is the model, and any Cypher database would show the same shapes.
+
+## The two models in one minute
+
+An **RDF** graph is a set of triples: subject, predicate, object. `Caroline attended SupportGroup` is one triple. Every part is either an identifier or a literal value. That is the whole data structure.[^3] RDF's strength is what sits on top: a query language (SPARQL),[^4] a vocabulary for describing classes and subclasses (RDFS), and a heavier logic layer (OWL) that lets a program derive new facts from the ones you stated.[^5]
+
+A **property graph** has nodes and relationships, and both can carry key-value properties. `Caroline` and `SupportGroup` are nodes. `ATTENDED` is a relationship between them, and it can have its own `date` property.[^6] The usual query language is Cypher, whose standardized descendant is the ISO graph query language GQL.[^7]
+
+If you have read the companion post on [agent memory](/posts/agent-memory-subject-scope-beats-fact-layer), this is the question underneath it: when you give memory some structure, what shape should the structure have?
+
+## Step 1: one fact that has a date
+
+Take this fact: Caroline attended the support group on 7 May 2023, and the source is turn D1:3 of a conversation. The interesting part is that the date and the source belong to the *attending*, not to Caroline and not to the group.
+
+In a property graph that is easy. The edge carries them.
+
+```cypher
+CREATE (a)-[:ATTENDED {date: date('2023-05-07'), source: 'D1:3'}]->(b)
+```
+
+In RDF, a triple has no room for extra data. There are two usual workarounds, and I built both.[^8] The first promotes the relationship to a node, so the "attending" becomes a thing with its own properties. The second, **reification**, keeps the original triple and writes a separate description of it using `rdf:Statement`, `rdf:subject`, `rdf:predicate` and `rdf:object`.[^9]
+
+<Mermaid
+  caption="The same fact in both models. RDF needs an extra node (or a described statement) to hold the date. The property graph attaches it to the edge."
+  label="Diagram. Left, RDF: Caroline connects to an Attendance node through who, the Attendance node connects to SupportGroup through what, and also holds a date and a source. Right, property graph: Caroline connects directly to SupportGroup through an ATTENDED edge that carries date and source."
+  code={`
+flowchart LR
+  subgraph RDF["RDF, event node"]
+    E["Attendance 1"] -->|who| C1["Caroline"]
+    E -->|what| G1["SupportGroup"]
+    E -->|date| D["2023-05-07"]
+    E -->|source| S["D1:3"]
+  end
+  subgraph PG["Property graph"]
+    C2["Caroline"] -->|"ATTENDED<br/>date, source"| G2["SupportGroup"]
+  end
+`}
+/>
+
+Counting what I actually stored:
+
+<Chart
+  type="bar"
+  height={280}
+  format="plain"
+  caption="Statements needed to store one dated, sourced fact. The property graph needs one edge with two properties; the RDF patterns need five or seven triples."
+  label="Bar chart. Plain triple 1 (cannot hold the date). RDF event node 5. RDF reification 7. Property graph edge 1 (with 2 properties)."
+  labels={['Plain triple (no date)', 'RDF event node', 'RDF reification', 'Property graph edge']}
+  series={[{ name: 'statements or edges', data: [1, 5, 7, 1] }]}
+  yTitle="count"
+/>
+
+Reading the query back also differs. The event-node version in SPARQL:
+
+```sparql
+SELECT ?d WHERE { ?e ex:who ex:Caroline ; ex:what ex:SupportGroup ; ex:date ?d }
+```
+
+Both returned 2023-05-07. The RDF version is longer because you query the pattern you built, not the fact you meant.
+
+Newer RDF work adds a compact way to attach data to a triple (quoted triples, from RDF-star and the RDF 1.2 work). I didn't test it, so I can't say how well the tooling supports it today. If you rely on edge properties, check that your RDF store handles it before you commit.
+
+## Step 2: where RDF pays you back, reasoning
+
+Now a different problem. You have a class hierarchy: `Dog` is a kind of `Mammal`, which is a kind of `Animal`. You store that Rex is a `Dog` and ask for all animals. In plain RDF, that query returns nothing, because nobody stated that Rex is an animal.
+
+RDF Schema defines `rdfs:subClassOf` with a meaning, and a **reasoner** can apply that meaning to derive every implied triple.[^9] This is the part of RDF the property graph world doesn't have built in.
+
+I built a class tree six levels deep with three subclasses per class (1,093 classes) and 40 instances under each leaf (29,160 instances, 30,252 triples in all). Then I asked for everything that is a `Thing`.
+
+- **Before reasoning:** 0 results.
+- **After an RDFS closure** (using `owlrl`, which implements the W3C rule sets):[^10] 29,160 results. The graph grew from 30,252 to 240,394 triples, 7.9 times larger, and building the closure took 42 seconds.
+
+<Chart
+  type="bar"
+  height={280}
+  format="compact"
+  caption="Triples in the class-hierarchy graph before and after materializing the RDFS closure. Every instance now carries one type triple for each ancestor class."
+  label="Bar chart. Before reasoning 30,252 triples. After RDFS closure 240,394."
+  labels={['Asserted', 'After RDFS closure']}
+  series={[{ name: 'triples', data: [30252, 240394] }]}
+  yTitle="triples"
+/>
+
+The 42 seconds is a property of this particular Python library, not of RDF. Other stores may do this faster or apply the rules at query time instead of storing the results; I did not test one. The 7.9 times is closer to the model's nature: if you materialize inference, you store it.
+
+A property graph answers the same question a different way. You model the hierarchy as ordinary edges and walk it in the query. No reasoner involved:
+
+```cypher
+MATCH (i:I)-[:INST]->(:C)-[:SUB*0..10]->(:C {name: $top}) RETURN count(DISTINCT i)
+```
+
+That returned the same 29,160 instances in 49 ms on the same machine, with nothing precomputed.
+
+The trade is clear. In the graph-walk version, *you* decide which relationships mean "is a kind of", and you write that into every query that needs it. In the RDF version, you state the meaning once, in the schema, and every query benefits. For a handful of rules the walk is simpler. For a large shared vocabulary that many teams query, declaring the semantics once is worth a lot. OWL adds more rules beyond subclass (equivalence, property chains, cardinality), and its profiles trade expressiveness against how cheap reasoning is.[^11]
+
+## Step 3: does the model make queries faster?
+
+The advertising claim for property graphs is speed on multi-hop traversals. I loaded the same random graph into both engines (20,000 nodes and 100,000 edges, then 200,000 nodes and 1,000,000 edges) and counted the distinct nodes reachable from a start node in 2, 3 and 4 hops. Both engines returned identical counts on every query, so they are answering the same question.
+
+<Chart
+  type="bar"
+  height={300}
+  format="plain"
+  caption="Median query time on a 1,000,000-edge graph (start nodes chosen at random; 100 starts for 2 hops, 20 for 3 and 4 hops). The two are close at 2 and 3 hops. At 4 hops the embedded property graph database is about 2.7 times faster."
+  label="Grouped bar chart of median milliseconds. 2 hops: rdflib 7.97, Kuzu 7.93. 3 hops: rdflib 9.99, Kuzu 7.88. 4 hops: rdflib 23.86, Kuzu 8.69."
+  labels={['2 hops', '3 hops', '4 hops']}
+  series={[
+    { name: 'rdflib (SPARQL)', data: [7.97, 9.99, 23.86] },
+    { name: 'Kuzu (Cypher)', data: [7.93, 7.88, 8.69] },
+  ]}
+  yTitle="median ms"
+/>
+
+Two things stand out. First, the property graph time barely moves as you add hops (7.9 to 8.7 ms), while the RDF engine's time grows (8.0 to 23.9 ms). That is the pattern the marketing describes. Second, the difference is small in absolute terms at this size, and the 2-hop numbers are effectively the same.
+
+Loading was a bigger gap: 25.9 seconds for rdflib against 1.4 seconds for Kuzu at a million edges, and 2.5 against 0.2 at 100,000.
+
+I would not read this as "property graphs are faster than RDF". It compares a pure-Python in-memory library against a C++ embedded database, so most of the gap could be the implementation language. A serious RDF store (Jena, Virtuoso, Oxigraph and others) is a different comparison, and I did not run one. What the numbers do show is that, for graphs of this size, neither model makes a 4-hop query slow enough to matter on its own. Choose on modeling and reasoning needs first.
+
+## Step 4: choosing
+
+Putting the three steps together:
+
+- **Choose a property graph** when your relationships carry data (dates, weights, sources), when your queries are mostly traversals (who is connected to whom, how many hops), and when you control the schema in one application. The model is smaller, and edge properties are first class.
+- **Choose RDF** when the vocabulary needs to be shared across systems or organizations, when you want a standard query language and exchange format, or when you want to derive implied facts from a schema instead of writing them into every query. Publishing linked data is the textbook case.
+- **Choose neither yet** if your data is mostly one entity type with attributes. A relational table and a join answer most "who is connected to whom" questions for small data, with tooling you already have.
+
+A common, less-discussed middle path is to start with a property graph and export triples later. The data is the same; what's hard to recover afterward is the shared meaning, so decide early whether you need that.
+
+## Limits of these measurements
+
+- **One machine, one run per configuration.** Windows, Python 3.12, rdflib 7.6.0, kuzu 0.11.3. The 100,000-edge configuration ran twice with medians within about a millisecond of each other; the million-edge one ran once.
+- **Different engines.** The timing compares implementations as much as models.
+- **Random graph.** Real graphs have hubs and clusters, and queries starting at a hub can touch far more nodes than the average I measured. The average degree here is 5.
+- **RDFS closure only.** I did not run full OWL reasoning, and I did not test a production RDF store or Neo4j.
+- **No RDF-star.** Edge annotation in RDF may be easier than shown if your store supports it.
+
+## References
+
+[^1]: Script: [rdf-vs-property-graph.py](/files/rdf-vs-property-graph.py). Needs `pip install rdflib owlrl kuzu`. The class hierarchy and graph sizes are parameters at the top of each step.
+[^2]: GitHub, [kuzudb/kuzu](https://github.com/kuzudb/kuzu). The repository shows as archived (last push 2025-10-10) in the GitHub API at the time of writing, and describes itself as an embedded property graph database that implements Cypher.
+[^3]: W3C, [RDF 1.1 Concepts and Abstract Syntax](https://www.w3.org/TR/rdf11-concepts/).
+[^4]: W3C, [SPARQL 1.1 Query Language](https://www.w3.org/TR/sparql11-query/).
+[^5]: W3C, [OWL 2 Web Ontology Language Document Overview](https://www.w3.org/TR/owl2-overview/).
+[^6]: Neo4j, [Graph database concepts](https://neo4j.com/docs/getting-started/appendix/graphdb-concepts/): nodes, relationships and properties on both.
+[^7]: ISO/IEC 39075:2024, [Information technology, Database languages, GQL](https://www.iso.org/standard/76120.html).
+[^8]: W3C, [Defining N-ary Relations on the Semantic Web](https://www.w3.org/TR/swbp-n-aryRelations/), a working group note describing the event-node pattern.
+[^9]: W3C, [RDF Schema 1.1](https://www.w3.org/TR/rdf-schema/): `rdfs:subClassOf`, and `rdf:Statement` with `rdf:subject`, `rdf:predicate`, `rdf:object` for reification.
+[^10]: [owlrl](https://pypi.org/project/owlrl/), a Python implementation of the OWL 2 RL and RDFS reasoning rule sets, used here with its RDFS semantics.
+[^11]: W3C, [OWL 2 Web Ontology Language Profiles](https://www.w3.org/TR/owl2-profiles/).
