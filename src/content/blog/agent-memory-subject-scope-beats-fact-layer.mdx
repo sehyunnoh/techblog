@@ -1,0 +1,143 @@
+---
+title: "A Free Speaker Filter Matched an LLM-Built Fact Layer for Agent Memory"
+description: "On 1,536 LoCoMo questions, tagging each fact with its subject lifted search from 54.4% to 59.5%. Filtering the raw turns by speaker did the same, for free."
+pubDate: 2026-10-21
+tags: ['ai', 'llm', 'python', 'architecture', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+Yesterday's post ended with a keyword search that reached the answer turn for 54% of questions, and a small embedding model that rescued some of the rest. The obvious next move, and the one people keep recommending, is to give the memory structure. Extract the facts, tag them with who and what they are about, maybe link them into a graph. That is the idea behind an ontology: an agreed list of the kinds of things your memory talks about and the relations between them.
+
+I wanted to know how much of a gain that structure buys when everything else is held fixed. The answer was smaller than I expected, and most of it came from one cheap piece. A plain filter on who spoke the turn did as well as the whole LLM-written fact layer.
+
+## What "ontology" means here, and what I did not build
+
+An ontology in the formal sense is a vocabulary with rules. OWL 2, the W3C standard, describes it as classes, properties and individuals, with a defined logical meaning attached to them.[^1] Facts stored in that world are usually triples: subject, predicate, object, such as `(Caroline, attended, support group)`.[^2]
+
+I did not build that. Running a real extractor means an LLM call per turn, schema design, and a graph store, and I wanted the experiment to isolate one question first. What does the lightest useful version of structure give you? That version is a fact with three fields: a **subject** (whose fact is it), a **statement** (one sentence), and a **source** (the turn it came from). No predicates, no inference. If this doesn't help, a heavier ontology has little to build on. If it does, we can ask which field is doing the work.
+
+## The test set and the fact layer
+
+The data is LoCoMo again: ten long chat histories between two named people, 5,882 turns, and 1,536 questions that each name the evidence turn.[^3] Same replica of Hermes-style FTS5 search as before (AND, then trigram, then an OR retry), same hit-at-k metric: at least one evidence turn appears in the top k results.[^4] The script for this post is linked at the end.[^8]
+
+LoCoMo also ships what I need for the structured side. Each session has an `observation` block, a list of short facts written by an LLM, grouped by speaker, each pointing at the turn it came from. That is 2,541 facts, 223,487 characters, or 30.8% of the raw dialogue's size. I treat it as the output of a good extractor.
+
+Two warnings about that choice. The facts were written by a model that saw the same turns the questions were built from, so this is a ceiling for a fact layer, not what a live extractor would deliver. And the facts only touch 2,387 of the 5,882 turns (40.6%). For 224 questions (14.6%) the evidence turn has no fact at all, and no fact search can find it.
+
+<Mermaid
+  caption="The arms in this test. Every arm returns a ranked list of turns, so they are scored against the same evidence labels."
+  label="Diagram: a question goes to raw turn search (arm A), optionally filtered by who spoke the turn (arm F), and to a fact index (arm B), optionally filtered by fact subject (arm C). The filtered lists are fused by reciprocal rank fusion (arm G)."
+  code={`
+flowchart LR
+  Q["Question"] --> A["A: search raw turns"]
+  Q --> F["F: raw turns,<br/>filter by speaker"]
+  Q --> B["B: search LLM facts<br/>map back to turns"]
+  B --> C["C: facts,<br/>filter by subject"]
+  F --> G["G: fuse F + C<br/>(rank fusion)"]
+  C --> G
+`}
+/>
+
+The filter is as simple as it sounds. If the question contains one of the two speakers' names, keep only results from that speaker's turns (arm F) or that speaker's facts (arm C). Otherwise leave the results alone. The search first pulls 200 candidates and then filters, so the filter has something to choose from.
+
+## Result 1: facts help, and the subject tag helps a bit more
+
+<Chart
+  type="bar"
+  height={300}
+  format="percent"
+  caption="Share of 1,536 questions with an evidence turn in the top 10. Searching the facts beats searching the raw turns, and scoping them by subject adds a couple more points."
+  label="Bar chart of hit at 10. Raw turns 54.4 percent. Facts only 57.7. Facts scoped by subject 59.5. Facts scoped by subject plus session date 61.0."
+  labels={['A: raw turns', 'B: facts', 'C: facts by subject', 'E: C + session date']}
+  series={[{ name: 'hit@10', data: [54.4, 57.7, 59.5, 61.0] }]}
+  yTitle="hit@10"
+/>
+
+Searching the fact layer instead of the turns moved top-10 from 54.4% to 57.7%. Scoping by subject made it 59.5%. Putting the session date in front of every fact, a stand-in for a "when" attribute, brought it to 61.0%. The gains are steadier at the very top of the list: the evidence turn is in first place for 24.9% of questions on raw turns and 35.1% with subject-scoped facts.
+
+Multi-hop questions, the ones that need more than one turn, gained the most, from 38.3% to 55.3%. A fact such as "Caroline is planning to continue her education" is one clean sentence, while the raw turn around it is chat with filler. A short, subject-labeled sentence is an easier target for a keyword search to hit.
+
+That is the story the structure advocates would tell. Here is where it gets awkward.
+
+## Result 2: the same filter on raw turns does as well
+
+Arm F uses no LLM and no extraction. It uses a field every chat log already has: who sent the message. Filter the raw-turn results by the speaker named in the question and nothing else changes.
+
+<Chart
+  type="bar"
+  height={320}
+  format="percent"
+  caption="Top-10 hit rate by question type. The speaker filter on raw turns (F) is within a point of the LLM-built fact layer with its subject tag (C) overall, and ahead of it on open-domain questions."
+  label="Grouped bar chart of hit at 10. Overall: raw turns 54.4, speaker filter 59.7, facts by subject 59.5. Multi-hop: 38.3, 50.0, 55.3. Temporal: 61.7, 67.0, 66.4. Open-domain: 30.4, 34.8, 34.8. Single-hop: 59.6, 62.9, 61.0."
+  labels={['All (1,536)', 'Multi-hop (282)', 'Temporal (321)', 'Open-domain (92)', 'Single-hop (841)']}
+  series={[
+    { name: 'A: raw turns', data: [54.4, 38.3, 61.7, 30.4, 59.6] },
+    { name: 'F: raw turns, speaker filter', data: [59.7, 50.0, 67.0, 34.8, 62.9] },
+    { name: 'C: LLM facts, subject filter', data: [59.5, 55.3, 66.4, 34.8, 61.0] },
+  ]}
+  yTitle="hit@10"
+/>
+
+Overall, F reaches 59.7% against C's 59.5%. The facts still win on multi-hop (55.3% against 50.0%), which is consistent with the cleaner-sentence argument, and lose or tie elsewhere. Arm C gained 5.1 points over the baseline. The free filter alone gained 5.3. In this test, the thing doing most of the work was knowing whose statement a result is, not rewriting the statement.
+
+I should be careful about how general that is. Of the 1,536 questions, 1,516 name one of the two speakers, because LoCoMo is two named people talking. An agent's session log is a user and an assistant, and "whose turn is it" carries no information when the question never says "the user". The portable lesson is the shape of the trick, not the field. If your questions mention projects, files, or customers, the equivalent filter is on those, and you need them tagged at write time.
+
+## Result 3: the two layers still complement each other
+
+<Chart
+  type="bar"
+  height={300}
+  format="percent"
+  caption="Hit rate at three depths. Fusing the speaker-filtered turns with the subject-scoped facts gives the best list at every depth, 12.9 points above the baseline at top 10."
+  label="Grouped bar chart. Hit at 1: raw turns 24.9, speaker filter 33.1, facts by subject 35.1, fused 38.9. Hit at 5: 46.0, 52.7, 53.5, 60.1. Hit at 10: 54.4, 59.7, 59.5, 67.3."
+  labels={['Top 1', 'Top 5', 'Top 10']}
+  series={[
+    { name: 'A: raw turns', data: [24.9, 46.0, 54.4] },
+    { name: 'F: raw turns, speaker filter', data: [33.1, 52.7, 59.7] },
+    { name: 'C: LLM facts, subject filter', data: [35.1, 53.5, 59.5] },
+    { name: 'G: F and C fused', data: [38.9, 60.1, 67.3] },
+  ]}
+  yTitle="hit@k"
+/>
+
+When I merged the two ranked lists with reciprocal rank fusion, a standard method that scores each result by the sum of 1/(60 + rank) across lists,[^5] top-10 hit rate rose to 67.3%. That is 12.9 points over the baseline. Fusing the unfiltered turns with the scoped facts gave 66.3%, so most of the benefit comes from combining two different views, with the filter adding a point.
+
+This number sits next to yesterday's. Keyword search plus a small embedding model covered 66.1% of questions, with no fact layer at all.[^6] A fact layer from an LLM that saw the answers and a free embedding model on a laptop CPU landed in the same place. They are not the same experiment, and I did not stack them, so I can't say whether the gains add. What I can say is that if you have to pick one extra component to add to keyword search, this does not point to the fact layer as the obvious winner.
+
+## What the structure costs
+
+The fact layer is not free just because the benchmark shipped it for free.
+
+- **Extraction.** One LLM pass over every turn, or a batch of turns. LoCoMo's 726,756 characters of dialogue produce 223,487 characters of facts, so the layer is about 31% the size of what it summarizes. Every new session means another pass.
+- **Coverage.** Facts record what the extractor considered worth keeping. Here 40.6% of turns generated a fact, and the 224 questions pointing at the rest scored 0.0% through that path. Among the 1,312 questions whose evidence turn does have a fact, subject-scoped fact search reached 69.7% at top 10. The coverage gap cost more than the retrieval method did.
+- **Drift.** Facts are written once, and they can be wrong or go stale. The raw turn is the ground truth. I would keep the source link on every fact for that reason, and arm G only works because the turns stay in the index.
+
+## What this does not show
+
+- **The facts are favorable to the facts.** They were written by a model that read the same dialogue the questions were built from. A live extractor will likely do worse.
+- **Two named speakers flatter the filter.** 99% of these questions name a speaker. Test the equivalent on your own logs before relying on it.
+- **Hit at k only checks retrieval.** I did not have a model answer the questions, so I cannot say if cleaner facts make answers more accurate or only easier to find.
+- **I did not test real triples or a graph.** The layer here is subject, statement and source. Multi-hop traversal, which is the usual argument for a graph, was out of scope. GraphRAG-style systems build entity graphs and community summaries for a different purpose, global questions over a corpus, and my numbers say nothing about them.[^7]
+- **One run, one dataset.** The retrieval is deterministic, but the benchmark has ten conversations.
+
+## Takeaways
+
+- **Tag every memory item with who or what it is about at write time.** A subject filter lifted top-10 retrieval from 54.4% to about 59.6% whether the items were raw turns or LLM-written facts.
+- **Check what metadata you already have before paying for extraction.** The speaker field on raw turns matched an LLM fact layer overall (59.7% against 59.5%).
+- **Facts earn their keep on multi-hop questions.** They scored 55.3% against 50.0% for the filtered turns, because each fact is one clean sentence.
+- **Fuse, don't replace.** Merging the two ranked lists reached 67.3% at top 10 and 38.9% at top 1, the best of any arm.
+- **Measure coverage of your fact layer.** An extractor that skips 59% of turns puts a hard ceiling on what any search over facts can find.
+
+## References
+
+[^1]: W3C, [OWL 2 Web Ontology Language Document Overview](https://www.w3.org/TR/owl2-overview/). OWL 2 is "an ontology language for the Semantic Web with formally defined meaning."
+[^2]: W3C, [RDF 1.1 Concepts and Abstract Syntax](https://www.w3.org/TR/rdf11-concepts/): an RDF graph is a set of subject, predicate, object triples.
+[^3]: Maharana et al., [Evaluating Very Long-Term Conversational Memory of LLM Agents](https://arxiv.org/abs/2402.17753) (LoCoMo), and the [released data](https://github.com/snap-research/locomo/blob/main/data/locomo10.json). Questions in categories 1 to 4 with evidence turns: 1,536.
+[^4]: Retrieval replica and metric are the ones described in [yesterday's post](/posts/hermes-memory-search-last-resort-fallback/), based on `hermes_state_search.py` in NousResearch/hermes-agent at commit 1f91fb3. SQLite 3.49.1 FTS5, Windows, Python 3.
+[^5]: Cormack, Clarke and Buettcher, [Reciprocal Rank Fusion outperforms Condorcet and individual Rank Learning Methods](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf), SIGIR 2009. The constant 60 is the value used there.
+[^6]: Union of keyword search and `bge-small-en-v1.5` at top 10: 66.1%, from the previous post's measurements.
+[^7]: Edge et al., [From Local to Global: A Graph RAG Approach to Query-Focused Summarization](https://arxiv.org/abs/2404.16130).
+[^8]: Measurement script: [agent-memory-ontology.py](/files/agent-memory-ontology.py), which imports [agent-memory-fts-recall.py](/files/agent-memory-fts-recall.py) from the same folder. One run, results are deterministic.
