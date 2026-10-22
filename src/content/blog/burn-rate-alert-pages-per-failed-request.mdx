@@ -1,0 +1,173 @@
+---
+title: 'The Standard Burn-Rate Alert Pages Once Per Failed Request on a Low-Traffic Service'
+description: 'I simulated Google SRE Workbook burn-rate paging rules on a 99.9% SLO. They bound the budget lost before a page, but below about 900 requests a day they page for nearly every error.'
+pubDate: 2026-10-22
+tags: ['observability', 'devops', 'python', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+import Figure from '../../components/Figure.astro';
+
+Imagine a service that is doing exactly what its reliability target says. The target is 99.9% of requests succeeding over 30 days, and the service is failing 0.1% of them, no more. It is on budget. Nobody should be woken up.
+
+Now give it the alerting setup that the Google SRE Workbook recommends for paging, the multiwindow, multi-burn-rate rules, and give it a little traffic: one request every 100 seconds. In my simulation that service paged **26 times a month** while meeting its SLO. It produced 26 failed requests in that month. The page count and the error count were the same number.
+
+The rules are good. The reasons they are good also explain where they stop working, and that boundary is easy to measure. This post walks through what the rules guarantee, checks those guarantees with a simulation, and then finds the traffic level where they break.
+
+## Three terms, defined once
+
+An **SLO** (service level objective) is a target such as "99.9% of requests succeed, measured over 30 days". The **error budget** is the other side of it: 0.1% of requests may fail. Over 30 days that is the whole allowance.
+
+The **burn rate** is how fast you are spending that allowance compared with the pace that would use it up in exactly 30 days. The Workbook defines it as "how fast, relative to the SLO, the service consumes the error budget."[^1] A burn rate of 1 means the budget lasts the full 30 days. A burn rate of 14.4 means a 1.44% error ratio on a 99.9% SLO, and it empties the budget in 50 hours.
+
+The number 14.4 is not arbitrary. In 30 days there are 720 hours, so spending 2% of the budget in one hour means running at 0.02 × 720 = 14.4 times the normal pace. The Workbook recommends 2% in one hour and 5% in six hours as "reasonable starting numbers for paging."[^1]
+
+## The rule: two windows that must agree
+
+A plain "error ratio over the last hour is above 14.4x" alert has a flaw. After an outage ends, the hour-long average stays high until the bad minutes scroll out of the window, so the alert keeps firing long after the service recovered. The Workbook's fix is to require a second, much shorter window to agree, with the guideline that the short window be 1/12 of the long one.[^1]
+
+For a 99.9% SLO the page rules are:
+
+| Long window | Short window | Burn rate | Budget consumed |
+|---|---|---|---|
+| 1 hour | 5 minutes | 14.4 | 2% |
+| 6 hours | 30 minutes | 6 | 5% |
+
+Page if either row has both of its windows above its burn rate. A third row (3 days, 6 hours, burn rate 1) opens a ticket instead of paging, and I left it out of the simulation.
+
+<Mermaid
+  caption="The paging decision, evaluated every minute. The long window says the damage is large enough to matter. The short window says it is still happening."
+  label="Flowchart: for each of two window pairs, both the long window and the short window error ratio must exceed the burn rate threshold, and either pair passing pages"
+  code={`
+flowchart LR
+  A["1h error ratio<br/>&gt; 14.4 x 0.1%"] --> C{"both?"}
+  B["5m error ratio<br/>&gt; 14.4 x 0.1%"] --> C
+  D["6h error ratio<br/>&gt; 6 x 0.1%"] --> F{"both?"}
+  E["30m error ratio<br/>&gt; 6 x 0.1%"] --> F
+  C -- yes --> P["PAGE"]
+  F -- yes --> P
+`}
+/>
+
+## How I tested it
+
+The script is [burn-rate-sim.py](/files/burn-rate-sim.py), about 160 lines of NumPy.[^2] Traffic is generated in one-minute buckets, requests as a Poisson draw and failures as a binomial draw on top. Each rule is evaluated once a minute on the ratio of failures to requests over its trailing window, the way a recording rule would. A window with no requests produces no value, so its condition is false.
+
+I compared three rules: the two-row multiwindow rule above (**MWMB**), the same two long windows with no short-window check (**LONG**), and the Workbook's first and simplest approach, "error ratio over 10 minutes at or above the SLO threshold" (**TEN**).
+
+Limits of the setup, stated up front. Errors are independent coin flips, which real outages are not (real failures arrive in bursts). Traffic is constant. There is no `for:` delay and no ticket rule. Everything is for a 99.9% SLO. Treat the numbers as showing the shape of the behavior, not as predictions for your system.
+
+## What the rules guarantee: a cap on budget lost
+
+With steady traffic (1,000 requests per second) and a sudden constant error rate, I measured how many minutes passed before the MWMB rule paged, and how much of the 30-day budget had burned by then.
+
+<Chart
+  type="bar"
+  height={320}
+  caption="Share of the 30-day error budget already spent when MWMB pages, by the size of the outage. The cap is the same no matter how large the outage is. <b>Simulated</b>, 1,000 req/s, one-minute evaluation."
+  label="Bar chart of error budget consumed at the moment of the first page for error rates from 0.72% to 100%, which stays near 5% for the slower outages and near 2% for the faster ones"
+  labels={['0.72%', '1%', '1.44%', '2%', '5%', '10%', '50%', '100%']}
+  series={[
+    { name: 'Budget spent before the page (%)', data: [5.02, 5.02, 5.03, 2.04, 2.08, 2.08, 2.31, 2.31] },
+  ]}
+  yTitle="Budget spent (%)"
+  format="plain"
+/>
+
+The guarantee is visible in the chart. A 100% outage pages after 1 minute, a 10% error rate after 9 minutes, a 2% error rate after 44 minutes, and in each of those cases the budget loss at that moment lands near 2%. Slower burns, between 6x and 14.4x, are caught by the second row and cost about 5%. The cost is bounded by the threshold, not by the severity of the incident. That is what "2% of budget in an hour" buys you.
+
+Two details from the run are worth knowing. At an error rate of exactly 1.44% (14.4x on the nose) the hour window sits at the threshold rather than above it, so the first row never fires and the second row catches it after 151 minutes, having spent 5%. And an error rate under 0.6% (6x) never pages at all: 0.5% held for a day would burn about 17% of the monthly budget with no page. That slow burn is the ticket row's job, which is why it exists.
+
+## What the short window buys: faster reset
+
+Now stop the outage and see how long the page stays on. I ran a full outage of various lengths and counted the minutes MWMB, LONG and TEN were firing in total.
+
+<Chart
+  type="bar"
+  height={320}
+  caption="Minutes the page stayed on, counted from the start of a full outage. Without the short window the page outlives a one-minute blip by an hour. <b>Simulated</b>, 1,000 req/s."
+  label="Grouped bar chart of minutes firing for outages of 1, 2, 5, 10, 30 and 60 minutes for the multiwindow rule versus the long windows alone"
+  labels={['1 min', '2 min', '5 min', '10 min', '30 min', '60 min']}
+  series={[
+    { name: 'MWMB (with short windows)', data: [5, 6, 34, 39, 59, 89] },
+    { name: 'LONG (no short windows)', data: [60, 61, 362, 367, 387, 417] },
+  ]}
+  yTitle="Minutes firing"
+  format="plain"
+/>
+
+For a one-minute blip, MWMB clears after 5 minutes and LONG after 60, which matches the Workbook's own comparison of resetting "five minutes later, rather than one hour later."[^1] But look at the 5-minute outage. MWMB stayed on for 34 minutes, not 5. The second row (6 hours and 30 minutes) is still satisfied: five minutes of total failure is 1.4% of a six-hour window, over the 0.6% threshold, and the 30-minute window needs to drain before it turns off. The short window helps reset, but a real five-minute outage still produces a page that lingers for about half an hour after recovery. That is acceptable, since someone should look at it, but it is not the 5-minute reset the headline comparison suggests.
+
+## Where it breaks: the traffic floor
+
+Everything above assumed 1,000 requests per second. The Workbook flags the weak spot in one sentence: these approaches "can cause problems for systems that receive a low rate of requests," and its example is that with 10 requests an hour, a single failure is a 10% error rate, a 1,000x burn on a 99.9% SLO.[^1]
+
+I put a number on that. Each row below is 24 simulated months of a service whose true error rate is exactly 0.1%, so it is within SLO, and counts how many times a month each rule paged.
+
+| Requests/sec | Requests per day | Failed requests/month | MWMB pages/month | TEN pages/month |
+|---|---|---|---|---|
+| 0.003 | 260 | 7 | 7.0 | 7.0 |
+| 0.01 | 864 | 26 | 25.8 | 25.7 |
+| 0.03 | 2,592 | 78 | 9.2 | 76.6 |
+| 0.1 | 8,640 | 261 | 0.0 | 244.8 |
+| 1 | 86,400 | 2,585 | 0.0 | 1,380 |
+| 100 | 8,640,000 | 259,060 | 0.0 | 3,072 |
+
+<Chart
+  type="bar"
+  height={320}
+  caption="Pages per month from a service that is exactly on its SLO, against the failed requests it had that month. At the lowest traffic the two numbers are the same. <b>Simulated</b>, 24 months per traffic level."
+  label="Grouped bar chart comparing failed requests per month with MWMB pages per month at 0.003, 0.01, 0.03 and 0.1 requests per second"
+  labels={['0.003 req/s', '0.01 req/s', '0.03 req/s', '0.1 req/s']}
+  series={[
+    { name: 'Failed requests per month', data: [7, 26, 78, 261] },
+    { name: 'MWMB pages per month', data: [7.0, 25.8, 9.2, 0] },
+  ]}
+  yTitle="Per 30 days"
+  format="plain"
+/>
+
+The mechanism is arithmetic. At 0.01 requests per second a single hour contains about 36 requests, and the first row pages when more than 1.44% of them fail. One failure in 36 is 2.8%. The short window agrees, because it holds around three requests. So one failed request satisfies every condition and the rule pages. At 0.03 requests per second you need two failures close together, and by 0.1 requests per second (about 360 requests an hour) the rule needs six, which almost never happens at a true 0.1% rate.
+
+Two other things in the table. TEN, the simple rule, pages hundreds to thousands of times a month at every level, which matches the Workbook's verdict of low precision for that approach. And the cliff is sharp: from one page per failure to nearly none within a factor of ten in traffic.
+
+The failure is not that real outages go unnoticed. When I made the service fail 100% of requests, MWMB paged with a median of 4 minutes at 0.003 requests per second, 2 minutes at 0.01, and 1 minute from 0.03 upward. Detection stays fast. It is precision that collapses: the rule cannot tell one unlucky request from a real incident, because at that volume they look the same.
+
+## A cheap fix I tried, and its price
+
+The Workbook's remedies for low-traffic services are synthetic traffic, grouping several small services into one alert, making clients retry with backoff, or lowering the SLO.[^1] All of those change the system. As an experiment I tried something that changes only the alert: require a minimum number of failures in the trailing hour before the page can fire. This is my own heuristic, not something the Workbook proposes.
+
+| Requests/sec | Min failures in 1h | Pages/month (on SLO) | Median minutes to page in a real outage |
+|---|---|---|---|
+| 0.01 | none | 25.9 | 2 |
+| 0.01 | 2 | 0.7 | 3 |
+| 0.01 | 3 | 0.0 | 5 |
+| 0.01 | 5 | 0.0 | 8 |
+| 0.03 | none | 8.5 | 1 |
+| 0.03 | 3 | 0.3 | 2 |
+| 0.03 | 5 | 0.0 | 3 |
+
+At 0.01 requests per second, requiring three failures removed every false page and delayed a real outage page from a median of 2 minutes to 5. That is a good trade for this one service. It also has a cost the table does not show: a service this quiet might see an outage that fails only two requests before users stop trying, and the guard would stay silent. The floor trades missed small incidents for fewer meaningless pages, and only you know which of those hurts more.
+
+## Trade-offs and pitfalls
+
+- **The cap is on budget, not on time.** A 2% page cost is the same for a 100% outage and a 2% error rate, but the second one takes 44 minutes to fire. If your users notice within a few minutes, the budget is not the only clock that matters.
+- **Slow burns need the ticket row.** Under 6x, nothing pages. I did not simulate the ticket rule, so I cannot say how well it handles noise.
+- **My errors are independent.** Real failures cluster. Clustered failures would change the false-page counts in ways this simulation does not capture, so measure your own error history before trusting the traffic thresholds.
+- **One SLO, one set of constants.** The 14.4 and 6 values come from the 99.9% example. With other targets the burn rates are recalculated from the budget percentages, and the traffic floor moves with them.
+- **Evaluation interval.** I evaluated once a minute. A coarser interval adds up to that much delay to every detection time above.
+
+## Takeaways
+
+- Burn-rate paging rules cap the budget lost before a page at the threshold (about 2% or 5% of 30 days in the simulation), whatever the size of the outage.
+- The short window earns its place on resets: one minute of outage left the page on for 5 minutes instead of 60. A five-minute outage still held it for 34.
+- The rules assume enough traffic that one failure is statistical noise. Under roughly 900 requests a day, I measured about one page per failed request on a service within its SLO.
+- Above roughly 8,600 requests a day (0.1 per second) the false pages were gone, so check your busiest-to-quietest endpoint ratio before using one rule set for everything.
+- If you cannot add traffic, a minimum-failure floor on the long window silenced the false pages in my test, at the price of missing very small incidents.
+
+## References
+
+[^1]: Google, *The Site Reliability Workbook*, [Chapter 5: Alerting on SLOs](https://sre.google/workbook/alerting-on-slos/). Burn rate definition, the 2% in one hour and 5% in six hours paging recommendation, the 14.4 and 6 burn rates, the 1/12 short-window guideline, the reset comparison, and the low-traffic section including the 10-requests-per-hour example and the four remedies.
+[^2]: Measurement script: [burn-rate-sim.py](/files/burn-rate-sim.py). Python 3.12.10, NumPy 2.5.3, fixed random seed, about 6 seconds to run. Experiments E1 to E5 map to the traffic-floor table, the budget chart, the reset chart, the real-outage detection times and the failure-floor table.
