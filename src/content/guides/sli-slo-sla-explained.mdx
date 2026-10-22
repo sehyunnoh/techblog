@@ -1,0 +1,166 @@
+---
+title: 'SLI vs SLO vs SLA: What Each One Is, Who Owns It, and How They Fit Together'
+description: 'A beginner-friendly SRE guide to service level indicators, objectives and agreements, with a comparison table, the downtime each "nine" allows, and a real cloud SLA read line by line.'
+pubDate: 2026-10-22
+updatedDate: 2026-10-22
+tags: ['observability', 'devops', 'architecture', 'tutorial']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+
+Three acronyms that differ by one letter get used as if they were the same word. People say "our SLA is 99.9%" when they mean a goal nobody is paying anyone for. People write an SLA before they can measure anything. And the three terms really are different things, owned by different people, with different consequences when they go wrong.
+
+This guide defines each one, compares them side by side, and then shows how they stack. The definitions come from Google's SRE book, the source most teams borrow the vocabulary from.[^1] The numbers come from a small script you can run.[^4]
+
+## The short version
+
+- An **SLI** (service level indicator) is a measurement. "The fraction of requests that succeeded."
+- An **SLO** (service level objective) is a target for that measurement. "At least 99.9% of requests succeed, over 30 days."
+- An **SLA** (service level agreement) is a contract. "If we fall below 99.9%, we refund you 10%."
+
+The SRE book's own wording for the first two is a "carefully defined quantitative measure" of some aspect of the service, and a target value or range for it. The third carries consequences, typically financial, if the objective is missed.[^1] The book also offers a quick test for telling them apart: ask what happens if the target is not met. If nothing explicit happens, you are almost certainly looking at an SLO, whatever people call it.[^1]
+
+## Side by side
+
+| | SLI | SLO | SLA |
+|---|---|---|---|
+| What it is | A measurement | A target for a measurement | An agreement with consequences |
+| Form | A ratio or a number, such as 99.93% | A threshold plus a time window | Contract text |
+| Who it is for | Engineers | The team and its product owners | Customers and lawyers |
+| What happens when it is missed | Nothing, it is only a number | The team changes its priorities | Money, credits or penalties |
+| Who can change it | Whoever owns the monitoring | The service team, with product input | Both parties, through a contract change |
+| Typical strictness | Not applicable | Tighter than the SLA | Looser than the SLO |
+| Example | Successful requests divided by valid requests | 99.95% over 30 days | 99.9% or the customer gets a credit |
+
+The strictness row is the part that surprises people, and I will come back to it.
+
+<Mermaid
+  caption="The three layers. The SLI is raw data, the SLO is an internal promise built on it, the SLA is an external promise that sits further away from perfect."
+  label="Flow diagram showing a service producing an SLI measurement, which is compared with an internal SLO, which sits above a looser external SLA with penalties"
+  code={`
+flowchart LR
+  A["Service<br/>requests"] --> B["SLI<br/>good / valid<br/>= 99.93%"]
+  B --> C{"vs SLO<br/>99.95%?"}
+  C -- "below" --> D["Team acts:<br/>slow releases,<br/>fix reliability"]
+  C -- "above" --> E["Ship features"]
+  B --> F{"vs SLA<br/>99.9%?"}
+  F -- "below" --> G["Customer<br/>gets a credit"]
+`}
+/>
+
+In that diagram the measured 99.93% is below the internal SLO of 99.95% (so the team reacts) but above the SLA of 99.9% (so no customer is owed anything yet). That gap is the point of keeping them separate. The SLO is the early warning, and the SLA is the line you want to never reach.
+
+## SLI: the measurement
+
+An SLI is only as useful as its definition. "Availability" is not an SLI. "Number of HTTP requests that returned a status below 500 and finished within 300 ms, divided by all valid requests" is. The ratio form, good events over valid events, is the most common because it gives a number between 0 and 1 that is easy to compare against a target.
+
+The SRE book lists the usual categories. User-facing services track availability, latency and throughput. Storage systems also care about durability. Big data pipelines care about throughput and end-to-end latency. It adds that every system should track correctness.[^1]
+
+Three practical points matter early.
+
+**Decide what counts as valid.** If a client sends a malformed request and gets a 400, was that a failure of your service? Usually not, so those requests are excluded from the denominator. The definition has to say so, or two teams will compute two different numbers from the same logs.
+
+**Do not use averages for latency.** The book warns that an average can hide the long tail and prefers percentiles instead.[^1] To see it, I generated 100,000 synthetic request times in which 2% of requests are slow (1.5 to 3 seconds). This data is made up for the demonstration, not measured from a real service.
+
+<Chart
+  type="bar"
+  height={300}
+  caption="Same 100,000 synthetic requests, four summaries. The mean of about 130 ms looks healthy. The 99th percentile is 2.2 seconds. <b>Synthetic data</b>, generated by the demo script."
+  label="Bar chart of mean, median, 95th and 99th percentile latency for a synthetic sample where 2 percent of requests are slow, showing the 99th percentile far above the others"
+  labels={['Mean', 'p50', 'p95', 'p99']}
+  series={[{ name: 'Latency (ms)', data: [129.7, 82.2, 157.1, 2240.9] }]}
+  yTitle="Milliseconds"
+  format="plain"
+/>
+
+The mean and even the 95th percentile say the service is fast. One in fifty users waits more than two seconds, and only the p99 shows it. A ratio SLI catches the same thing in a different way: the fraction of requests under 300 ms comes out to 98.00%, which against a 99% target is a clear miss.
+
+**Measure close to the user.** An SLI taken from the load balancer sees failures the application never logs. One taken from the application misses everything that died before reaching it. Pick the point that matches what a user experiences.
+
+## SLO: the target, and the nines
+
+An SLO is an SLI plus a number plus a window: "99.9% of requests succeed, over a rolling 30 days." The window matters as much as the number. A 99.9% target over a day permits 86 seconds of failure, and over 30 days permits 43 minutes, and the two are very different promises.
+
+Availability targets are usually written as "nines". Here is what each one allows in a 30-day month, straight arithmetic from 43,200 minutes:
+
+| Target | Allowed failure | Minutes per 30 days |
+|---|---|---|
+| 99% | 1% | 432 |
+| 99.5% | 0.5% | 216 |
+| 99.9% | 0.1% | 43.2 |
+| 99.95% | 0.05% | 21.6 |
+| 99.99% | 0.01% | 4.32 |
+| 99.999% | 0.001% | 0.43 |
+
+Every added nine cuts the allowance by a factor of ten, and the work needed to reach it rarely scales so politely. Four minutes a month is often shorter than the time a person needs to notice an incident, never mind fix it, so a 99.99% target usually means recovery has to be automatic.
+
+The allowance has a name: the **error budget**. It is the share of requests the SLO lets you fail. The book describes it as a rate at which the objectives can be missed, tracked daily or weekly, so the team can spend it on risky launches and stop spending when it runs out.[^1] That idea turns reliability from an argument into a number. If the budget is full, ship. If it is spent, stop and fix.
+
+The same chapter gives advice that is easy to nod at and hard to follow:
+
+- **Do not pick a target from current performance.** If you are at 99.97% today and promise 99.97%, you have locked in the effort it took to get there.
+- **Keep as few SLOs as possible.** Enough to cover what users care about, and no more.
+- **Keep them simple.** Complicated aggregations make changes harder to see and reason about.
+- **Leave a margin.** Set the internal objective stricter than the one you advertise, so you can fix chronic problems before users feel them.[^1]
+
+If you want the alerting side of this (when to wake someone based on how fast the budget is burning), I measured that in a separate post, including where the standard rules stop working for low-traffic services.[^3] The [observability guide](/guides/observability-from-first-principles/) covers where SLIs come from in the first place.
+
+## SLA: the contract
+
+An SLA is what you promise customers, and what you owe them when you miss. The best way to understand one is to read one. Amazon's EC2 SLA is public, last updated May 25, 2022 at the time I read it.[^2] Its Region-Level commitment is a Monthly Uptime Percentage of at least 99.99%, and the remedy is a service credit:
+
+| Monthly Uptime Percentage | Service credit |
+|---|---|
+| 99.0% up to below 99.99% | 10% |
+| 95.0% up to below 99.0% | 30% |
+| Below 95.0% | 100% |
+
+Notice what a real SLA contains that an SLO does not.
+
+- **A remedy, and only that remedy.** The text says the SLA sets out your "sole and exclusive remedies" for unavailability. A credit against future bills is the whole compensation, not damages.
+- **A claim process.** You must open a case in the support center, with dates, resource IDs and your own request logs, by the end of the second billing cycle after the incident. The credit is not automatic.
+- **Exclusions.** Problems caused by things outside the provider's reasonable control, or by the customer's own equipment and software, do not count.
+
+I ran a 30-day month with one full outage through those tiers:
+
+| Outage minutes in 30 days | Uptime | Meets 99.99% | EC2 Region-Level credit |
+|---|---|---|---|
+| 2 | 99.995% | yes | none |
+| 4 | 99.991% | yes | none |
+| 10 | 99.977% | no | 10% |
+| 432 | 99.000% | no | 10% |
+| 440 | 98.981% | no | 30% |
+| 2,200 | 94.907% | no | 100% |
+
+The first tier starts almost immediately. Ten minutes of outage in a month, which most teams would call a good month, already costs the provider a 10% credit, because 99.99% leaves only 4.32 minutes. The tiers then step up slowly: it takes more than seven hours of outage to reach the 30% credit. The shape of the table is a business decision about how much risk the provider will pay for, and it is not a statement about what users experience.
+
+## How they relate
+
+The usual arrangement is that the SLA is the loosest line, the SLO sits tighter, and real performance is better than both. A provider that promises 99.9% to customers and runs an internal objective of 99.95% has the difference between them, 0.05% or about 21.6 minutes a month, as room to notice and fix a problem before anyone is owed money. That is the margin the SRE book recommends keeping.[^1]
+
+Cloud contracts can look the opposite way round. The EC2 Region-Level line of 99.99% is very strict, and whatever AWS targets internally has to be stricter still to avoid paying out regularly. Whether your own SLO should be above or below a provider's SLA depends on how many such dependencies you chain together: a service built on three components that each promise 99.9% cannot honestly promise 99.9% itself.
+
+## Common mistakes
+
+- **Calling an SLO an SLA.** If no consequence is attached, it is an SLO. The label matters because it tells people whether missing the number triggers a conversation or an invoice.
+- **A 100% target.** It leaves no budget, so every deploy is a risk and every incident an SLO violation. Each extra nine costs more than the last, so the target has to be a decision, not a default.
+- **Measuring what is easy rather than what users feel.** CPU load is a cause. Request success is a symptom, and symptoms are what an SLI should capture.
+- **One SLO for everything.** A background export and a checkout call do not share requirements. Group requests by what they need.
+- **No window stated.** "99.9%" alone means nothing. 99.9% of what, over how long?
+
+## Takeaways
+
+- SLI is the measurement, SLO is the target for it, SLA is a contract with a penalty. The penalty is what separates the last from the other two.
+- Write an SLI as good events over valid events, define "valid" in writing, and use percentiles or threshold ratios for latency, never the mean.
+- Every nine divides the monthly downtime allowance by ten: 43.2 minutes at 99.9%, 4.32 minutes at 99.99%.
+- The error budget (what the SLO leaves over) is what lets a team trade reliability against speed.
+- Keep the internal SLO tighter than the SLA you sign, and read the SLA's exclusions and claim steps before counting on the credit.
+
+## References
+
+[^1]: Google, *Site Reliability Engineering*, [Chapter 4: Service Level Objectives](https://sre.google/sre-book/service-level-objectives/). Definitions of SLI, SLO and SLA, the "what happens if the SLOs aren't met" test, the SLI categories by system type, percentiles versus averages, error budgets, and the advice on simplicity, margin and not anchoring on current performance.
+[^2]: Amazon Web Services, [Amazon Compute Service Level Agreement](https://aws.amazon.com/compute/sla/), last updated May 25, 2022 when read on 2026-10-22. The Region-Level commitment, the service credit tiers, the claim procedure and the exclusions.
+[^3]: Google, *The Site Reliability Workbook*, [Chapter 5: Alerting on SLOs](https://sre.google/workbook/alerting-on-slos/), and this site's [burn-rate simulation post](/posts/burn-rate-alert-pages-per-failed-request/) built on it.
+[^4]: Calculation script: [sli-slo-sla-demo.py](/files/sli-slo-sla-demo.py). Python standard library only, fixed random seed. The latency sample is synthetic and the downtime and credit tables are arithmetic.
