@@ -1,0 +1,148 @@
+---
+title: 'Traces Break at the Hand-Off: Five of Eleven Common Boundaries Dropped Every Request'
+description: 'I sent 200 requests across eleven kinds of hand-off with the OpenTelemetry Python SDK. Five lost every trace, batching lost 90%, and the failures you most want to trace were the ones left behind.'
+pubDate: 2026-10-23
+tags: ['observability', 'opentelemetry', 'python', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+import Figure from '../../components/Figure.astro';
+
+The request trace looks fine. `POST /order`, 200 OK, 90 milliseconds, every span green. The customer's complaint arrives an hour later: the confirmation email never came. You search for the failing span and find it, a red `send_email` span with a timeout. It sits in a trace of its own. One span, no parent, no request ID you can follow back to the order that caused it.
+
+The trace did not fail at the point of failure. It ended earlier, at the moment the work was handed to something else, and the handed-off half is exactly where slow, retried, flaky things live. That is why traces tend to be missing when you need them most.
+
+I wanted to know how often this happens by default, not in theory. So I built eleven common hand-offs in Python, pushed 200 requests through each, and counted how many arrived on the other side still attached to the trace they started in.
+
+## What has to travel
+
+A **trace** is the record of one request's journey. It is made of **spans**, each one a timed step (an HTTP handler, a database call), and every span carries the same trace ID plus a pointer to its parent span. To know which trace it belongs to, a new span needs a piece of state called the **context**.
+
+Inside one thread, the context is invisible plumbing. The OpenTelemetry SDK keeps it in a Python `contextvars` variable, so any span you start picks up the current one as its parent without being told. Nothing is wired up by hand, which is why tracing feels like it just works in a simple service.
+
+The trouble starts when work crosses a boundary where that variable does not follow. Across processes it cannot: the context has to be written into something that does travel, such as an HTTP header, and read back out on the other side. The W3C Trace Context standard fixes the shape of that header. It is called `traceparent` and looks like this:[^1]
+
+```
+traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+```
+
+The four dash-separated fields are the version (`00`), the trace ID (32 hex characters), the ID of the span that made the call (16 hex characters), and a flags byte whose one defined bit says the caller may have recorded the trace. That is 55 characters in total. Everything below is about whether those 55 characters, or the in-memory equivalent, make it across.
+
+<Mermaid
+  caption="Two kinds of hand-off. Inside a process the context rides along in a variable, and each way of moving work either copies it or silently does not. Across processes someone has to write it down and read it back."
+  label="Diagram splitting hand-offs into in-process boundaries, which depend on whether the context variable is copied, and cross-process boundaries, which need the traceparent to be serialized into a header, message or database row"
+  code={`
+flowchart TB
+  R["Request span<br/>(context in a variable)"]
+  R --> I["Same process"]
+  R --> X["Another process or later time"]
+  I --> I1["asyncio task, to_thread<br/>variable copied"]
+  I --> I2["Thread pool, run_in_executor<br/>variable NOT copied"]
+  X --> X1["HTTP call<br/>traceparent header"]
+  X --> X2["Queue message, DB row<br/>you must store it"]
+`}
+/>
+
+## How I tested it
+
+One Python 3.12.10 process, `opentelemetry-sdk` 1.45.1, an in-memory span exporter, and a request loop. Each request opens a root span `POST /order`, then hands a piece of work to the thing under test, which opens a span called `downstream`. Both carry the request's number as an attribute. After the run I check, per request, whether the `downstream` span has the same trace ID as that request's root span (or, for the batch case, a link into it). "Connected" means yes. "Orphan" means the work happened but sits in a trace of its own.
+
+Some honest limits. The queue is Python's `queue.Queue` and the database is in-memory sqlite, so this measures how context moves, not how Kafka or RabbitMQ behave. The HTTP hop is a real local server, but I inject and extract the header myself rather than through an instrumentation package. The results describe the Python SDK; Java's agent, for instance, wraps executors for you. The script is [trace-context-boundaries.py](/files/trace-context-boundaries.py), and it takes about a minute to run.[^2]
+
+## The results, hand-off by hand-off
+
+| Hand-off | Connected (of 200) | Why |
+|---|---|---|
+| HTTP call, header injected | 200 | `traceparent` sent and read back |
+| HTTP call, header not copied | 0 | Server starts a fresh trace |
+| `ThreadPoolExecutor.submit`, default | **0** | Worker thread starts with an empty context |
+| `ThreadPoolExecutor.submit` via `copy_context().run` | 200 | Context copied by hand |
+| `asyncio.create_task` | 200 | Tasks copy the context at creation |
+| `asyncio.to_thread` | 200 | Documented to propagate the context[^6] |
+| `loop.run_in_executor` | **0** | Looks like `to_thread`, does not copy |
+| Queue message, no carrier | **0** | Nothing in the message to read |
+| Queue message, `traceparent` inside | 200 | Producer wrote it, consumer read it |
+| DB job row, no trace column | **0** | The row has nowhere to keep it |
+| DB job row, `traceparent` column | 200 | Stored and restored by the poller |
+
+The pattern is easy to state and hard to spot while coding. Every one of those zeros runs without an error, and the work completes normally. Nothing warns you. `asyncio.to_thread` and `run_in_executor` do nearly the same thing from the caller's side, one keeps the trace and the other drops all 200.
+
+The thread pool row is the one I'd expect to catch the most people, because a pool is the first thing you reach for to move slow work off the request path. The OpenTelemetry Python contrib project ships a `ThreadingInstrumentor` that is documented to re-activate the captured context in executor threads.[^3] I did not test it. The point of the measurement is that without it, or without a hand-written `copy_context()`, the default is a clean break.
+
+The queue and database rows share a different lesson. Nothing in Python can rescue a context that was never written down. If the producer does not serialise it into the message, then no consumer, however well instrumented, can recover it later. That has a consequence for retries and scheduled jobs: a row that waits in a table for an hour can only be tied back to a request if the request's `traceparent` went into the row at insert time.
+
+## Batches: one consumer, ten parents
+
+Consumers often pull messages in groups and process them in one pass, one span for the batch. A span has exactly one parent, so which of the ten requests is it a child of?
+
+The common shortcut is to take the first message's context as the parent. I tried it with 200 requests in batches of ten, and compared against the approach the OpenTelemetry messaging conventions recommend, which is to *link* the batch span to every message's creation context.[^4] The conventions give the reason in plain terms: a span can have only one parent, so batches cannot be correlated through parenting.
+
+<Chart
+  type="bar"
+  height={300}
+  caption="Requests (out of 200) that can be reached from their own root span by following the consumer batch span, with batches of ten. <b>Measured</b>, one run, deterministic."
+  label="Bar chart comparing requests reachable from a batch span: 20 of 200 when the batch uses the first message as parent, 200 of 200 when it uses links to all messages"
+  labels={['Parent = first message', 'Links to all messages']}
+  series={[
+    { name: 'Requests reachable', data: [20, 200] },
+  ]}
+  yTitle="Requests reachable (of 200)"
+  format="plain"
+/>
+
+With the parent shortcut, 20 requests are reachable and 180 are not: one per batch. Nine out of ten orders processed in that batch have no connection to the span that handled them. With links, all 200 are reachable, and a failure in the batch span lists every request it touched. The price is that links are a weaker relationship than parenthood, and not every backend renders them as nicely as a waterfall of child spans. Whether your tracing backend draws links well is worth checking before you commit to this.
+
+## Why this hurts most when something fails
+
+The hand-offs above are the ordinary path. Failures make it worse, for a reason that has nothing to do with propagation and everything to do with sampling.
+
+Most services keep only a fraction of traces, because keeping all of them is expensive. The common default is **head sampling**: decide at the start of the trace, at random, with the decision traveling in that flags byte of `traceparent`. The OpenTelemetry docs state the limitation directly: "you cannot ensure that all traces with an error within them are sampled with head sampling alone."[^5] The spec, for its part, calls the flag a recommendation from the caller, which is why every service has to be configured to respect it.[^1]
+
+I simulated this. 20,000 requests, a consumer that fails 5% of messages (997 failures), and both sides running the same sampler: keep 10% of traces, follow the parent's decision when there is one. I ran it three times.
+
+<Chart
+  type="bar"
+  height={320}
+  caption="Of 997 consumer failures, how many were recorded at all, and how many of those could be traced back to a recorded request span. Three runs shown as averages. <b>Measured</b>, 10% head sampling on both sides."
+  label="Bar chart: with no traceparent in the message, about 99 failures were recorded and 0 connected to a request trace; with traceparent in the message, about 100 were recorded and all 100 connected"
+  labels={['No traceparent in message', 'traceparent in message']}
+  series={[
+    { name: 'Failures recorded', data: [99, 100] },
+    { name: 'Connected to the request trace', data: [0, 100] },
+  ]}
+  yTitle="Failures (of 997)"
+  format="plain"
+/>
+
+Both setups record about a tenth of the failures. That is the sampling rate doing what it was told. The difference is in what you get when you open one. With the context carried in the message, every recorded failure sits in the same trace as the request that caused it (99, 99 and 103 in the three runs). Without it, none do (0 in all three), because the consumer's sampling decision is made on a trace ID that has no relation to the producer's. The zero is by construction, not luck: two unrelated trace IDs never match.
+
+Two things follow. A broken hand-off turns every sampled failure into a half-story. And even a perfect one still shows you only one failure in ten. Tail sampling, which decides after the trace is complete, addresses the second problem. The OpenTelemetry docs are frank about its cost: it "can be difficult to implement" and "difficult to operate."[^5] I did not measure it here.
+
+## Trade-offs and pitfalls
+
+- **My queue is not your broker.** Real brokers have their own header or attribute mechanisms, and the SDK's messaging instrumentations handle some of them. What I measured is the principle: a context that is not written into the message does not exist on the other side.
+- **A carried context can be old.** A retried message may arrive hours after its request. If you make the consumer a *child* of the original request, the trace gets a huge gap in its timeline. Links avoid pretending the two were continuous.
+- **Carrying costs bytes.** 55 characters per message is small, but a row per job in a busy table, or a queue with tiny payloads, adds up. It is still cheap compared with having no way back.
+- **Bad headers restart the trace.** The standard says a vendor that receives an invalid `traceparent` ignores it, and when it restarts, all of trace ID, parent ID and flags are regenerated.[^1] A proxy that mangles the header does the same damage as one that drops it.
+- **Python only.** Go passes the context explicitly as an argument, which fails differently. Java agents patch executors. Test your own stack rather than trusting my table.
+
+A cheap defence: write one test per hand-off that asserts the downstream span's trace ID equals the request's. It is the same check my script runs, and it would have caught every zero above before production did.
+
+## Takeaways
+
+- Treat every place where work leaves the request's thread or process as a place the trace can end, and verify each one with a trace-ID assertion rather than by eye.
+- In Python, `ThreadPoolExecutor.submit` and `run_in_executor` drop the context by default, while `asyncio.create_task` and `to_thread` keep it.
+- Put the `traceparent` into every queue message and every job row at the moment of the request. Nothing downstream can add it later.
+- For batch consumers, link the batch span to each message instead of choosing one parent. In my test that was the difference between 20 and 200 reachable requests.
+- Head sampling plus a broken hand-off means the failure you can see has no request attached. Fix propagation first, then decide whether tail sampling is worth running.
+
+## References
+
+[^1]: W3C, [Trace Context, Level 1 Recommendation](https://www.w3.org/TR/trace-context/). `traceparent` format (section 3.2), the sampled flag as a recommendation (3.2.2.5), and the handling of invalid headers and restarted traces (3.2.2.3, 3.4, 4.3).
+[^2]: Measurement script: [trace-context-boundaries.py](/files/trace-context-boundaries.py). Python 3.12.10, opentelemetry-api and opentelemetry-sdk 1.45.1, Windows 11. The sampling experiment uses unseeded trace IDs, so recorded-failure counts vary by a few per run (97 to 103 observed).
+[^3]: OpenTelemetry Python contrib, [Threading Instrumentation](https://opentelemetry-python-contrib.readthedocs.io/en/latest/instrumentation/threading/threading.html). Documented to cover `threading.Thread`, `threading.Timer` and `futures.ThreadPoolExecutor`. Not tested in this post.
+[^4]: OpenTelemetry, [Semantic conventions for messaging spans](https://opentelemetry.io/docs/specs/semconv/messaging/messaging-spans/). Producers attaching a creation context to each message, and batch spans linking to each message's creation context.
+[^5]: OpenTelemetry, [Sampling](https://opentelemetry.io/docs/concepts/sampling/). Head sampling definition and its error-trace limitation, and the stated disadvantages of tail sampling.
+[^6]: Python documentation, [asyncio.to_thread](https://docs.python.org/3/library/asyncio-task.html#asyncio.to_thread). States that the current `contextvars.Context` is propagated to the thread.
