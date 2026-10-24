@@ -1,0 +1,106 @@
+---
+title: 'Claude Duet Explained, and How It Compares with Meta Muse and OpenAI dots'
+description: 'Claude Duet is Anthropic''s proactive personal agent. This guide explains what it does, how it asks for approval, and how it differs from Meta Muse and OpenAI dots, using the vendors'' own pages.'
+pubDate: 2026-10-24
+updatedDate: 2026-10-24
+tags: ['ai', 'llm', 'architecture', 'security']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+
+Three big labs shipped the same kind of product within about six weeks of each other. Meta announced Muse on September 8, OpenAI announced dots on September 29, and Anthropic announced Claude Duet on October 21, 2026. All three are "proactive agents": software that watches your accounts, works on its own computer in the cloud, and comes back to you when it needs a decision. This guide explains Duet first, then lines it up against the other two.
+
+A note on names. Meta has no product called Duet. When people say "Meta's version" they mean Muse, and when they say "dots" they mean OpenAI's agents inside ChatGPT. Also, none of this is Claude Code or any coding tool. These are agents for email, calendars, invoices and shopping.
+
+## What "proactive agent" means
+
+A chatbot waits for your message. A proactive agent does not. You connect it to your apps (email, calendar, files, billing), and it checks them on its own, writes you a summary, drafts replies and does background work. Two terms come up repeatedly:
+
+- **Connector.** A plug-in that lets the agent read or act in one of your apps, such as Gmail or Stripe. You decide which ones to turn on.
+- **Cloud computer.** A virtual machine the agent works inside, separate from your laptop. It holds the agent's browser, files and saved logins. Because the work happens there, the agent keeps going while your devices are off.
+
+If you have read the [augmented vs agentic engineering guide](/guides/augmented-vs-agentic-engineering/), this is the agentic style moved out of the code editor and into daily admin work: you hand over a goal, not a step.
+
+## What Claude Duet does
+
+According to Anthropic's product page, Duet tracks what needs your attention, sends a morning brief, drafts next steps, and then stays quiet until something needs you. It can flag urgent items in your inbox and calendar, find unpaid invoices and draft reminders, prepare payroll for review, get contracts ready to send, and build briefs, decks or dashboards.[^1] It runs on Claude Opus 5.5 and works with more than 6,000 connectors and plugins, including Gmail, Slack, Google Drive, Stripe, QuickBooks, HubSpot and Notion.[^1] You talk to it by text or voice, in an app on iOS and Android or on the web, and it shares memory, skills and apps with the regular Claude app.[^1]
+
+TechCrunch adds that Anthropic aims it at professionals and small businesses, and that Anthropic itself says Duet is not good at errands such as booking tickets. It also cannot show you its browsing live.[^2]
+
+### How it asks for approval
+
+Duet asks before sensitive actions such as sending a message or paying for something, and you can see what it has done and steer it.[^1] Purchases go through Stripe's Link wallet or Shopify's Shop Pay.[^2] Two limits sit above the approval prompt: it will not trade securities or move money between accounts, and by default it declines to handle credit card numbers or government ID. A new classifier (a small model that screens each outgoing message) checks for sensitive information leaving.[^2]
+
+### What to know before expecting to use it
+
+- It is a **research preview** on a waitlist, for Claude Pro and Max subscribers in the US only. Team and Enterprise plans are not included yet.[^1]
+- It shares your plan's usage limits, and the background checks count against them. Big jobs such as a financial model use more.[^1]
+- Anthropic's own list of weaknesses: it may misread a thread, misjudge what is urgent, or miss something that arrives between check-ins.[^1]
+
+## The shape all three share
+
+<Mermaid
+  caption="The common design. The agent works inside its own cloud computer, and anything sensitive stops at an approval step before it reaches your apps or the outside world."
+  label="Flow diagram: you set goals, the agent works on its own cloud computer with connected apps, drafts an action, a sensitive action waits for your approval, and approved actions go out to the apps"
+  code={`
+flowchart LR
+  U["You set goals<br/>and connect apps"] --> A["Agent on its own<br/>cloud computer"]
+  A -->|"reads, drafts, prepares"| D["Draft action"]
+  D --> G{"Sensitive?"}
+  G -->|"no"| X["Done in your apps"]
+  G -->|"yes"| P["Waits for<br/>your approval"]
+  P --> X
+`}
+/>
+
+The products differ mostly in who draws the line at the "Sensitive?" diamond and how much of it you can change.
+
+## Meta Muse
+
+Meta's newsroom post describes Muse running on a "Muse Secure VM," a dedicated virtual machine that holds both the agent and your data, isolated from other users.[^3] The distinctive piece is **Sentinel**, a second agent on the same machine that is isolated from Muse at the system level. Muse's access to the internet needs Sentinel's approval.[^3] Muse also checks with you before sensitive actions such as sending an email or buying something, keeps an audit trail of past and planned actions, and lets you choose per app whether it can only read your email or also send.[^3]
+
+On credentials, Meta says Muse cannot see your passwords or payment methods; it uses stored credentials without reading them. Checkout goes through Link, which issues a one-time-use card number so your real card stays hidden.[^3] Meta says conversations are not shared with its ad systems and you can opt out of training use. A Confidential VM, encrypted with a key only you hold, is described as planned for "later this year," so it is not something to count on today.[^3]
+
+Muse launched in the US on iOS, Android and muse.ai and is free for most uses with paid plans for more.[^3] TechCrunch describes it as a personal assistant, with a separate small-business version.[^2]
+
+## OpenAI dots
+
+Dots are persistent agents inside ChatGPT. You name one, give it goals, and it keeps working after you close the chat. Each gets its own cloud computer and browser, connects to more than 4,000 apps through OpenAI's plugins, and runs on GPT-6 Astra. You can reach the same dot from ChatGPT, Slack or Microsoft Teams.[^4]
+
+The control model is the most configurable of the three. Proactive background research uses read-only tools. **Custom Rules** let you require approval for, or block, specific actions. An Activity View lets you watch and redirect work in progress, and sensitive tasks such as changing a password always stay with you.[^4] Rollout began September 29: ChatGPT Pro (excluding the EEA, Switzerland and the UK), Business Premium in all supported regions, and Enterprise as an admin-enabled beta. For about the first month, dot usage does not count against plan allowances, and long-term terms are not set.[^4]
+
+## Side by side
+
+| | Claude Duet | Meta Muse | OpenAI dots |
+|---|---|---|---|
+| Announced | Oct 21, 2026 | Sep 8, 2026 | Sep 29, 2026 |
+| Where you use it | iOS, Android, web | iOS, Android, muse.ai | ChatGPT, plus Slack and Teams |
+| Own cloud computer | Yes | Yes (Secure VM) | Yes, with a browser |
+| Connected apps | 6,000+ connectors | You pick apps and access level | 4,000+ plugins |
+| Approval design | Asks before sensitive steps, hard limits on trading and money transfers | Asks before sensitive steps, plus Sentinel gating internet access | Custom Rules you set per action type |
+| Stated focus | Professionals, small business | Personal, with a small-business version | Goals you assign, across work apps |
+| Availability | US, Pro/Max, waitlist | US | Pro and Business Premium, regional exclusions |
+| Cost | Included in plan, shares limits | Free for most use, paid tiers | Included with plan, usage free for about a month |
+
+This table is my arrangement of facts from each vendor's own pages. Rows like "stated focus" compress marketing language, so read them as a starting point.
+
+## Reading the differences
+
+- **Who owns the rules.** Dots give you the most dials, through Custom Rules. Duet and Muse ship a fixed approval policy and let you pick connectors. More dials mean more setup and more ways to loosen something you should not.
+- **Where the safety check lives.** Muse puts a second agent between the first one and the internet. Duet adds a classifier on outgoing messages. Dots limit proactive work to read-only tools. These are different bets about what goes wrong, and none of them is proven by the vendors' own descriptions.
+- **Money.** Duet and Muse both route checkout through Stripe or Shopify wallets. Duet states it will not trade securities or move money between accounts, and dots keep money transfers and password changes with you. Muse's page says it asks before purchases but does not describe an equivalent hard ban.
+
+## What to be careful about
+
+- **Everything above is vendor description.** I read the vendors' pages and press coverage. I have not used any of the three, and nobody in these sources reports hands-on testing of the approval systems. OpenAI's own help pages returned errors when I tried to open them, so the dots section rests on press coverage of the launch, not OpenAI's documentation directly.[^4]
+- **These are previews and early rollouts.** Prices, regions and limits are already changing, and the sources disagree in places on dots pricing, so I left prices out where I could not confirm them.
+- **An agent that reads your inbox reads text written by strangers.** That text can try to give the agent instructions. This is a general risk for any agent with inbox access, and it is my reasoning, not a claim from these vendors' pages. It is the reason the approval step matters more than the feature list.
+- **"Asks before sensitive actions" depends on what counts as sensitive.** Each vendor draws that line, and you cannot fully inspect it from the outside.
+
+## References
+
+[^1]: Anthropic, [Claude Duet](https://claude.com/product/claude-duet), product page. Features, Opus 5.5, 6,000+ connectors, approvals, usage limits, availability and stated limitations.
+[^2]: Ivan Mehta, [Claude Duet app is Anthropic's bet on agents](https://techcrunch.com/2026/10/22/claude-duet-app-is-anthropics-bet-on-agents/), TechCrunch, October 22, 2026. Target audience, purchases via Link and Shop Pay, the classifier, the refusal to trade or move money, and the description of Muse.
+[^3]: Meta, Muse announcement, [Meta Newsroom](https://about.fb.com/news/2026/09/introducing-muse/), September 2026. Secure VM, Sentinel, approvals, audit trail, credentials, Link checkout, privacy statements, planned Confidential VM and availability.
+[^4]: [OpenAI dots](https://www.androidauthority.com/openai-dots-chatgpt-always-on-ai-agents-3717020/), Android Authority, reporting on the DevDay announcement of September 29, 2026. Cloud computer and browser, 4,000+ apps, GPT-6 Astra, Custom Rules, Activity View, availability and the usage-allowance note. OpenAI's own [dots help article](https://help.openai.com/en/articles/20001529-dots) exists but could not be opened from my environment.
