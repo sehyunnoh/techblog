@@ -1,0 +1,108 @@
+---
+title: 'Augmented Engineering vs Agentic Engineering: What Each Term Means and How to Choose'
+description: 'Augmented engineering has no standard definition, while agentic engineering does. This guide sorts out the usages, compares the two working styles side by side, and says when each one fits.'
+pubDate: 2026-10-24
+updatedDate: 2026-10-24
+tags: ['ai', 'llm', 'architecture', 'tutorial']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+
+If you search for "augmented engineering" expecting a definition, you will not find one. The phrase is used loosely, by different people, for slightly different things. "Agentic engineering" is better pinned down, but it is also new and it gets stretched. This guide separates the usages that can be traced to a source, then compares the two ways of working they point at.
+
+One caution first. The comparison table below is my synthesis. Nobody published an official "augmented vs agentic" spec, so treat the columns as a way to think, not as a standard.
+
+## The short version
+
+- **Augmented engineering** is not a fixed term. In AI coding it usually means the engineer stays in the driver's seat, writes or directs most steps, and uses AI to speed each step up. The most precise relative is Kent Beck's **augmented coding**.
+- **Agentic engineering** means handing scoped tasks to AI agents that act on their own for a while (read files, edit, run commands), while the engineer orchestrates and reviews.
+- The practical difference is the **size of the step you delegate** and **where you check the result**. Small steps checked constantly is the augmented style. Larger tasks checked at the end is the agentic style.
+
+## What "augmented" means, as far as anyone has defined it
+
+There are three usages, and only one is about AI-assisted software work in the sense you probably mean.
+
+**Kent Beck's augmented coding.** In a June 2025 essay, Beck contrasts it with vibe coding, where you accept whatever the AI produces. In his framing the engineer keeps the standards of hand-written software and the architectural judgment, and hands the typing to the AI. His own summary lists treating the AI as a senior pair programmer, enforcing test-driven development, catching design drift early, and refusing shortcuts such as disabled tests or features nobody asked for.[^1] Note that it says "coding", not "engineering".
+
+**"AI-augmented engineering" as a general label.** Vendor and blog pages use it for human-led work where AI speeds up execution. One guide, from a vendor that sells agent tooling, describes it as work where humans still sequence the tasks through sprints, pull requests and pipelines, and AI accelerates work inside each phase without coordinating across phases.[^3] That is a useful description, but remember who wrote it.
+
+**Capgemini's augmented engineering.** This is a different thing that happens to share the name. In a 2026 report on aerospace and defense, Capgemini describes augmented digital engineering as the convergence of digital continuity and AI, linking lifecycle data, models and requirements so engineers can validate designs with AI support.[^4] It is about product engineering, not coding assistants.
+
+If someone says "augmented engineering" to you, ask which of these they mean.
+
+## What "agentic" means
+
+"Vibe coding" was Andrej Karpathy's 2025 term for prompting AI and largely not reviewing what comes back. IBM's explainer credits him with proposing "agentic engineering" in an X post in early 2026 as a more professional successor, and defines it as using engineering expertise to orchestrate and oversee AI agents across the development process, with agents writing much of the code and humans directing, reviewing and validating.[^2] I could not retrieve the original post, so I rely on IBM's account of it.
+
+The word "agent" matters here. An agent is an AI system that runs in a loop: it decides an action, uses a tool (open a file, run the tests), looks at the result and decides again, without you approving each step. That loop is what makes agentic work different in kind, not only in degree.
+
+## The same task, two ways
+
+Take a concrete job: add rate limiting to one API endpoint.
+
+<Mermaid
+  caption="The augmented loop. The human closes the loop after every small step."
+  label="Flow diagram: human picks the next step, AI proposes a small change, human reviews and accepts, then back to the first step"
+  code={`
+flowchart LR
+  A1["Human picks<br/>the next step"] --> A2["AI proposes<br/>a small change"]
+  A2 --> A3["Human reviews<br/>and accepts"]
+  A3 --> A1
+`}
+/>
+
+<Mermaid
+  caption="The agentic loop. The agent closes many small loops by itself and the human checks the outcome."
+  label="Flow diagram: human writes a task and checks, the agent plans, edits and runs tests in a loop, then the human reviews the result"
+  code={`
+flowchart LR
+  G1["Human writes task<br/>and checks"] --> G2["Agent: plan,<br/>edit, run tests"]
+  G2 -->|"tests fail, try again"| G2
+  G2 -->|"tests pass"| G3["Human reviews<br/>the result"]
+`}
+/>
+
+**Augmented.** You decide the design: a token bucket per API key, stored in memory first. You ask the AI for the bucket class, read it, ask for a test, run it yourself, then ask for the middleware that uses it. Each request to the AI is a few dozen lines, and you have looked at every one of them before the next begins.
+
+**Agentic.** You write the task: "Add per-key rate limiting to `POST /orders`, 10 requests per second, return 429 with a `Retry-After` header. Existing tests must still pass and new tests must cover the limit." The agent reads the codebase, picks a place for the code, writes it, runs the suite, fixes what fails and stops. You get a diff, maybe 200 lines across five files, and review it once.
+
+Both can end in the same code. The difference is how many decisions were made while you were not looking.
+
+## Side by side
+
+| | Augmented | Agentic |
+|---|---|---|
+| Who chooses the next step | You | The agent, inside a task you scoped |
+| Unit handed to the AI | A function, a test, a refactor | A task or small feature |
+| When you review | After every step | At the end of the task |
+| Your main skill | Design and judgment at fine grain | Specifying tasks and checks, and reviewing large diffs |
+| What stops mistakes | Your attention | Tests, types, CI and your review |
+| Main bottleneck | Your typing-and-reading speed | Your ability to verify what you did not watch |
+| Typical failure | Slow, and you lose focus on trivial reviews | A plausible diff that is wrong in a way the checks do not cover |
+
+Beck's rule about refusing shortcuts such as disabled tests belongs here.[^1] An agent that is told "make the tests pass" can get there by weakening the tests. The more you delegate, the more your checks have to be things the agent cannot quietly edit.
+
+## How to choose
+
+Neither style is better in general. These rules of thumb follow from the table above.
+
+- **Use the augmented style** when the design is unclear, the code is unfamiliar to you, the area is risky (auth, money, migrations), or there are few tests. Small steps let you find problems while they are cheap.
+- **Use the agentic style** when the task is well specified, the result can be checked mechanically, and a wrong answer is easy to spot and revert. Test-covered refactors and mechanical migrations fit well.
+- **Move between them within one day.** Let an agent do the scaffolding, then drop to small steps for the part you do not trust. The terms describe a stance toward one piece of work, not a type of engineer.
+
+IBM's advice for teams points the same way: break work into scoped modular tasks, add review loops to the existing CI/CD pipeline, and standardise review and testing expectations.[^2]
+
+## What to be careful about
+
+- **Evidence is thin.** The pages that compare the two styles are mostly explainers and vendor guides. The vendor guide I cite also sells an agent coordination product, so its claim that augmentation is the right choice for most teams today is an opinion with a commercial interest behind it.[^3] I have not measured productivity or defect rates for either style.
+- **Terms drift.** "Agentic" is already applied to everything from autocomplete with tools to multi-agent systems that run the whole delivery pipeline. Ask what loop is meant.
+- **The boundary is blurry.** Beck's augmented coding is done with AI coding tools that can themselves run code, so by the loop definition above parts of it overlap with agentic work. What separates them is the discipline around the loop.[^1]
+- **Vibe coding is neither.** Accepting output without review is the thing both terms were coined to distinguish themselves from.[^1][^2]
+
+## References
+
+[^1]: Kent Beck, [Augmented Coding: Beyond the Vibes](https://www.kentbeck.com/summaries/augmented-coding-beyond-the-vibes/), summary page, June 25, 2025. The definition against vibe coding, the senior-pair-programmer framing, TDD discipline, and refusing shortcuts such as disabled tests.
+[^2]: IBM, [What is agentic engineering?](https://www.ibm.com/topics/agentic-engineering), published 27 February 2026. Definition, the attribution of the term to Karpathy in an X post, the comparison with vibe coding and AI-assisted coding, and the recommended governance practices. The Karpathy post itself was not retrieved.
+[^3]: Augment Code, [AI-Augmented vs Agentic SDLC](https://www.augmentcode.com/guides/ai-augmented-vs-agentic-sdlc). Describes who sequences tasks and who holds decision authority in each model. Vendor content: the publisher sells agent coordination software.
+[^4]: Capgemini Research Institute, [Realizing augmented engineering](https://www.capgemini.com/insights/research-library/augmented-engineering/). Augmented digital engineering as the convergence of digital continuity and AI, in aerospace and defense. The page itself shows no publication date; its report files are dated July 2026.
