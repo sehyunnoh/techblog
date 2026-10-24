@@ -1,0 +1,176 @@
+---
+title: 'Logical Clocks Fixed the Clock-Skew Bug, but 1 Write in 200 Still Vanished'
+description: 'I ran wall-clock, Lamport, hybrid and vector clocks through one simulated workload. Logical clocks removed the skew mistakes, yet 0.5% of writes still vanished. Only vector clocks kept them all.'
+pubDate: 2026-10-24
+tags: ['data', 'backend', 'python', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+import Figure from '../../components/Figure.astro';
+
+Two people edit the same record. Alice saves a new phone number. Ten milliseconds later Bob opens that record, sees her number, fixes the typo in the street address and saves. Bob's save is based on Alice's, so it should win. Your database keeps Alice's version instead, and the street typo comes back.
+
+Nothing crashed and nothing was reported. The database compared two timestamps, and the server that took Bob's save had a clock that ran a little slow.
+
+The usual advice is to stop trusting wall clocks and use logical clocks. Lamport clocks, hybrid logical clocks and vector clocks all exist for this reason, and they do fix this exact bug. I wanted to see what they fix and what they leave behind, so I wrote a small simulator and ran the same workload through each one.
+
+## Background: when two writes meet
+
+A **replica** is one copy of the data. A replicated store keeps several, so that one machine dying does not lose anything. Writes land on one replica and are copied to the others a few milliseconds later, which means the replicas briefly disagree. When two versions of the same value meet, the system needs a rule for choosing.
+
+The simplest rule is **last write wins** (LWW): every write carries a timestamp and the larger timestamp is kept. Cassandra works this way. Its documentation says conflicts resolve by "last write wins", and that the timestamp comes from the client's clock or, failing that, the coordinator's.[^1] The same page adds that Cassandra's correctness depends on those clocks and recommends running NTP, the protocol that keeps clocks roughly in step.
+
+To say what "should" win, we need a definition. Event A **happened before** event B if information could have flowed from A to B: the same client did them in order, or B read what A wrote. Two writes where neither one saw the other are **concurrent**. Lamport's 1978 paper states the property a clock must have to respect this ordering: if a happened before b, then the clock reading of a is smaller than that of b. It also points out that the reverse does not hold, because a smaller reading does not prove that a happened first.[^2]
+
+## Experiment 1: a causal pair and a skewed clock
+
+The first test is the opening story, repeated many times. Write v1 on replica A at time zero. A client reads v1, then writes v2 on replica B some milliseconds later. Each replica's clock is off by a random amount, and I count how often v1 beats v2.
+
+<Mermaid
+  caption="The failing case. v2 is written after reading v1, but replica B's clock runs behind, so its timestamp is smaller and last-write-wins keeps the older value."
+  label="Sequence diagram: client X writes v1 on replica A, whose clock runs 8 ms fast, receiving timestamp 8 ms. Client Y reads v1 from A, then 10 ms later writes v2 on replica B, whose clock runs 4 ms slow, receiving timestamp 6 ms. Replicas compare 8 against 6 and keep v1"
+  code={`
+sequenceDiagram
+  participant X as Client X
+  participant A as Replica A, clock 8 ms fast
+  participant Y as Client Y
+  participant B as Replica B, clock 4 ms slow
+  X->>A: write v1
+  Note over A: stamp 8 ms
+  Y->>A: read v1
+  Y->>B: write v2, based on v1
+  Note over B: true time 10 ms, stamp 6 ms
+  A->>B: replicate v1
+  Note over B: 8 beats 6, keeps v1, v2 is gone
+`}
+/>
+
+For two clocks whose errors are independent and normally distributed with standard deviation σ, the chance that v2 gets the smaller stamp has a closed form. The difference of the two errors has spread σ√2, so the loss probability is Φ(−gap / (σ√2)), where Φ is the standard normal CDF. I ran 200,000 trials per setting and the simulation matches the formula to the third decimal place.
+
+<Chart
+  type="line"
+  height={320}
+  caption="Share of causally later writes that lose under wall-clock last-write-wins, by clock skew (σ, per replica). <b>Simulated</b>, 200,000 trials per point, matches the closed form."
+  label="Line chart of loss probability against clock skew. With 10 ms between the writes: 0 at 1 ms, 0.02 percent at 2 ms, 7.9 percent at 5 ms, 24 percent at 10 ms, 36 percent at 20 ms, 44 percent at 50 ms. With 100 ms between the writes the curve is shifted right: 0 until 10 ms, 0.02 percent at 20 ms, 7.9 percent at 50 ms, 24 percent at 100 ms"
+  labels={['1', '2', '5', '10', '20', '50', '100']}
+  series={[
+    { name: '10 ms between the writes', data: [0, 0.02, 7.9, 24.0, 36.2, 44.4, 47.2] },
+    { name: '100 ms between the writes', data: [0, 0, 0, 0, 0.02, 7.9, 24.0] },
+  ]}
+  yTitle="Causally later write loses (%)"
+  xTitle="Clock skew σ (ms)"
+  format="plain"
+/>
+
+The curve is a cliff, not a slope. At 2 ms of skew with 10 ms between the writes, 1 in 5,000 pairs breaks. At 5 ms it is 1 in 13. The loss starts when the skew grows to about half the gap between the writes, and it climbs toward a coin flip.
+
+How much skew is realistic? The hybrid logical clock paper says NTP can usually hold time to within tens of milliseconds over the public internet, and about a millisecond on a local network under ideal conditions.[^3] I also asked my own machine. Eight samples against `time.windows.com` with `w32tm /stripchart` showed an offset between −10.3 and −13.7 ms, which includes some error from the network path itself. A desktop on home internet is not a server in a data centre, but it shows that "a few milliseconds off" is not an exotic state. CockroachDB takes the other approach and polices it: its `--max-offset` flag defaults to 500 ms, and its documentation says servers crash when observed offsets exceed the limit, to avoid reading inconsistent data.[^4]
+
+## Three ways to stamp a write without trusting the wall clock
+
+All three below put information about what the writer had seen into the stamp. The common requirement is that the client hands back what it read when it writes, so the stamp can include it.
+
+- **Lamport clock.** One integer per replica. A replica sets its counter to the larger of its own and any counter it has been told about, plus one, and stamps the write with it. If a happened before b, then a's stamp is smaller, which is the property from the paper.[^2] It tells you nothing about real time.
+- **Hybrid logical clock (HLC).** A pair of the largest physical time seen and a small counter for ties. It keeps the causality guarantee and stays close to the physical clock, so timestamps still look like dates. The paper proves the gap to physical time is bounded.[^3]
+- **Vector clock.** A list of counters, one per writer. Comparing two lists tells you whether one version descends from the other or whether they are concurrent. Dynamo describes it as a list of (node, counter) pairs: if every counter in one clock is less than or equal to the matching one in the other, the first is an ancestor and can be forgotten, and otherwise the two are in conflict.[^5]
+
+The first two give a total order, so a conflict still resolves to one winner. Only the vector clock can say "these two are concurrent" and keep both. The question for the next experiment is what that distinction costs and buys.
+
+## Experiment 2: the same workload, four clocks
+
+The simulator has 3 replicas, 20 hot keys and 20 clients. Each client reads a key from a random replica, waits 2 to 20 ms, then writes to the same replica half the time and a random one otherwise, then rests for about 80 ms. Replication takes a median of 20 ms with a long tail. Clients carry what they read into their next write, and a client that reads several sibling versions merges them by taking all of them as context. The schedule of clients, keys and delays is identical for every scheme, so the schemes are compared on the same events. I ran five seeds, about 22,000 writes in total.[^8]
+
+At the end I let replication drain and classified every write ever made. A write is fine if it survived or if some surviving write was built on top of it, since the data lives on in its descendant. It is **lost** if neither is true. Ground truth comes from the clients' actual read history, not from any clock.
+
+<Chart
+  type="bar"
+  height={340}
+  caption="Writes that ended up in no surviving version, as a share of all writes. <b>Simulated</b>, five seeds, about 22,000 writes. σ is the replica clock skew in ms. Wall = wall-clock LWW, no ctx = client does not return its context."
+  label="Bar chart of lost writes percent: wall clock with no skew 0.49, wall clock with 20 ms skew 0.55, wall clock with 100 ms skew 1.11, Lamport 0.51, Lamport without returning the client context 0.50, hybrid logical clock with 100 ms skew 0.50, vector clock 0.00"
+  labels={['Wall σ0', 'Wall σ20', 'Wall σ100', 'Lamport', 'Lamport, no ctx', 'HLC σ100', 'Vector']}
+  series={[
+    { name: 'Writes lost (%)', data: [0.49, 0.55, 1.11, 0.51, 0.5, 0.5, 0] },
+  ]}
+  yTitle="Writes lost (%)"
+  format="plain"
+/>
+
+The chart says a few different things.
+
+**Skew is only part of the damage.** With perfectly synchronised clocks, wall-clock LWW still lost 0.49% of writes. Those are concurrent writes: two clients wrote within one replication delay of each other, neither saw the other, and one write was thrown away by design. Skew then adds on top. At 100 ms it more than doubled the loss to 1.11%.
+
+**Logical clocks remove the skew term and nothing else.** Lamport and HLC, even with 100 ms of skew under the HLC, landed at 0.50%. That is the same loss as the synchronised wall clock, because they resolve concurrent writes by picking a winner just like it does. The numbers fall from 1.11% to 0.50%, not to zero.
+
+**Only the vector clock lost nothing.** It saw that the two writes were concurrent and kept both. That has a price, which is that the application now gets to decide.
+
+| Scheme | Writes lost | Reads that returned siblings | Merge decisions that kept the older of a causal pair, per 1,000 writes |
+|---|---|---|---|
+| Wall clock, σ 0 | 0.49% | 0 | 0 |
+| Wall clock, σ 20 ms | 0.55% | 0 | 104 |
+| Wall clock, σ 100 ms | 1.11% | 0 | 643 |
+| Lamport | 0.51% | 0 | 0 |
+| Lamport, client does not return its context | 0.50% | 0 | 5.3 |
+| HLC, σ 100 ms | 0.50% | 0 | 0 |
+| Vector clock | 0.00% | 23.2% | 0 |
+
+The last column counts moments when a replica compared two versions, one an ancestor of the other, and kept the ancestor. Most of these are repaired later, because another write built on the newer one arrives and wins, which is why the final-state column is so much smaller. A client that reads during the window still sees the older value, though. That is the 104 per 1,000 for a mere 20 ms of skew.
+
+The row I did not expect is Lamport without the client context. Forgetting to pass the stamp back from a read to the next write is a real mistake, since the property from the paper needs every message to carry the clock.[^2] In this workload it caused only 5.3 stale merge decisions per 1,000 writes and no permanent loss. The replicas exchange so many writes that their counters stay close, which hid the bug. A quieter system could hide it just as well until the day it does not.
+
+## What vector clocks cost
+
+Look at the sibling column. 23.2% of reads returned more than one version, and the average clock held 19.7 entries, nearly one per client. The price comes in two parts.
+
+The first is **application work**. When a read returns two versions, someone has to merge them. Dynamo's authors describe the shopping cart as the model case, where the application merges conflicting carts, and they note that a store itself can only apply simple policies such as last write wins.[^6] If the merge is hard to define, such as two different phone numbers, you have moved the problem, not removed it.
+
+The second is **metadata size**. A clock with one entry per client grows with the number of distinct writers. Dynamo bounds it by truncation: it stores a timestamp with each pair, and when the number of pairs reaches a threshold (the paper says "say 10"), the oldest pair is removed. The paper admits that truncation can make descendant relationships impossible to derive accurately, and says the problem had not surfaced in production.[^5] Dynamo's pairs name storage nodes, so the clock is normally bounded by how many nodes handle a key.
+
+I wanted to see what truncation does if the entries name clients instead. One key, writers taking turns, every writer reads all current versions before writing, and the clock is cut to 10 entries by dropping the oldest. In truth every write comes after every earlier write, so any version left over is a false conflict.
+
+<Chart
+  type="bar"
+  height={320}
+  caption="Average number of coexisting versions of one key after each write (writes 501 to 2,000), by number of distinct writers, with the clock truncated to 10 entries. <b>Simulated</b>, 2,000 sequential read-then-write operations, every write has read every version."
+  label="Bar chart of average sibling count with a 10-entry limit: 1 for 5 writers, 1 for 10 writers, 11 for 11 writers, 60 for 12 writers, 385 for 15 writers, 618 for 20 writers, 984 for 50 writers"
+  labels={['5', '10', '11', '12', '15', '20', '50']}
+  series={[
+    { name: 'Average versions kept', data: [1, 1, 11, 60.1, 385.3, 618.4, 984.2] },
+  ]}
+  yTitle="Versions coexisting"
+  xTitle="Distinct writers"
+  format="plain"
+/>
+
+With 10 writers or fewer nothing happens, and the key always has exactly one version. At 11 writers, one past the limit, every write leaves a sibling behind: the store stayed at 11 versions from then on. At 12 it averaged 60, at 20 it averaged 618 and peaked at 975. The cause is mechanical. The new clock has dropped an entry that an older version still carries, so the older version can no longer be proven to be an ancestor and stays. Each following write then reads all of them, grows the clock further, and drops more.
+
+This is my model of the truncation rule in the Dynamo paper applied to per-client entries, not a measurement of Dynamo, and real systems add more rules. Riak's documentation names the same family of problem, "sibling explosion", for objects that rapidly collect siblings no one reconciles, and describes dotted version vectors as the fix that ties each value to the update that created it.[^7] The point I take from my run is narrower: the safe size of a vector clock is decided by who is allowed to be an entry, not by a size limit you add afterwards.
+
+## Trade-offs and pitfalls
+
+- **My workload is busier than a typical one.** 20 clients on 20 keys gives about 11 writes per second per key, which is why even synchronised wall clocks lost 0.5%. Dynamo reports that over 24 hours 99.94% of shopping cart requests saw exactly one version.[^5] The ratios between schemes matter more than the absolute percentages.
+- **Fixed skew, no drift, reliable delivery.** Each replica's clock offset is constant for a run. Real clocks drift, step when NTP corrects them, and can jump backwards. I did not simulate partitions or node failures.
+- **A perfect merge is assumed.** The vector clock row only looks free because my clients merge siblings flawlessly. A merge that picks one by timestamp quietly reintroduces last write wins one layer up.
+- **HLC and Lamport are cheap for a reason.** They never tell you that two writes were concurrent. If losing one of them is acceptable, such as a "last seen" field, that is an honest choice and much simpler.
+- **Wall clocks are not wrong everywhere.** Systems that use them but bound the error, as CockroachDB's offset limit does, are making a different trade, not a mistake.[^4]
+- **Only a single register.** One value per key. Real data has multi-key transactions and deletes, and in an LWW system a delete is timestamped like any other write.[^1]
+
+## Takeaways
+
+- Wall-clock last-write-wins breaks when clock skew approaches half the time between a write and the next one that depends on it. In my test, 5 ms of skew with writes 10 ms apart made the wrong write win 7.9% of the time.
+- Lamport clocks and HLCs remove skew-driven mistakes completely, but they still choose a winner between concurrent writes. In the workload, that left about 0.5% of writes lost with or without skew.
+- To preserve concurrent writes you need version tracking that can tell concurrent from ordered, such as a vector clock. In my run it cost 23% of reads returning siblings that the application had to merge.
+- Decide who gets an entry in the clock before you decide how big the clock may be. Truncating a per-client clock to 10 entries produced siblings forever once 11 clients wrote to the same key.
+- Whatever clock you pick, the client has to hand it back with its next write. Forgetting that was survivable in my simulation, which should worry you more than it reassures you.
+
+## References
+
+[^1]: Apache Cassandra documentation, [Dynamo](https://cassandra.apache.org/doc/latest/cassandra/architecture/dynamo.html). Timestamp-based last write wins, timestamps from the client or the coordinator, per-column resolution, timestamped deletes, and the statement that correctness depends on synchronised clocks (NTP recommended).
+[^2]: Leslie Lamport, [Time, Clocks, and the Ordering of Events in a Distributed System](https://lamport.azurewebsites.net/pubs/time-clocks.pdf), Communications of the ACM, 1978. The Clock Condition, implementation rules IR1 and IR2 (messages carry timestamps), and the remark that the converse does not hold.
+[^3]: Kulkarni, Demirbas, Madeppa, Avva, Leone, [Logical Physical Clocks and Consistent Snapshots in Globally Distributed Databases](https://cse.buffalo.edu/tech-reports/2014-04.pdf), 2014. Definition of HLC, bounded drift from physical time, bounded counter, and the statement that NTP can usually maintain time to within tens of milliseconds over the public internet.
+[^4]: CockroachDB documentation, [cockroach start](https://docs.cockroachlabs.com/docs/stable/cockroach-start). The `--max-offset` flag, default 500 ms, and the crash behaviour when observed offsets exceed it.
+[^5]: DeCandia et al., [Dynamo: Amazon's Highly Available Key-value Store](https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf), SOSP 2007. Vector clocks as (node, counter) pairs, the clock truncation scheme (threshold "say 10", oldest pair removed), the caveat about descendant relationships, and the 24-hour version counts (99.94% of requests saw exactly one version).
+[^6]: Same paper, section on conflict resolution: the data store can use only simple policies such as "last write wins", while the application can merge, for example shopping carts.
+[^7]: Riak KV documentation, [Causal Context](https://docs.riak.com/riak/kv/latest/learn/concepts/causal-context/index.html). Definition of sibling explosion and the description of dotted version vectors.
+[^8]: Measurement and simulation script: [logical-clocks-sim.py](/files/logical-clocks-sim.py). Python 3.12.10, standard library only, deterministic, about 30 seconds. Experiment 1 uses 200,000 trials per setting with seed 11. Experiment 2 uses seeds 1 to 5. Experiment 3 uses seed 3. The clock-offset reading was taken on 2026-10-24 on Windows 11 with `w32tm /stripchart /computer:time.windows.com /samples:8`.
