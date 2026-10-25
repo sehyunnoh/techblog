@@ -1,0 +1,186 @@
+---
+title: 'Where Do Container Image Bytes Come From? Measurements on Python Images'
+description: 'I unpacked Python images layer by layer and rebuilt them with common Dockerfile habits. A later rm saved nothing on the wire, and half of pandas in the image was its own test suite.'
+pubDate: 2026-10-25
+tags: ['devops', 'docker', 'python', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+
+An image with numpy, pandas and requests on top of `python:3.13-slim` takes 91 MB to pull and 272 MB on disk. The slim base alone is 43 MB to pull, and `docker image ls` printed 176 MB for it. Three numbers for one image is already a hint that "image size" is not one thing.
+
+I wanted to know where the bytes actually sit, so I unpacked a set of Python images layer by layer and then rebuilt them with the habits that tutorials recommend, and a few that they skip. Some of what I expected held. Some did not. In particular, I assumed my own code and Python itself would be a large part of the image, and I assumed that deleting a cache in a later `RUN` would give the bytes back.
+
+## Background: layers and the three sizes
+
+A container image is a stack of **layers**. Each `RUN`, `COPY` or `ADD` in a Dockerfile produces one, and each layer is stored as a compressed tar archive of the files that step added or changed. Layers are read-only. When a later layer deletes a file, it does not touch the earlier layer. The OCI image specification records the deletion as a **whiteout**, an empty file named `.wh.` plus the deleted name, which hides the file from the merged view.[^1] The bytes stay where they were.
+
+That gives three sizes worth separating:
+
+- **Registry size**: the sum of the compressed layers. This is what a pull downloads and a registry stores.
+- **Unpacked size**: the files a running container sees after all layers are merged, with whiteouts applied.
+- **What Docker prints**: depends on the engine. More on this below.
+
+I measured all three with a small script that runs `docker save` and reads every layer of the archive.[^7]
+
+My setup, so you can judge what transfers: Docker 28.0.4 on Docker Desktop for Windows 11 (the engine runs in a Linux VM, `linux/amd64`), Python 3.13.17 on Debian trixie, numpy 2.5.4, pandas 3.1.0. Every Dockerfile variant was built with `--no-cache`. Build sizes were identical across repeated runs, which is expected for the same inputs.
+
+## One image, three sizes
+
+<Chart
+  type="bar"
+  height={340}
+  logY={true}
+  caption="Registry (compressed) and unpacked size of eight base images, in MB on a log axis. <b>Measured</b> with <code>docker save</code> on one machine. dl = distroless, py = python:3.13, deb = debian:stable."
+  label="Bar chart on a log axis. Registry size then unpacked size in MB: busybox 2.2 and 4.4, distroless static 0.7 and 2.1, alpine 3.9 and 8.4, python 3.13 alpine 16.9 and 45.4, distroless python3 19.7 and 53.0, debian stable slim 29.8 and 78.8, python 3.13 slim 43.1 and 114.8, python 3.13 full 413.6 and 1104.8"
+  labels={['dl static', 'busybox', 'alpine', 'py alpine', 'dl python', 'deb slim', 'py slim', 'py full']}
+  series={[
+    { name: 'Registry size (MB)', data: [0.7, 2.2, 3.9, 16.9, 19.7, 29.8, 43.1, 413.6] },
+    { name: 'Unpacked size (MB)', data: [2.1, 4.4, 8.4, 45.4, 53.0, 78.8, 114.8, 1104.8] },
+  ]}
+  yTitle="Size (MB, log scale)"
+  format="plain"
+/>
+
+The gap between the two series is nearly constant. Python slim unpacks to 2.66 times its compressed size, the full image to 2.67 times, the Alpine one to 2.69 times. For a quick estimate, an image is about 2.7 times bigger on disk than on the wire.
+
+Then there is the number Docker itself prints. For `python:3.13-slim` on my machine, `docker image inspect` reports 43.1 MB, which is the compressed size, and `docker image ls` reports 176 MB. Docker's documentation explains the second one: the containerd image store keeps the compressed layers and the extracted layers, while the older storage drivers kept only the extracted ones.[^2] Compressed plus unpacked is 157.9 MB, so the printed figure is about 12% higher than that sum. I did not track down the remainder. The practical point is that an `ls` size from a machine with the containerd store and one from a machine without it are not comparable, and neither one is what your registry bill is based on.
+
+## Python is the small part of a Python image
+
+I grouped every file in the merged filesystem by path. The Python bucket is `/usr/local`, where the official images install the interpreter, the standard library and `site-packages`.
+
+<Chart
+  type="bar"
+  stacked={true}
+  height={360}
+  caption="What the unpacked filesystem of three Python 3.13 images is made of, as a share of each image. <b>Measured</b> by path group. The Python bucket is /usr/local. Absolute sizes: 45 MB, 115 MB and 1,105 MB."
+  label="Stacked bar chart of the percent of unpacked size. Python alpine, 45 MB: Python 73.7, shared libraries 21.9, binaries 2.4, usr share 1.3, compiler and headers 0, package manager state 0, other 0.7. Python slim, 115 MB: Python 28.2, shared libraries 39.8, binaries 24.5, usr share 2.6, compiler and headers 0, package manager state 4.4, other 0.5. Python full, 1,105 MB: Python 6.5, shared libraries 45.9, binaries 11.2, usr share 19.1, compiler and headers 16.3, package manager state 0.9, other 0.1"
+  labels={['py alpine (45 MB)', 'py slim (115 MB)', 'py full (1,105 MB)']}
+  series={[
+    { name: 'Python (/usr/local)', data: [73.7, 28.2, 6.5] },
+    { name: 'Shared libraries', data: [21.9, 39.8, 45.9] },
+    { name: 'Binaries', data: [2.4, 24.5, 11.2] },
+    { name: '/usr/share', data: [1.3, 2.6, 19.1] },
+    { name: 'Compiler and headers', data: [0, 0, 16.3] },
+    { name: 'Package manager state', data: [0, 4.4, 0.9] },
+    { name: 'Other', data: [0.7, 0.5, 0.1] },
+  ]}
+  yTitle="Share of unpacked size (%)"
+  format="plain"
+/>
+
+Python is 74% of the Alpine image, 28% of the slim one and 6.5% of the full one. The rest is the operating system underneath. In the full image the toolchain (compilers, headers, `libexec`) alone is 180 MB, because it is built on `buildpack-deps`, an image meant for compiling things.
+
+One number in that chart looks wrong at first. The Python bucket is 32.4 MB in slim and 71.3 MB in full, though both ship Python 3.13.17. The difference is `libpython3.13.so` (28.8 MB in full, 5.2 MB in slim) and the compiled extension modules in `lib-dynload` (21.0 MB against 5.7 MB). I checked the full image with `file`, and it reports `with debug_info, not stripped`. Running `strip --strip-unneeded` on that library gave a file of exactly 5,239,800 bytes, the same size as the one in the slim image.
+
+The official Dockerfiles explain it. The slim one adds `-Wl,--strip-all` to the linker flags, and the full one does not.[^3] So the 38.9 MB difference between the two Python buckets is the gap between an unstripped and a stripped build of the same files. I verified that for `libpython` directly and took the same cause for the extension modules from the Dockerfiles, not from a separate test. It is not a flaw in either image. It is a default you inherit when you pick the tag, and you are unlikely to attach a debugger to the interpreter inside a container.
+
+## Deleting in a later layer does not give bytes back
+
+Here is the layer stack for the most common mistake. You install packages with pip, which writes a download cache under `/root/.cache/pip`, and then you clean it up in the next instruction.
+
+<Mermaid
+  caption="Layers of an image that installs with pip and removes the cache in a separate step. The registry keeps layer 2 whole. The running container sees the cleaned result."
+  label="Flow diagram: layer 1 is the python slim base at 43 MB compressed. Layer 2 is pip install, adding 78.7 MB compressed including a 30.6 MB cache. Layer 3 is rm of the cache and adds a whiteout marker of about 0 MB. The registry stores 121.8 MB. A running container sees 272 MB unpacked without the cache"
+  code={`
+flowchart LR
+  L1["Layer 1<br/>python:3.13-slim<br/>43.1 MB"] --> L2["Layer 2<br/>pip install<br/>+78.7 MB, 30.6 MB is cache"]
+  L2 --> L3["Layer 3<br/>rm -rf cache<br/>about 0 MB, a whiteout"]
+  L3 --> R["Registry stores 121.8 MB<br/>Container sees 272 MB"]
+`}
+/>
+
+<Chart
+  type="bar"
+  height={320}
+  caption="The same pip install of numpy, pandas and requests, five ways. <b>Measured.</b> Registry size is what a pull transfers, unpacked size is what the container sees."
+  label="Bar chart in MB. Plain pip install: registry 121.8, unpacked 303.4. Remove cache in a next layer: registry 121.8, unpacked 272.2. Remove cache in the same layer: registry 91.2, unpacked 272.2. no-cache-dir: registry 91.2, unpacked 272.2. BuildKit cache mount: registry 91.2, unpacked 272.2"
+  labels={['pip install', 'rm in next layer', 'rm in same layer', '--no-cache-dir', 'cache mount']}
+  series={[
+    { name: 'Registry size (MB)', data: [121.8, 121.8, 91.2, 91.2, 91.2] },
+    { name: 'Unpacked size (MB)', data: [303.4, 272.2, 272.2, 272.2, 272.2] },
+  ]}
+  yTitle="Size (MB)"
+  format="plain"
+/>
+
+The `rm` in the next layer fixed the unpacked size (303.4 to 272.2 MB) and changed the registry size by exactly nothing. Anyone pulling that image still downloads the 30.6 MB cache. Doing the removal in the same `RUN` as the install, or skipping the cache with `--no-cache-dir`, saves it on both measures. A BuildKit cache mount (`RUN --mount=type=cache,target=/root/.cache/pip`) also produced the smaller image. It has the extra benefit of keeping the cache between builds on your machine, which matters because pip's own documentation warns against `--no-cache-dir` unless something higher up, such as layer caching in a container build, already covers it.[^4]
+
+The same rule hurts in a less obvious place. I copied 40 MB of data into `/app/data` and then ran `chown -R 1000:1000 /app` as a separate step. Changing ownership counts as a modification, so the file system has to store every file again in the new layer. The registry size went from 83.1 to 123.1 MB, exactly 40.0 MB more, and the unpacked size did not move. `COPY --chown=1000:1000` set the same ownership at no cost, at 83.1 MB.
+
+## What is inside your dependencies
+
+With the base image and the layer rules covered, I looked at what pip puts into `site-packages`. The three packages add 157 MB unpacked. Most of that is pandas at 76.1 MB, numpy at 40.5 MB, and `numpy.libs`, the shared libraries bundled with the numpy wheel, at 27.5 MB. Inside pandas, 38.6 MB is `pandas/tests`. Half of the pandas in this image is the pandas test suite.
+
+I tried two common reductions and checked that each image still imported pandas and numpy and summed a small DataFrame:
+
+| Variant | Registry (MB) | Unpacked (MB) | Cold `import pandas` (s) |
+|---|---|---|---|
+| Baseline, `--no-cache-dir` | 91.2 | 272.2 | 0.24 |
+| `pip --no-compile` | 75.6 | 225.9 | 0.93 |
+| Delete dirs named `test`/`tests` | 76.9 | 218.8 | 0.24 |
+| Both | 71.3 | 203.8 | 0.92 |
+
+Deleting the test directories removed 53.4 MB unpacked and 14.3 MB from the pull, with no change in import time. Skipping bytecode compilation (`--no-compile`) removed 46.3 MB unpacked and 15.6 MB from the pull, and it made the first import almost four times slower, from 0.24 to 0.93 seconds. The time is the median of five runs, each in a fresh container, so no `.pyc` files from a previous run could help. Python writes bytecode on first import when it can, but a container that starts, serves one request and exits never keeps it.
+
+That makes `--no-compile` a different kind of choice from deleting tests. One costs nothing at runtime. The other trades image size for start-up time on every cold start, so it is a poor deal for serverless or autoscaled containers and a fine one for a service that starts once a day.
+
+## Compilers, Alpine and the build context
+
+The last group is about what you leave behind from building. I used `psycopg2`, the PostgreSQL driver, because installing it from source needs a C compiler and the PostgreSQL client headers.
+
+| Variant | Registry (MB) | Unpacked (MB) |
+|---|---|---|
+| Compiler and `libpq-dev` left in | 143.7 | 361.6 |
+| Same, apt package lists removed in the same `RUN` | 127.0 | 340.0 |
+| Multi-stage: build a wheel, install it in a clean slim image | 48.9 | 127.4 |
+| `psycopg2-binary` wheel | 51.0 | 135.0 |
+
+The multi-stage build cut 94.8 MB from the pull compared with leaving the toolchain in, and it was 2.1 MB smaller than the prebuilt binary wheel, which bundles its own copy of the client library.[^6] Removing the apt lists alone was worth 16.7 MB. Two small notes from getting this to build: `--no-install-recommends` left out `libc6-dev`, and the compile failed on a missing `assert.h` until I added it. In the multi-stage version, the final image installs `libpq5`, the runtime library, and nothing else.
+
+Alpine has a reputation for breaking Python packages with native code, because it uses musl instead of glibc and older wheels were built for glibc only. I expected the gap to Alpine to disappear once numpy and pandas went in. It did not. With the same three packages, the Alpine image was 68.0 MB to pull against 91.2 MB for slim, and 212.7 MB unpacked against 272.2 MB. The bare base gap had been 26.2 MB to pull and 69.4 MB unpacked, so the lead shrank a little but stayed. The reason is that both packages now publish `musllinux` wheels, which I confirmed by listing what pip downloaded (`numpy-2.5.4-cp313-cp313-musllinux_1_2_x86_64.whl` and a matching pandas file). The musllinux tag is defined in PEP 656.[^5] Nothing was compiled.
+
+The biggest single mistake came from the plainest instruction. I used this blog's own repository as the build context and ran `COPY . /app` with no ignore file. The image grew from 43.7 MB to 214.7 MB to pull, and from 116.5 MB to 578.6 MB unpacked, most of it a 472 MB `node_modules` folder. The build took 88 seconds instead of 1.3, because the whole directory had to be sent to the builder first. A `.dockerignore` listing `node_modules`, `.git` and the build output brought it back.[^6] Besides size, `COPY . .` also puts any local notes or config files you forgot about into the image.
+
+<Chart
+  type="bar"
+  height={340}
+  caption="Extra registry (compressed) megabytes caused by each habit, compared with the fixed version of the same Dockerfile. <b>Measured</b>, each on its own, so the bars do not add up. From left: test directories kept, bytecode kept, apt lists kept, pip cache kept, chown -R in a later layer, psycopg2 build tools kept, COPY . . with no ignore file."
+  label="Bar chart of extra compressed MB: pip cache kept 30.6, chown -R in a later layer 40.0, test directories kept 14.3, bytecode kept 15.6, apt lists kept 16.7, psycopg2 build tools kept 94.8, COPY dot dot with no ignore file 171.0"
+  labels={['tests', '.pyc', 'apt lists', 'pip cache', 'chown -R', 'build tools', 'COPY . .']}
+  series={[
+    { name: 'Extra registry size (MB)', data: [14.3, 15.6, 16.7, 30.6, 40.0, 94.8, 171.0] },
+  ]}
+  yTitle="Extra MB to pull"
+  format="plain"
+/>
+
+## Trade-offs and what I did not test
+
+- **One machine, one architecture.** Everything is `linux/amd64` on Docker Desktop. Apt and PyPI contents change over time, so the exact megabytes will drift, though the pattern should not.
+- **Deleting `tests` directories is a blunt tool.** I removed every directory named `test` or `tests` under `site-packages` and checked that numpy and pandas still worked. A package that loads data from a folder with such a name would break, and I did not check any beyond these two.
+- **Alpine's other differences are untested.** I measured size and that the packages import. I did not measure speed or behaviour differences from musl, which are the usual reasons people leave Alpine.
+- **Cold-start numbers are from a laptop** with other things running. The median of five was stable across two full runs (0.24 and 0.25 seconds for the baseline, 0.93 and 0.87 for `--no-compile`), but the exact values are not portable.
+- **Registry size is compressed with Docker's default settings.** A registry or a different builder could compress differently.
+- **I did not measure pull time.** Bytes are a proxy. Layer reuse across images matters too, and a shared base layer is only downloaded once per machine.
+
+## Takeaways
+
+- Check which size you are looking at. Registry size, unpacked size and what `docker image ls` prints differ by a factor of about 2.7 or more, and the last depends on the storage backend.
+- The bulk of a Python image is usually the operating system beneath it. Choosing the base (full, slim, Alpine) moves more bytes than anything you write in your own layers.
+- A file removed in a later layer stays in the pull. Clean up in the same instruction, use `--chown` on `COPY`, and send build tools to a throwaway stage.
+- Look inside your dependencies before trusting them to be lean. Half of pandas here was its own tests, and skipping bytecode saved 46 MB at the cost of a four-fold slower first import.
+- Write a `.dockerignore` before the first `COPY . .`. It was the largest single difference I measured.
+
+## References
+
+[^1]: Open Container Initiative, [Image Format Specification: Layers](https://github.com/opencontainers/image-spec/blob/main/layer.md). Whiteout files named with the `.wh.` prefix, opaque whiteouts, and the rule that a whiteout hides only lower layers.
+[^2]: Docker documentation, [containerd image store](https://docs.docker.com/engine/storage/containerd/). The statement that the containerd store keeps both compressed and extracted layers, where the legacy drivers kept only uncompressed ones. The page does not say how `docker image ls` computes its size, so the 12% gap is my own observation.
+[^3]: Docker Official Images, python: [3.13/slim-trixie/Dockerfile](https://github.com/docker-library/python/blob/master/3.13/slim-trixie/Dockerfile) (base `debian:trixie-slim`, adds `-Wl,--strip-all` to `LDFLAGS`) and [3.13/trixie/Dockerfile](https://github.com/docker-library/python/blob/master/3.13/trixie/Dockerfile) (base `buildpack-deps:trixie`, no strip flag). Both delete `test`, `tests` and `idle_test` directories and `*.pyc`, `*.pyo` and `libpython*.a` files after install.
+[^4]: pip documentation, [Caching](https://pip.pypa.io/en/stable/topics/caching/) (default cache under `~/.cache/pip` on Linux, `--no-cache-dir`, and the note about layered caches in container builds) and [pip install](https://pip.pypa.io/en/stable/cli/pip_install/) (`--no-compile`).
+[^5]: Tzu-ping Chung, [PEP 656: Platform Tag for Linux Distributions Using Musl](https://peps.python.org/pep-0656/). The `musllinux` tag for wheels targeting musl-based distributions such as Alpine.
+[^6]: Docker documentation, [Building best practices](https://docs.docker.com/build/building/best-practices/). Multi-stage builds, `.dockerignore`, `apt-get update` with `install` in one `RUN`, and removing `/var/lib/apt/lists` at the end of the same instruction.
+[^7]: Measurement scripts: [container-image-anatomy.py](/files/container-image-anatomy.py) reads `docker save` archives layer by layer, and [container-image-experiments.py](/files/container-image-experiments.py) builds the variants. Python 3.12 standard library only, Docker 28.0.4. Run on 2026-10-25. The three Python images were pulled from Docker Hub with `crane` because Docker Desktop's own pull failed repeatedly on large layers, and I loaded them with `docker load`. I then compared every layer digest and size of the three loaded images with the Docker Hub `linux/amd64` manifest, and all of them were identical. The `COPY . .` experiment used this repository as its build context.
