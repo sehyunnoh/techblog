@@ -1,0 +1,142 @@
+---
+title: 'The Patched Node Still Reports Brotli 1.2.0, and My PC Has Nine Places to Check'
+description: 'Node, .NET, curl and others each carry their own Brotli decoder. I counted the places on one Windows PC and tested which clients decode Brotli they never asked for.'
+pubDate: 2026-10-26
+tags: ['security', 'web', 'python', 'devops', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+
+On October 21, Node.js and Google shipped fixes for a memory-corruption bug in the Brotli decompressor, filed as CVE-2026-111497. Node's advisory rates it High and says it allows remote code execution.[^1] My first reaction was the one most people have: update Node, done.
+
+Then I started checking, and three things did not match that plan. The patched Node 24.22.1 still prints `brotli 1.2.0`, the same string as the vulnerable one. My PC has at least nine separate places that carry a Brotli decoder, and updating Node touches exactly one. And Node's `fetch()` does not ask servers for Brotli, yet it decodes a Brotli reply anyway.
+
+None of this needed an exploit. I never built a malformed Brotli stream, and the script I ran only sends valid data. It measures exposure, not exploitation.
+
+## Background: what broke, and why one fix is not enough
+
+**Brotli** is a compression format, mostly seen on the web as `Content-Encoding: br`. A client advertises what it can unpack in the `Accept-Encoding` request header, and the server picks one and names it in `Content-Encoding` on the reply. The decoder is a small C library from Google. Runtimes usually **bundle** it: they copy the source or a compiled build into their own package, so every product ships and patches its own version.
+
+The bug itself is an **out-of-bounds write**, meaning the program writes bytes past the end of a buffer it owns. Node's advisory describes it this way: when the decoder met an invalid block switch, it reported "need more input" instead of a permanent format error. The streaming decoder then kept appending input bytes to an eight-byte internal buffer, so malformed data could write past its end.[^1] Google's own advisory lists the affected range as Brotli 1.0.3 through 1.2.0 and the fixed releases as 1.0.10, 1.1.1 and 1.2.1, published on October 22.[^2]
+
+That is the whole defect, and it is why the story is about distribution. One flawed C file got copied into a lot of places, and each place has its own owner, its own release schedule and its own version label.
+
+<Mermaid
+  caption="One upstream fix, many separate downstream releases. Each box is shipped and patched by a different project. Versions are from the vendors' own advisories."
+  label="Flow diagram. Upstream google/brotli fix released October 21 as 1.0.10, 1.1.1 and 1.2.1. It flows to Node.js 22.23.4, 24.22.1 and 26.12.1 on October 21, to .NET 8.0.33, 9.0.22 and 10.0.14 on October 25, to Bun 1.4.4, to PyPI brotli 1.2.1, to Envoy and to curl or Git for Windows builds, each separately"
+  code={`
+flowchart LR
+  U["google/brotli<br/>fix in 1.0.10, 1.1.1, 1.2.1<br/>Oct 21"] --> N["Node.js<br/>22.23.4 / 24.22.1 / 26.12.1<br/>Oct 21"]
+  U --> D[".NET runtime<br/>8.0.33 / 9.0.22 / 10.0.14<br/>Oct 25"]
+  U --> B["Bun 1.4.4"]
+  U --> P["PyPI brotli 1.2.1<br/>brotlicffi 1.2.1.0"]
+  U --> E["Envoy, ClickHouse,<br/>FFmpeg via libjxl, ..."]
+  U --> C["curl / libbrotlidec<br/>in other distributions"]
+`}
+/>
+
+## The version string does not tell you whether you are patched
+
+I downloaded Node 24.22.1 into a scratch folder, checked its SHA-256 against `SHASUMS256.txt` from nodejs.org, and compared it with the Node 24.14.1 installed on my machine.
+
+```
+v24.14.1  bundled brotli 1.2.0   (installed, vulnerable range)
+v24.22.1  bundled brotli 1.2.0   (patched)
+```
+
+Both print `process.versions.brotli` as `1.2.0`. Node's advisory does not say what the fixed build bundles, but the label evidently did not move with the fix. JFrog's write-up warns about exactly this: "the upstream version number alone is not always sufficient" to decide whether a copy is patched, in either direction.[^3]
+
+That breaks the obvious check. If you grep a dependency list for `brotli 1.2.0` and treat every hit as vulnerable, you flag patched Node builds, as the two lines above show. If you only accept `1.2.1` as safe, you flag them for the same reason. What works is the vendor's own fixed-version table: Node 22.23.4, 24.22.1 or 26.12.1 and later, .NET 8.0.33, 9.0.22 or 10.0.14 and later,[^4] and so on.
+
+## Nine places on one Windows PC
+
+I scanned `Program Files`, `Program Files (x86)`, `AppData\Local\Programs`, the global npm folder and the Bun folder: 8,396 files ending in `.exe`, `.dll`, `.node`, `.pyd` or `.so`, searching for the byte string `BrotliDecoderDecompress`, the decoder's entry point.[^8] Twenty-one files contained it. Node and Bun did not show up at all, so I added them by asking the runtimes directly.
+
+| Place | What I found | Patched? |
+|---|---|---|
+| Node.js 24.14.1 | `process.versions.brotli` is 1.2.0 | No, fixed in 24.22.1 |
+| Bun 1.4.3 | reported as affected, fixed in 1.4.4 (secondary source)[^6] | No |
+| Git for Windows | 7 files: `brotli.exe`, `libbrotlidec.dll` and two `libcurl` DLLs, each in two folders; its curl prints `brotli/1.2.0` | Cannot tell from the string |
+| .NET runtimes 6.0.35, 8.0.25, 10.0.10 | `System.IO.Compression.Native.dll` in each | 8 and 10 are below the fixed 8.0.33 and 10.0.14; 6.0 is not in Microsoft's table |
+| WSL settings app | its own copy of the .NET compression DLLs | Needs a rebuild by the vendor |
+| Logitech plugin service | its own copy of the .NET compression DLLs | Needs a rebuild by the vendor |
+| Microsoft Copilot app | `brotlidec.dll` | Version unreadable |
+| Intel CST service, HP print doctor | decoder function name inside the executable | Version unreadable |
+
+Microsoft's note about self-contained apps explains the two vendor rows: installing a newer runtime on the host does not update the runtime bundled inside an app, which has to be rebuilt and republished.[^4] On this PC the Node installer, the .NET runtimes and Git for Windows are three separate updates, and the vendor apps are out of my hands.
+
+This is a lower bound, and a soft one. Chromium-based apps, which include Chrome, Edge, VS Code and every Electron app, compile Brotli in statically with symbol names stripped, so a text search cannot see them. The scan counts files that mention the function, not independent builds, and a managed `System.IO.Compression.Brotli.dll` is likely a thin wrapper rather than a decoder. I also cannot read versions out of most of these files, which is why the last column has so many shrugs.
+
+## Not asking for Brotli does not protect you
+
+The usual comfort is "my client never requests `br`, so no server will send it." I tested that with a local server that records the `Accept-Encoding` header and always replies with a valid Brotli body plus `Content-Encoding: br`. Each client got one request with default settings.
+
+<Mermaid
+  caption="What the Node fetch() test did. The request carries no br. The reply carries one anyway, and the client decodes it using its bundled decoder."
+  label="Sequence diagram. Node fetch sends GET with Accept-Encoding gzip, deflate. The server replies 200 with Content-Encoding br and a Brotli body. fetch runs the body through the bundled Brotli decoder and returns the text hello brotli"
+  code={`
+sequenceDiagram
+  participant C as Node fetch()
+  participant S as Server
+  C->>S: GET / (Accept-Encoding: gzip, deflate)
+  S-->>C: 200 (Content-Encoding: br) + Brotli body
+  Note over C: decoder runs although br was never requested
+  C->>C: returns "hello brotli"
+`}
+/>
+
+| Client, default settings | Sends `br`? | Decodes a `br` reply anyway? |
+|---|---|---|
+| Node `fetch()` (24.14.1) | no (`gzip, deflate`) | **yes** |
+| Node `http.get` | no header | no, raw bytes |
+| Python `requests`, `httpx`, `aiohttp` + `brotli` package | yes | yes |
+| Python `urllib3` + `brotli` package | no (`identity`) | **yes** |
+| Same four, no `brotli` package | no | no (`aiohttp` raised HTTP 400) |
+| Python `urllib.request` | no | no |
+| Git's curl, no flag | no | no |
+| Git's curl `--compressed` | yes (`deflate, gzip, br, zstd`) | yes |
+| Windows `System32\curl.exe --compressed` | no (`deflate, gzip`) | no, no Brotli in this build |
+
+Two rows matter. `fetch()` is the built-in way to call an HTTP API in modern Node, and it decodes `br` without requesting it. `urllib3` with the `brotli` package announces `identity`, meaning "do not compress", and still decodes when the server disobeys. In both cases the server, not the client, decides whether the decoder runs, so anything the client fetches from a hostile or compromised server is in scope. The Python advisories say the same: the package only has to be installed, and requests, urllib3, httpx and aiohttp unpack Brotli replies without your code importing it.[^7]
+
+The other direction exists too. Imperva's demonstration used Express 5 or body-parser 2 unpacking an uploaded Brotli request body, and it notes that a bare Node HTTP server does not decode request bodies by itself.[^5] The two directions have different attackers: a response needs a server you call, a request body needs a client that can reach your server.
+
+The curl rows hold one more surprise for this machine. `curl` resolves to two different programs here, Git's build with Brotli and Windows' own `curl.exe` without it. Which one a script gets depends on `PATH` order.
+
+## How worried to be
+
+The evidence is thinner than the headlines suggest, and it is also not nothing.
+
+Imperva ran attacker-supplied code on one target: the official Node 24.22.0 image on Linux arm64, through both `fetch()` and an Express body, and the same input was rejected by 24.22.1. Execution "took multiple attempts in our setup", and Imperva says it did not test every Node build.[^5] Microsoft's advisory lists information disclosure, denial of service and elevation of privilege for .NET, not code execution, and says neither request decompression nor automatic response decompression is on by default.[^4] JFrog crashed a ClickHouse server and hung pyarrow, and described reaching control of the instruction pointer in FFmpeg without claiming a working exploit.[^3] A secondary news report I read on the day said no attacks in the wild had been reported.[^6]
+
+So a crash or memory leak is the reasonable worst case for most code, and code execution is demonstrated on one build with some luck. That is a reason to patch on your normal fast path, not a reason to ignore it, particularly for services that decompress Brotli from the public internet.
+
+## Trade-offs and what I did not test
+
+- **One PC, Windows 11, one afternoon.** Linux containers carry their own copies in different places. Their counts will differ.
+- **The scan is a text search.** Static, stripped copies are invisible to it, and a hit proves the function name is present, not that the code is reachable or old.
+- **I did not read versions for most hits.** Only Node, curl and the .NET runtimes expose one cheaply, and the Node example shows that a version string can mislead anyway.
+- **I never fed a malformed stream to anything.** I cannot say from my own measurement whether any of these builds crash. I rely on the advisories for that.
+- **The `fetch()` decode test ran on 24.14.1 only.** The patched 24.22.1 is documented as rejecting the bad input,[^5] but I did not run a decode test on it.
+- **The `brotli` package in my test venv was 1.2.1, already fixed.** The request headers and decode behaviour do not depend on that, but I did not install 1.2.0 to compare.
+- **I have not updated anything on this machine.** The table describes it as it is today.
+
+## Takeaways
+
+- Treat a library bug in a compression format as a bug in every program that unpacks that format. Make the list of programs before you start patching.
+- Do not trust the bundled version string. Look up the vendor's fixed-version table, and for Node check `process.version` against 22.23.4, 24.22.1 and 26.12.1.
+- "My client doesn't send `br`" is not a defence for `fetch()` or `urllib3`. A server can send what it likes, and these clients decode it.
+- If a Python service does not need Brotli, uninstalling `brotli` and `brotlicffi` makes the common clients fall back to gzip and deflate, which my test confirmed for the decode behaviour.[^7]
+- Self-contained apps and vendor installers need their own update. Ask the vendor, or find the DLLs and check.
+
+## References
+
+[^1]: Node.js, [October 2026 Security Releases](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases). CVE-2026-111497 entry: affected lines 22.x, 24.x and 26.x, the "need more input" root cause and the eight-byte buffer, credit to OpenAI Codex Security, fixed in v22.23.4, v24.22.1 and v26.12.1. The page does not state the bundled Brotli version of the fixed releases.
+[^2]: GitHub Advisory Database, [GHSA-9v8h-qqgm-4m35](https://github.com/advisories/GHSA-9v8h-qqgm-4m35), published 2026-10-22: Brotli 1.0.3 through 1.2.0 affected, update to 1.0.10, 1.1.1 or 1.2.1; PyPI `brotli` below 1.2.1 and `brotlicffi` below 1.2.1.0. Release dates on [google/brotli releases](https://github.com/google/brotli/releases) (v1.0.10, v1.1.1 and v1.2.1, all on 21 Oct). The upstream fix commit, `0ed4268` ("Detect and report invalid stream earlier"), changes `c/dec/decode.c`; its diff does not explain the memory-safety impact, which comes from the Node advisory.
+[^3]: JFrog Security Research, [Brotli2Shell: Beyond Node(2Shell) and HTTP(2Shell)](https://research.jfrog.com/post/brotli2shell-beyond-node2shell-and-http2shell/). Root cause, per-ecosystem exposure (Node, pyarrow, Python clients, .NET, FFmpeg, ClickHouse), the caution on version numbers, and the detection tooling.
+[^4]: Microsoft, [.NET security announcement 494](https://github.com/dotnet/announcements/issues/494) (affected and patched runtime and SDK versions, and the statement that request decompression and automatic response decompression are off by default) and [.NET October 2026 out-of-band security updates](https://devblogs.microsoft.com/dotnet/dotnet-october-2026-oob-security-updates/) (released October 25; self-contained apps must be rebuilt and republished). Neither mentions .NET 6.
+[^5]: Imperva, [Node2Shell: From Brotli Data to Remote Code Execution](https://www.imperva.com/blog/node2shell-from-brotli-data-to-remote-code-execution/). Node 24.22.0 on Linux arm64 vulnerable, 24.22.1 rejecting the same input; `fetch()` and Express 5 / body-parser 2 paths; "execution took multiple attempts in our setup"; not every build tested. I read it through a summarising fetch tool, so check details against the original.
+[^6]: The Hacker News, [Brotli decoder flaw behind Node.js RCE](https://thehackernews.com/2026/10/brotli-decoder-flaw-behind-nodejs-rce.html), updated October 26. Secondary source, used for the Bun fixed version (1.4.4), the Envoy and Python scope, and the absence of reported attacks at the time. I could not confirm the Bun fix from Bun's own release page, which did not mention Brotli.
+[^7]: Python Packaging Advisory Database entries listed by the article above, [PYSEC-2026-4322](https://github.com/pypa/advisory-database/blob/main/vulns/brotli/PYSEC-2026-4322.yaml) and [PYSEC-2026-4323](https://github.com/pypa/advisory-database/blob/main/vulns/brotlicffi/PYSEC-2026-4323.yaml), for the "installed package plus auto-decoding client" exposure and the uninstall workaround. The client behaviour in the table is my own measurement.
+[^8]: Measurement script: [brotli-exposure-probe.py](/files/brotli-exposure-probe.py). Python 3.12 standard library for the harness, which builds two throwaway virtual environments with requests 2.34.2, urllib3 2.8.0, httpx 0.28.1 and aiohttp 3.14.5 (one also with brotli 1.2.1). Windows 11, Node 24.14.1, curl 8.21.0 (two builds), .NET runtimes 6.0.35, 8.0.25 and 10.0.10. Run on 2026-10-26. It never creates malformed Brotli data. Node 24.22.1 was downloaded for the comparison and its archive matched the published SHA-256.
