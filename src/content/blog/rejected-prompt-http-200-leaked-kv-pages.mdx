@@ -1,0 +1,159 @@
+---
+title: 'A Rejected Prompt Got HTTP 200 and Other Customers'' Data: A KV Cache Leak Simulation'
+description: 'I modeled the KV-cache page reuse behind Cloudflare''s GLM-5.3 leak. A fresh pool leaks nothing, a warm one hands over other customers'' pages, and every reply still returns HTTP 200.'
+pubDate: 2026-10-27
+tags: ['llm', 'security', 'systems', 'architecture', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+import Figure from '../../components/Figure.astro';
+
+Yesterday Cloudflare published a post-incident report on a bug in its Workers AI service. For about two weeks, some replies from the GLM-5.3 model contained text from other customers' recent requests. 155 replies were affected, all for prompts longer than 681,280 tokens, and the report says the requests that triggered it looked like ordinary long-context use.[^1]
+
+The detail that stuck with me is a small one. The oversized prompts should have been refused. Instead the server answered HTTP 200 and streamed a fluent reply, and no error frame appeared anywhere. Cloudflare says its pre-launch tests checked status codes and performance but not what the output said.[^1] A leak that returns 200 is invisible to everything that watches for failures.
+
+I cannot run Cloudflare's stack, and I do not have the GPUs it uses. What I can do is rebuild the mechanism from the report, run it as a small simulation, and ask the questions the report leaves open. How much of a reply is someone else's data? Does it depend on how long the server has been up? Would a test have caught it? Every number below comes from my model, not from Cloudflare's systems, and I will say so again where it matters.
+
+## The vocabulary, briefly
+
+A language model generates text one token at a time, and for each new token it looks back at the **KV cache**: stored intermediate values for every earlier token in the conversation. Recomputing them each time would be far too slow, so the server keeps them in GPU memory. That memory is carved into fixed-size **pages**, and a request is handed as many pages as its prompt needs.
+
+Big deployments often split the work across machines. **Prefill** processes the whole prompt in one go and fills the cache. **Decode** then generates the reply from it. In "disaggregated" mode these two run on different GPUs, so the prefill side must send its pages across to the decode side.
+
+One more fact matters here. The report notes that KV pages are not zeroed when a request finishes and the page is reused.[^1] That is a common choice, since clearing memory costs time. It means a new request's pages contain whatever the previous owner wrote, until the new request overwrites them.
+
+## What went wrong, as reported
+
+Cloudflare's report and an upstream SGLang bug report describe the same sequence, which I have drawn below.[^1][^2]
+
+<Mermaid
+  caption="The reported path of an oversized prompt in prefill/decode disaggregated mode. The one-page transfer is the whole bug: decode reserves pages for the full prompt but only the first page was ever written by this request."
+  label="Sequence diagram. A client sends a prompt larger than the prefill pool. The scheduler rejects it and swaps in a one-token placeholder. The admission queue does not check for rejection and admits it. Prefill writes one page and sends it. Decode reserves pages for the full prompt, reads the stale pages left by earlier requests, and returns HTTP 200"
+  code={`
+sequenceDiagram
+  participant C as Client
+  participant S as Scheduler
+  participant P as Prefill GPU
+  participant D as Decode GPU
+  C->>S: prompt of 800,000 tokens
+  Note over S: pool holds 681,280, so reject
+  S->>S: swap prompt for 1-token placeholder
+  S->>P: admit (queue checks "finished", not "rejected")
+  P->>D: send 1 page, mark transfer complete
+  Note over D: reserves pages for all 800,000 tokens
+  D->>D: reads page 1 (new) + remaining pages (stale)
+  D-->>C: 200 OK, fluent reply
+`}
+/>
+
+Two things had to be true at once. The deployment advertised a 1,048,576-token context window while the prefill cache pool held only 681,280 tokens, a gap the report says was known before launch.[^1] And in disaggregated mode, the queue that admits requests asked whether a request was finished, not whether it was rejected, so a rejected request kept going. On a single machine the same rejection produced a normal client error.
+
+The upstream issue had been filed on July 6 by someone running a different model and a smaller pool, with the same diagnosis: the decode side allocated space for the full prompt and received one token's worth of cache, so it decoded from uninitialized memory.[^2] That issue was closed by a stale-issue bot on September 5, with no maintainer comment on the page. The fix PR that Cloudflare proposed upstream was later closed in favor of cleaner changes.[^3]
+
+## What I modeled
+
+The simulator is a Python script of about 200 lines, and it takes close to three minutes to run.[^4] It keeps a pool of 32,768 pages of 64 tokens each. Background requests arrive with log-normal prompt lengths (median 8,000 tokens), hold their pages for a random time, and release them without clearing. Every page remembers which request last wrote it, and each request belongs to one of 200 simulated customers. Then I inject one oversized request that follows the reported path: it writes a single page, reserves pages for its full length, and I look at who owns the pages it would read.
+
+Several choices are mine, not Cloudflare's. The page size (64 tokens happens to divide 681,280 evenly), the decode pool size, the traffic shape, and above all the order in which free pages are handed out. I do not know which allocator SGLang uses in this path, so I tried three. Treat the absolute percentages as illustrations. The shapes are what I would defend.
+
+Each measurement uses a fresh simulated server with its own random seed (30 per row, 100 for the last one), so one victim's pages never leave residue for the next.
+
+## Result 1: a fresh server leaks nothing
+
+The first question was whether the timing matters. A pool that has never served traffic holds no one's data. So I warmed the pool up for a varying number of steps (at most one new request per step), then injected the oversized prompt. The "content check" in the chart is a test that looks at whose data the oversized request would read, the sort of canary-marker test Cloudflare says it used to validate its fix.
+
+<Chart
+  type="bar"
+  height={320}
+  caption="How a pool's history changes what an oversized request reads. Simulated, LIFO allocator, 50% utilization, 30 independent servers per bar. The x axis is not to scale. <b>Modeled</b>, not measured on any real system."
+  label="Bar chart. With 0 or 1 warm-up steps no run leaks and a content check detects 0 percent. At 20 steps 53 percent of runs are detected and 1.5 percent of the context is foreign. At 100 steps 87 percent are detected and 12.7 percent is foreign. At 500 steps all runs are detected and 42.9 percent is foreign. At 3000 steps all are detected and 58.8 percent is foreign"
+  labels={['0 steps', '1', '5', '20', '100', '500', '3,000']}
+  series={[
+    { name: 'Runs where a content check would flag it (%)', data: [0, 0, 3, 53, 87, 100, 100] },
+    { name: 'Share of the reply\'s context that is foreign (%)', data: [0, 0, 0.1, 1.5, 12.7, 42.9, 58.8] },
+  ]}
+  yTitle="Percent"
+  format="plain"
+/>
+
+Right after startup, the bug is invisible even to a check that looks at content: the pages are untouched, so there is nothing to leak. After a few hundred requests it is reliably there. Cloudflare says its pre-launch tests did not validate output content, so this does not explain why they passed.[^1] But it does mean a test run on a quiet, freshly started server can pass for a second reason, and the bug can be real the whole time.
+
+## Result 2: it still looks like a success
+
+On a warm pool I ran 100 oversized requests, one per simulated server. All 100 got a normal 200 and a reply built from pages that were not theirs. The foreign share of the context ranged from 15% to nearly 100%, depending on how many pages the allocator handed out from untouched memory. The median reply drew on 24 different customers' pages, with a range of 4 to 49.
+
+That is the part a status-code test cannot see. Nothing in the stale pages is flagged as stale. To the decode step they are valid values, so the attention math runs, a token comes out, and the next one follows. The reply may read as slightly off-topic or it may quote another customer's text. Either way the response headers look like every healthy response.
+
+## Result 3: the allocator decides who is exposed
+
+The report says the leaked data came from other customers' *recent* requests.[^1] My model suggests why that phrase is plausible, and also that it depends on a detail nobody has published for this path.
+
+<Chart
+  type="bar"
+  height={300}
+  caption="How many distinct customers' pages an oversized request read, by the order free pages are reused. Simulated, mean of 30 servers per bar, 3,000 warm-up steps. <b>Modeled</b>; the real allocator's policy is an assumption I could not check."
+  label="Bar chart of distinct customers exposed per oversized request. Last-freed-first: about 22 at 30 percent utilization and 24 at 60 percent. First-freed-first: about 53 and 54. Random: about 185 and 183"
+  labels={['Last freed, first reused (LIFO)', 'First freed, first reused (FIFO)', 'Random page choice']}
+  series={[
+    { name: 'Pool 30% full', data: [22, 53, 185] },
+    { name: 'Pool 60% full', data: [24, 54, 183] },
+  ]}
+  yTitle="Distinct customers exposed"
+  format="plain"
+/>
+
+With a last-in-first-out free list, the oversized request gets the most recently released pages, so the stale data is fresh: the median source request had finished only 174 to 224 completions earlier. With first-in-first-out, every page it reads is stale (the free list is old enough that none were never-written) and the sources span about 54 customers. With random page choice, it spans nearly 200. The mechanism is the same, but the blast radius changes by an order of magnitude based on a line of allocator code.
+
+## Why status-code tests pass, and what would have caught it
+
+The simplest way to see the gap is to list the checks and what each would have shown in my model.
+
+| Check | Sees the leak? | Why |
+|---|---|---|
+| HTTP status of the reply | No | Always 200 |
+| Latency and throughput | Not in this model | Decode does the same work either way (I did not model timing) |
+| Reply parses as text | No | Stale values decode into normal tokens |
+| Content check against known canary data, on a **warm** pool | Yes | Foreign pages hold other requests' markers |
+| Same check on a **cold** pool | No | Nothing written yet |
+| Test the oversized prompt expects a 400 | Yes | The one test that names the actual contract |
+
+The last row is the cheapest. "A prompt larger than the pool must be refused" is a plain behavioral requirement, and a test for it does not care about page contents at all. Cloudflare's report says the engine was assumed to handle the mismatch gracefully, and the tests only confirmed that something came back.[^1]
+
+## The fixes, and what each one buys
+
+Cloudflare describes several changes. I did not run these through the simulator. The "in my model" column is what follows from how each one works, so read it as reasoning, not as a measurement.[^1]
+
+| Fix | In my model | Cost or catch |
+|---|---|---|
+| Pool at about twice the context, so a valid prompt always fits | Oversized prompts never get rejected in this path, so no stale read | Does nothing for the next mismatch, and costs memory |
+| Reject at the admission queue, with the original error | Zero pages read, client gets a 400 | Code change in the engine, tested against the reproduction |
+| Zero pages when they are released | Foreign share drops to 0 | One extra write per freed page, which on real hardware I did not measure |
+| Per-page tags checked before decode reads | Foreign reads become errors | Cloudflare's prototype reported under 1% overhead, then was disabled for reliability reasons[^1] |
+
+The ordering matters more than the list. Fixing the config closes this door; rejecting at admission closes the class of bug; zeroing or tagging pages turns the next unknown bug from a leak into a crash or an error. Cloudflare's report lists all of these, and says zeroing pages on release is still an unmerged draft upstream.[^1]
+
+## Trade-offs and what I cannot claim
+
+- **This is a model.** I rebuilt a mechanism from a report and a bug thread. I did not read SGLang's allocator, and the policies I compared are guesses. A real deployment may hand out pages in an order I did not try.
+- **The percentages are mine.** The 24 customers, the 59% foreign share and the 87% detection at 100 steps depend on traffic, pool size and utilization I invented. What carries over is the direction: cold pools do not leak, warm ones do, and allocator order sets the exposure.
+- **I cannot say what was exposed.** Cloudflare's post does not state what the 155 replies contained, how many customers were involved beyond "a small number", or whether the count is exhaustive.[^1] My model cannot fill that gap.
+- **Zeroing is not free.** Clearing pages on release adds memory traffic on the hot path. In an engine tuned for throughput, that is the reason it is not the default.
+- **A shared cache is a shared risk.** Several commenters on the Hacker News thread argue that cache sharing between tenants carries this kind of risk by nature, and that sensitive workloads belong on non-shared hosts.[^5] That is an opinion from the thread, not a finding.
+
+## Takeaways
+
+- A request that should have been rejected and returned 200 is the hardest kind of bug to find, because success and the leak look identical from outside. Test the refusal path on purpose.
+- Pages that are reused without being cleared turn every ownership mistake into a data exposure. Whoever owns the allocator owns the isolation guarantee.
+- In my model a freshly started server leaks nothing, so a test that passes on a quiet cold system tells you less than it seems to.
+- Which pages get reused first changed the number of customers exposed by an order of magnitude. If you run a shared serving stack, find out what your allocator does.
+- When two configured limits disagree (here, 1,048,576 against 681,280), a known gap deserves a test that fails loudly, not an assumption that the engine copes.
+
+## References
+
+[^1]: Cloudflare, [Cross-request KV cache exposure in the GLM-5.3 Workers AI model](https://blog.cloudflare.com/kv-cache-exposure-remediation/), published October 26, 2026. All incident dates, the 155-response count, the 681,280 and 1,048,576 token figures, the root cause, the fixes and the page-tag prototype overhead come from this post. I read it through a fetch summary, not a line-by-line reading of the original.
+[^2]: SGLang, [issue #30233](https://github.com/sgl-project/sglang/issues/30233), opened July 6, 2026 against SGLang 0.5.11 with GLM-5.2-FP8. Describes the one-token placeholder, the one-token KV transfer and decode from uninitialized cache. Closed as inactive on September 5, 2026 with no maintainer comments visible.
+[^3]: SGLang, [pull request #38704](https://github.com/sgl-project/sglang/pull/38704), "respect admission aborts before KV handoff". Closed October 10, 2026, with a maintainer noting that cleaner fixes landed in #38935 and #43562.
+[^4]: Simulation script: [kv-page-leak-sim.py](/files/kv-page-leak-sim.py). Python 3.12.10, NumPy 2.5.3, Windows 11, fixed seeds. It models the reported mechanism only. Page size, decode pool size, traffic shape and allocator policies are my assumptions.
+[^5]: Hacker News, [discussion of the Cloudflare report](https://news.ycombinator.com/item?id=50252159). Quoted as commenters' opinions, not verified claims.
