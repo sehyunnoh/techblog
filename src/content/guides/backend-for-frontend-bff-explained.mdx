@@ -1,0 +1,145 @@
+---
+title: 'Backend for Frontend (BFF) Explained: What It Is, When It Pays Off, and What It Costs'
+description: 'A BFF gives each client its own server-side backend. This guide covers the problem it solves, a runnable demo with measured request counts and bytes, its security role, and when to skip it.'
+pubDate: 2026-10-27
+updatedDate: 2026-10-27
+tags: ['backend', 'architecture', 'web', 'tutorial']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+
+A **Backend for Frontend**, or **BFF**, is a small server that sits between one kind of client (a phone app, a web app, a smart-TV app) and the services behind it, and exists only to serve that client. Each client type gets its own. The idea sounds like extra layers for their own sake, and sometimes it is. This guide explains where it comes from, what it actually does, a small experiment I ran to put numbers on the claim, and the cases where you should not build one.
+
+## Where the idea came from
+
+Phil Calçado described it in 2015, looking back at SoundCloud around 2014. The company had split its monolith into services, but the web app and the new iOS app both talked to one generic public API. Drawing a single profile screen took many requests, which hurt on slow mobile networks, and every change to the shared API needed coordination between teams. Their fix was to give each client its own backend, owned by the team that built the client, so a screen could fetch one resource instead of many.[^1]
+
+Sam Newman later documented it as a pattern, based on what he saw at SoundCloud and at REA.[^2] Microsoft's Azure Architecture Center describes the same pattern and credits Newman.[^3]
+
+## The problem it solves
+
+Start with one backend and one web UI. A mobile app arrives. It has a smaller screen, a slower network, and different needs, so people start bending the shared backend to fit both. Both clients now depend on one deployable thing, which has to satisfy both. Requests from one UI team have to be checked against the other's.[^3]
+
+<Mermaid
+  caption="Left: two clients share one general-purpose API and every change has to suit both. Right: each client has its own BFF, which calls the same downstream services and shapes the answer for its own screen."
+  label="Two architecture diagrams. Left: a web client and a mobile client both call one shared API, which calls the services. Right: a web client calls a web BFF and a mobile client calls a mobile BFF, and both BFFs call the same services"
+  code={`
+flowchart LR
+  subgraph After
+    W2["Web app"] --> BW["Web BFF"]
+    M2["Mobile app"] --> BM["Mobile BFF"]
+    BW --> S2["Services"]
+    BM --> S2
+  end
+  subgraph Before
+    W1["Web app"] --> API["One shared API"]
+    M1["Mobile app"] --> API
+    API --> S1["Services"]
+  end
+`}
+/>
+
+The BFF is not a rename of the shared API. Its defining feature is ownership and focus: it is tightly aimed at one user interface and is usually run by the same team that builds that interface.[^2] That is what removes the cross-team queue.
+
+## What a BFF does, and what it should not
+
+The work that belongs in a BFF is the work that only one client cares about:
+
+- **Aggregation.** Call several services and merge the answers, so the client makes one request.
+- **Shaping.** Return exactly the fields the screen shows, in the form the client wants.
+- **Client-specific behavior.** Pagination style, how many items fit, what to cache, whether to batch.
+- **Session handling for browsers.** More on this below.
+
+What does not belong is anything every client needs. The Azure guidance is explicit that cross-cutting features such as monitoring and authorization should be handled elsewhere, for example by a gateway.[^3] The BFF should hold client-specific logic and little else. Business rules belong in the services.
+
+## One experiment: what one call instead of three buys
+
+Claims about BFFs tend to be about fewer requests and smaller payloads. I wanted to see how big those effects are in a toy case, and which part of the gain survives realistic conditions.
+
+The script starts three small services (profile, orders, recommendations) that return deliberately verbose JSON, as a general-purpose API would.[^4] A mobile home screen needs a name, an avatar, the three newest orders and five recommendations. The recommendations depend on a "segment" field in the profile, so the client cannot ask for them until the profile has arrived. I built three variants:
+
+1. **direct**: the client calls the services itself. Profile first, then orders and recommendations in parallel.
+2. **bff-m**: one call to a mobile BFF, which does the same fan-out server side and trims the result to what the screen shows.
+3. **bff-d**: one call to a desktop BFF that returns a richer payload (ten orders, twelve recommendations, more fields).
+
+Each service takes 15 ms to answer, and I simulate the client's network as a fixed round-trip time (RTT) per sequential request, set to 0, 80 and 250 ms. Those delays are `time.sleep` calls, not a real network. What is real is the number of requests and the number of bytes. The gzip column is zlib level 6, a stand-in for what a web server would send.
+
+| Variant | Client requests | JSON bytes | gzip bytes |
+|---|---|---|---|
+| direct | 3 | 42,946 | 6,671 |
+| mobile BFF | 1 | 611 | 234 |
+| desktop BFF | 1 | 9,493 | 1,746 |
+
+<Chart
+  type="bar"
+  height={300}
+  caption="Median time to build the home screen over 30 runs, by simulated client round-trip time. The gap between direct and BFF is close to one round trip, because the direct client needs two sequential steps. <b>Simulated delays, real request counts.</b>"
+  label="Bar chart of median screen-build time. At 0 ms RTT: direct 35 ms, mobile BFF 37 ms, desktop BFF 41 ms. At 80 ms RTT: direct 203, mobile BFF 123, desktop BFF 123. At 250 ms RTT: direct 543, mobile BFF 294, desktop BFF 296"
+  labels={['RTT 0 ms', 'RTT 80 ms', 'RTT 250 ms']}
+  series={[
+    { name: 'Direct (3 requests)', data: [35, 203, 543] },
+    { name: 'Mobile BFF (1 request)', data: [37, 123, 294] },
+    { name: 'Desktop BFF (1 request)', data: [41, 123, 296] },
+  ]}
+  yTitle="Median milliseconds"
+  format="plain"
+/>
+
+Three things to take from it, and one warning.
+
+- **The bytes shrink a lot, but partly because I made them.** My services return fat objects with fields the screen never shows, and my BFF drops them. With gzip the gap narrows from roughly 43 KB against 0.6 KB to 6.7 KB against 0.2 KB. A real API may be leaner or fatter than mine.
+- **The time saving is about one round trip, not a magic number.** At 80 ms the BFF finished in 123 ms against 203 ms. The 80 ms difference is exactly the extra sequential step the direct client needs because of the segment dependency. If the three calls had been independent, a client could fire them in parallel and pay one RTT either way.
+- **With no network delay, the BFF is slower.** At 0 ms the BFF took 37 to 41 ms against 35 ms, because the request now makes an extra hop through another process. That is the cost side of the ledger, small here but never zero.
+- **Warning.** This is a toy: three services, one machine, no failures, no auth, no contention. It shows the shape of the trade, not what your system will do.
+
+## The security role: tokens stay on the server
+
+For browser apps the BFF has a second job that has nothing to do with payload size. The IETF's current best practice for OAuth in browser-based apps, RFC 10017, describes the BFF as a server-side component that acts as the OAuth client. It holds the tokens, gives the browser a cookie-based session, and attaches the access token when forwarding requests to APIs, so the browser never receives a token that script could steal.[^5] The RFC ranks this architecture as the most secure of the three it describes.
+
+Cookie handling is spelled out. The `Secure` and `HttpOnly` flags are required, and `SameSite=Strict` and the `__Host-Http-` name prefix are recommended, along with a defense against cross-site request forgery.[^5] I walk through the mechanics in [the OAuth 2.0 PKCE guide](/guides/oauth2-authorization-code-pkce/). If your main reason to build a BFF is auth, read that first, because it changes the design: the BFF now carries session state and must be treated as a security boundary.
+
+## When it pays off, and when it does not
+
+It tends to pay off when:
+
+- Clients differ in what they need. Newman's strongest case is "specific functionality for a mobile UI or third party."[^2]
+- The UI team is separate from the teams owning the downstream services, so a shared API becomes a queue.
+- A screen needs several calls, some of them dependent, over a slow network.
+- You are building a browser app that handles sensitive data and want tokens out of the page.
+
+It tends not to pay off when:
+
+- Only one client exists, or the clients make the same or similar requests. Microsoft lists both as cases where the pattern might not suit.[^3]
+- The web UI needs little server-side aggregation. Newman would use one for a web-only UI only with significant aggregation or server-side rendering.[^2]
+- You already have GraphQL with client-specific resolvers, or an API gateway that covers the need. Microsoft's page names both as cases where a BFF may add little.[^3] I did not compare them here.
+- Running an extra service is expensive for your team. Each BFF has its own life cycle, deployment and security needs.[^3]
+
+## What goes wrong
+
+**Duplication.** Two BFFs will contain similar code, and that is expected. SoundCloud found their BFFs duplicating logic for similar screens and treated that as a sign of a missing domain concept, which they then moved into a service.[^1] Newman suggests being patient: he would wait for the third use before abstracting, and he warns that shared client libraries couple the BFFs together.[^2]
+
+**Turning back into one big API.** Merging BFFs into a single aggregating edge API has, in his words, repeatedly produced bloated code that has too many concerns.[^2] The more client types share a BFF, the stronger the pull to let it grow.[^2] One BFF per experience is the strict version of the rule.
+
+**Cross-cutting creep.** Putting authorization, rate limiting and logging in every BFF is convenient and adds latency and repeated code. Both Newman and Microsoft lean toward handling these in a layer above.[^2][^3]
+
+**Partial failure.** A BFF that calls five services will sometimes get four answers. It has to decide what to return, and the client has to render partial data. Newman calls this out as part of the design.[^2] My demo does not test it.
+
+**Ownership drift.** A BFF works because one team owns both the client and its backend. If it ends up owned by a separate backend team, you have rebuilt the queue it was meant to remove.
+
+## A short checklist
+
+- Does more than one client type exist, and do they need different shapes of data? If not, stop here.
+- Is the pain in the number of calls, the size of payloads, or the coordination between teams? A BFF fixes the first two and the third only if the client team owns it.
+- Could a gateway or GraphQL layer cover the need with less to operate?
+- Who owns each BFF, and who will be paged for it?
+- Is auth the reason? Then treat the BFF as a security component from day one.
+
+## References
+
+[^1]: Phil Calçado, [The Back-end for Front-end Pattern (BFF)](https://philcalcado.com/2015/09/18/the_back_end_for_front_end_pattern_bff.html), September 18, 2015. SoundCloud's experience around 2014, the generic-API problem, and the duplication lesson.
+[^2]: Sam Newman, [Backends For Frontends](https://samnewman.io/patterns/architectural/bff/). Definition, one BFF per experience, when to use and avoid it, duplication, bloat, cross-cutting concerns and partial failure.
+[^3]: Microsoft, [Backends for Frontends pattern](https://learn.microsoft.com/en-us/azure/architecture/patterns/backends-for-frontends), Azure Architecture Center. Context, considerations, and when the pattern might not be suitable.
+[^4]: Demo script: [bff-demo.py](/files/bff-demo.py). Python 3.12.10, standard library only, Windows 11, about 50 seconds to run. Service time and client round trips are simulated with `time.sleep`; request counts and byte sizes are real. Payload shape, field counts and which fields the BFFs keep are my choices.
+[^5]: IETF, [RFC 10017, OAuth 2.0 for Browser-Based Applications](https://www.rfc-editor.org/rfc/rfc10017.html) (BCP 212, August 2026), Section 6.1 on the Backend for Frontend pattern and its cookie requirements. I read the BFF section through a fetch summary, not line by line.
