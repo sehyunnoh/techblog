@@ -1,0 +1,145 @@
+---
+title: 'How an LLM Works, Part 1: A Next-Word Function and the Neural Network Inside It'
+description: 'Start from the idea that a language model is a function from text to next-word probabilities, then build the simplest neural network by hand and count its 13,002 parameters.'
+pubDate: 2026-10-27
+updatedDate: 2026-10-27
+tags: ['ai', 'llm', 'tutorial', 'deep-dive']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+This is the first of a series on how a large language model (LLM) works, from a single artificial neuron up to the transformer. Each part stands alone and each one comes with something I ran myself, so the claims are numbers and not just diagrams. The series follows the order in which the ideas depend on each other. This part covers two things: what an LLM is for, and what a neural network is made of.
+
+If you would rather watch than read, 3Blue1Brown's deep learning videos cover the same ground with far better animation.[^1] I link them where they match. The text here is written to be read without them.
+
+## What an LLM does
+
+An LLM is a function. You give it some text, and it gives back a probability for every possible next piece of text. That is the whole interface. It does not return a sentence, it returns something like "after these words, 12% chance of *lunch*, 9% chance of *is*, 4% chance of *salad*", for every entry in its vocabulary.
+
+A sentence comes from using that function in a loop. Pick one of the likely next words, append it to the text, and feed the longer text back in. Repeat until you have a paragraph.
+
+<Mermaid
+  caption="The generation loop. The model itself only does the step in the middle; everything else is ordinary code wrapped around it."
+  label="Flowchart. The text so far goes into the model, which outputs a probability for every possible next word. One word is picked from those probabilities and appended to the text. The longer text goes back into the model."
+  code={`
+flowchart LR
+  A["Text so far"] --> B["Model: probability for every possible next word"]
+  B --> C["Pick one word, at random weighted by probability"]
+  C --> D["Append it to the text"]
+  D --> A
+`}
+/>
+
+A chatbot is the same loop with a framing trick. The text so far is a transcript, "User: ... Assistant:", and the model is asked to continue it. The reply you see is the continuation.
+
+### A next-word function you can build in ten minutes
+
+To make this concrete without any neural network, I built the crudest version I could think of. It reads text, counts which word follows each pair of words, and uses those counts as probabilities. The text is the Markdown of this blog's own posts and guides: 65 files, 115,608 tokens (words and punctuation marks), 7,130 distinct ones.[^2]
+
+Ask it what follows "a large", and the counts say this:
+
+<Chart
+  type="bar"
+  height={300}
+  format="percent"
+  caption="Probability of the next word after 'a large', from counting in 12 occurrences in this blog's text. It is already a probability distribution, with a clear favorite and a long tail."
+  label="Bar chart of next-word probability after 'a large'. part 16.7 percent, array 8.3, body 8.3, number 8.3, prefill 8.3. Six more words share the remaining 50 percent."
+  labels={['part', 'array', 'body', 'number', 'prefill']}
+  series={[{ name: 'probability', data: [16.7, 8.3, 8.3, 8.3, 8.3] }]}
+  yTitle="probability of next word"
+/>
+
+Eleven different words followed "a large" in the text, so the table has eleven entries, and "part" leads with 16.7%. Run the loop from "a large" with three different random seeds and you get three different continuations:
+
+```
+seed 1: a large share of the steps above a long output costs time roughly linearly , regardless
+seed 2: a large body and immediately sends the same two long windows alone labels ' ' ,
+seed 3: a large part of it by . percent is foreign labels ' ' , data .
+```
+
+Always taking the most likely word instead gives the same output every time: "a large part of the same thing , and the one that must reconcile details across". It reads like English for about four words and then drifts, which makes sense. The function only looks at the last two words, so it has no idea what the sentence is about.
+
+That is the real distance between this toy and an LLM. The loop is identical. What differs is the function in the middle. A lookup table of word pairs cannot generalize: a pair it never saw has no entry, and this one has 57,100 distinct pairs for a corpus of 115,608 tokens, which is only about two examples per pair. An LLM replaces the table with a neural network, which can give sensible probabilities for sentences it has never seen. Real LLMs also look at thousands of words of context, not two.
+
+One more observation from the same loop explains something people notice about chatbots. The randomness lives in the "pick one word" step, not inside the model. Given the same text, the model returns the same probabilities every time. Different answers to the same question come from different random draws on top.
+
+## What a neural network is made of
+
+The classic first example is recognizing a handwritten digit. The image is 28 by 28 pixels, and each pixel has a brightness between 0 (black) and 1 (white). The network takes in those 784 numbers and returns 10 numbers, one per digit, where the largest is its answer.[^3]
+
+The building block is the **neuron**, and despite the name it is just a container for one number. Neurons are arranged in **layers**. The input layer holds the 784 pixel values. The output layer holds 10 numbers, one for each digit. Between them sit **hidden layers**, whose size is a free choice. The standard demo uses two hidden layers of 16 neurons, a number picked because it fits on a slide, not because it is optimal.
+
+### One neuron's job
+
+Every neuron outside the input layer computes its number from the previous layer in three moves:
+
+1. Multiply each number in the previous layer by its own **weight**.
+2. Add them all up, then add one more number called the **bias**.
+3. Squash the result into the range 0 to 1 with an **activation function**.
+
+As a formula: `new value = activation(w1·a1 + w2·a2 + ... + wn·an + b)`.
+
+A weight says how much this neuron cares about one particular input, and in which direction: a large positive weight means "more of that input makes me fire", a negative one means "more of that input shuts me up". The bias sets the threshold. With a bias of -10, the weighted sum has to exceed 10 before the neuron does anything.
+
+If you picture the 784 weights of a first-layer neuron laid out as a 28 by 28 grid, that grid is a template. The neuron responds most when the image matches the template. Training, which is the subject of the next two parts, is the search for weights that make the templates useful.
+
+### Layers as matrix multiplication
+
+Writing that formula once per neuron would be tedious, so a whole layer is written as one operation: `next layer = activation(W · previous layer + b)`. Here `W` is a table of weights with one row per neuron and one column per input. The dot between `W` and the previous layer is a matrix multiplication, which is just "compute all these weighted sums at once".
+
+This is worth remembering because it does not change. Later in this series, a transformer turns out to be a very large pile of exactly this operation with a few extra tricks around it.
+
+### Counting the parameters
+
+The weights and biases are the network's **parameters**, the numbers that training adjusts. They are easy to count:
+
+| Layer | Shape | Weights | Biases | Total |
+|---|---|---|---|---|
+| 1 | 784 to 16 | 12,544 | 16 | 12,560 |
+| 2 | 16 to 16 | 256 | 16 | 272 |
+| 3 | 16 to 10 | 160 | 10 | 170 |
+| **All** | | 12,960 | 42 | **13,002** |
+
+The script I wrote for this part prints the same table and arrives at 13,002.[^2] Almost all of it, 12,544 of 13,002, sits in the very first layer, because the input is wide. The network as a whole is a function that takes 784 numbers and returns 10, and those 13,002 numbers decide which function it is.
+
+## What an untrained network does
+
+Set the 13,002 parameters to random values and run the network. I did that for 20 different random seeds, on the 10,000 test images of the MNIST dataset.[^4] The accuracy came out at 9.1% on average, with a range of 4.3% to 12.7%. Guessing at random among 10 digits would score about 10%, and the test set is close to evenly split (each digit makes up between 8.9% and 11.4% of it), so random weights perform at chance level.
+
+The interesting part is how it fails. You might expect an untrained network to guess randomly. For seed 0, it did not:
+
+<Chart
+  type="bar"
+  height={300}
+  format="plain"
+  caption="How often each digit was the network's answer across 10,000 test images, with random weights (seed 0). It is not guessing evenly; it has a strong habit."
+  label="Bar chart of answer counts for digits 0 to 9. 0: 0. 1: 1. 2: 78. 3: 482. 4: 3. 5: 2034. 6: 1404. 7: 0. 8: 5998. 9: 0."
+  labels={['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']}
+  series={[{ name: 'times chosen', data: [0, 1, 78, 482, 3, 2034, 1404, 0, 5998, 0] }]}
+  xTitle="digit the network answered"
+  yTitle="images (of 10,000)"
+/>
+
+It said "8" for 5,998 of the 10,000 images, and never said 0, 7 or 9. The weights are random, but they are fixed, so the network applies the same arbitrary bias to every image. A random function is not an unbiased one, it is a function with an arbitrary opinion. That arbitrary opinion is also why the average accuracy is about 10%: a network that always answers "8" would score about 9.7%, the share of eights in the test set.
+
+For the first test image, a 7, the ten outputs were `0.19, 0.52, 0.84, 0.90, 0.84, 0.87, 0.94, 0.78, 0.96, 0.00`. The network "thinks" the answer is 8 (0.96), with 6 close behind. The output is also not a probability distribution. The ten values sum to 6.85, not 1, because each output neuron is squashed independently. Turning a list of scores into proper probabilities needs one more function, and it appears in Part 5, because an LLM's last step is exactly that.
+
+## Where this leads
+
+Everything an LLM does comes from this arrangement, scaled up and rearranged: numbers in layers, weights and biases between them, matrix multiplication as the workhorse, and a loop that picks from output probabilities. What changes is the layout of the layers and how many parameters there are. GPT-3, for example, has about 175 billion where our demo has 13,002.[^5]
+
+The main open question after this part is where good weights come from. A network with random weights is useless, and nobody sets 13,002 numbers by hand. Part 2 covers how a computer finds them: define a score for "how wrong is the network", then nudge every parameter in the direction that lowers it.
+
+## Limits of these measurements
+
+The next-word experiment is a three-word counting model on 115,608 tokens of my own writing, and its probabilities change whenever I publish another post, so your run will not reproduce my exact percentages. It illustrates the loop and the idea of a distribution. It says nothing about how well an LLM predicts. The untrained-network numbers come from one initialization scheme (standard normal weights and biases, sigmoid activations), and a different scheme would give different answers, though always near chance level. Both experiments are tiny, and I made no attempt to measure anything about real language models in this part.
+
+## References
+
+[^1]: Grant Sanderson (3Blue1Brown), the deep learning series: [But what is a neural network?](https://www.youtube.com/watch?v=aircAruvnKk) for this part, and [Large Language Models explained briefly](https://www.youtube.com/watch?v=LPZh9BOjkQs) for the overview of generation. The 784, 16, 16, 10 layout and its 13,002 parameters follow the first video.
+[^2]: Methodology. [llm-series-01-next-word-and-network.py](/files/llm-series-01-next-word-and-network.py), run 2026-10-27 on Python 3.12.10 and NumPy 2.5.3. Part A: lowercased words and the punctuation marks `.` and `,` from the Markdown and MDX files in this site's `blog` and `guides` folders at that date (65 files, frontmatter, code blocks, tags, links and footnotes removed), counting which word follows each pair of words; the three seeds and the greedy run all start from "a large". Part B: weights and biases drawn from a standard normal distribution, sigmoid activations, 20 seeds (0 to 19), the 10,000 MNIST test images. The "always answers 8" figure, 9.7%, is the share of eights in the test labels.
+[^3]: LeCun, Cortes, Burges, [The MNIST database of handwritten digits](http://yann.lecun.com/exdb/mnist/). 60,000 training and 10,000 test images of 28 by 28 pixels. The script downloads the test split from the `ossci-datasets` mirror on S3 that PyTorch's torchvision also uses.
+[^4]: Same script and run as footnote 2, part B.
+[^5]: Brown et al., [Language Models are Few-Shot Learners](https://arxiv.org/abs/2005.14165), 2020. Reports the 175 billion parameter GPT-3 model.
