@@ -1,0 +1,152 @@
+---
+title: 'How an LLM Works, Part 2: How a Network Learns, With a Cost Function and Gradient Descent'
+description: 'Turn "how wrong is the network" into one number, then lower it by small steps downhill. Measured on a real digit network: five starts, a learning-rate sweep, and what a gradient entry means.'
+pubDate: 2026-10-28
+updatedDate: 2026-10-28
+tags: ['ai', 'llm', 'tutorial', 'deep-dive']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+[Part 1](/guides/llm-explained-01-next-word-and-neural-networks) ended with a network of 13,002 parameters that, with random values, scores at chance on handwritten digits. Nobody sets 13,002 numbers by hand, so this part is about how a computer finds good ones. The method is short enough to state in one sentence: measure how wrong the network is with a single number, then change every parameter slightly in whichever direction lowers that number, and repeat. The rest of this guide takes that sentence apart and measures each piece.
+
+The matching video is 3Blue1Brown's chapter on gradient descent.[^1] This text does not depend on it.
+
+One setup note. The numbers below come from the same 784-16-16-10 network as Part 1, but initialized differently: weights drawn from a normal distribution scaled by one over the square root of the number of inputs, and biases at zero. That is a common choice that makes training behave better, and it is why the untrained numbers here do not match Part 1's.[^2]
+
+## Step 1: a single score for "how wrong"
+
+For one image, take the network's ten outputs and the ten values they should have been: 1 for the right digit, 0 for the rest. Subtract, square each difference, add them up. That is the **cost** of the image. Average it over many images and you have the cost of the network on that data.
+
+Some reference points make the scale readable. A network that outputs 0.1 for every digit has a cost of 0.900. A network that outputs 0 everywhere has a cost of exactly 1.000. A random network, over 20 starts and the 10,000 test images, averaged 2.680, with a range from 2.148 to 3.374.[^2] A random network is worse than one that knows nothing but the fact that there are ten digits, because it is confidently wrong.
+
+There are now two functions in play, and mixing them up is the usual source of confusion. The **network** takes an image (784 numbers) and returns 10 numbers. The **cost function** takes the network's 13,002 parameters and returns one number, the average wrongness on the training data. The first is what we want. The second is what we minimize, by moving through the space of parameter values.
+
+## Step 2: walking downhill, in one dimension
+
+Thirteen thousand dimensions is hard to picture, so start with one. I made up a bumpy function with two valleys, `f(x) = 0.1x⁴ − 0.8x² + 0.3x`. Its minima are at x = −2.088 (value −2.213) and x = 1.898 (value −1.015), so the left valley is deeper.
+
+Gradient descent on it has one rule: at the current x, compute the slope, and move against it. A positive slope means uphill to the right, so go left. Where the slope is steep, take a big step; near a flat bottom, a small one. I ran 200 steps with a step size of 0.1 from four starting points:
+
+| Start | End | Value at end |
+|---|---|---|
+| −3.0 | −2.088 | −2.213 |
+| −1.0 | −2.088 | −2.213 |
+| +0.5 | +1.899 | −1.015 |
+| +3.0 | +1.899 | −1.015 |
+
+Both ends are valid stopping points, and only one is the best. Which valley you finish in depends on where you started, and the method cannot tell the difference, because it only ever sees the local slope. This is the **local minimum** problem.
+
+The step size, called the **learning rate**, matters as much as the direction. From a start of −3, I tried four values and looked at where x was after 50 steps:
+
+- 0.01: x = −2.178. Moving the right way but not there yet.
+- 0.1 and 0.5: x = −2.088. Arrived.
+- 1.2: x = −4.08 billion after 4 steps, with f above 10³⁷. Each step overshoots the valley by more than the previous one, so the process runs away.
+
+<Mermaid
+  caption="The whole learning procedure. Parts 3 and 4 fill in the two steps that look easy here: computing the gradient, and doing it on enough data."
+  label="Flowchart. Start from random parameters. Run the network on training images and compute the cost. Compute the gradient of the cost with respect to every parameter. Subtract the learning rate times the gradient from each parameter. If the cost is low enough, stop; otherwise run the network again."
+  code={`
+flowchart LR
+  A["Random parameters"] --> B["Run network on training images, compute cost"]
+  B --> C["Compute the gradient: how sensitive is the cost to each parameter?"]
+  C --> D["Move every parameter by -learning rate x its gradient"]
+  D --> E{"Cost low enough?"}
+  E -->|no| B
+  E -->|yes| F["Done"]
+`}
+/>
+
+## Step 3: what the gradient actually is
+
+In one dimension, the gradient is the slope. In 13,002 dimensions it is a list of 13,002 slopes, one per parameter, and each means the same thing: if I nudge this parameter up by a tiny amount, how much does the cost change per unit of nudge?
+
+That definition can be checked without any theory, by doing the nudge. I took the network on 200 images and picked eight parameters (two first-layer weights on specific pixels and six at random). For each one I nudged it by 0.00001, re-ran the network, and divided the change in cost by the nudge. I compared that with the gradient the backpropagation code computed, which Part 3 explains:
+
+| Parameter | Gradient | Measured cost change per nudge |
+|---|---|---|
+| W3[6,8] | 0.093307 | 0.093307 |
+| W3[6,14] | 0.087887 | 0.087887 |
+| W2[14,4] | 0.009043 | 0.009043 |
+| W2[9,15] | 0.000687 | 0.000687 |
+| W1[3,400] (a centre pixel) | −0.001056 | −0.001056 |
+| W1[3,0] (corner pixel) | 0.000000 | 0.000000 |
+
+The two columns agree to within a relative difference of 4×10⁻⁶ across all eight.[^2] (Two more weights, W1[4,32] and W1[0,137], also printed zero in both columns; the table shows six of the eight rows.) So the gradient is the sensitivity list it is described as. The sign says which direction raises the cost, and the size says how much that parameter matters right now.
+
+The spread is large. Across all 13,002 entries, the largest absolute gradient was 0.273 and the median was 0.000086, about 3,000 times smaller. Most parameters barely matter at any given moment, and a few matter a lot. The weights in the last layer carry the most: the length of the gradient restricted to each weight matrix was 0.17, 0.28 and 1.24 for layers 1, 2 and 3. Notice also the corner-pixel weight at exactly zero. A weight that multiplies an input that is always black cannot change anything, and Part 3 returns to that.
+
+## Step 4: running it on the real network
+
+Now the full procedure. I trained on the first 10,000 MNIST training images, computing the gradient over all of them at every step (**full-batch** gradient descent), with a learning rate of 3.0, for 1,500 steps. I repeated that from five different random starts.[^2]
+
+<Chart
+  type="line"
+  height={340}
+  format="plain"
+  logY
+  caption="Cost on the training images during full-batch gradient descent, five random starts, learning rate 3.0. The cost axis is logarithmic. The starts differ by a factor of 1.4 at step 0 and finish within 0.004 of each other."
+  label="Line chart of cost against step on a log axis, five nearly overlapping lines. At step 0 the costs are 3.05, 2.17, 2.93, 2.63 and 2.62. At step 100 they are between 0.67 and 0.75. At step 500 they are between 0.131 and 0.145. At step 1500 they are between 0.057 and 0.061."
+  labels={[0,100,200,300,400,500,600,700,800,900,1000,1100,1200,1300,1400,1500]}
+  series={[
+    { name: 'seed 0', data: [3.053,0.722,0.348,0.208,0.156,0.131,0.114,0.102,0.093,0.085,0.079,0.074,0.069,0.065,0.062,0.059] },
+    { name: 'seed 1', data: [2.173,0.672,0.346,0.212,0.157,0.131,0.115,0.103,0.094,0.086,0.079,0.074,0.069,0.065,0.061,0.057] },
+    { name: 'seed 2', data: [2.928,0.749,0.435,0.26,0.19,0.145,0.121,0.107,0.096,0.087,0.081,0.075,0.07,0.066,0.062,0.059] },
+    { name: 'seed 3', data: [2.628,0.739,0.438,0.245,0.168,0.136,0.118,0.105,0.096,0.088,0.082,0.077,0.072,0.068,0.064,0.061] },
+    { name: 'seed 4', data: [2.62,0.669,0.425,0.287,0.181,0.143,0.122,0.108,0.097,0.088,0.081,0.075,0.07,0.066,0.062,0.058] },
+  ]}
+  xTitle="gradient descent steps"
+  yTitle="cost (log scale)"
+/>
+
+The network went from chance to useful. For seed 0, test accuracy on the 10,000 test images (which the network never trained on) rose from 9.7% to 54.5% at step 100, 80.8% at step 200, 89.6% at step 400, and 91.8% at step 1,500. The five starts ended at 91.8%, 92.0%, 92.3%, 92.4% and 92.5%.
+
+Two things stand out. First, the five starts began far apart (costs from 2.17 to 3.05) and ended nearly together, which is milder than the one-dimensional picture suggested. At this size, on this problem, the local-minimum worry did not bite hard: the starting point changed the final cost by at most 0.004 and the accuracy by 0.7 points. I did not check whether the five final networks are similar inside, only that they perform alike. Second, the early curve has a shoulder. At a learning rate of 0.1 the cost sat at 0.894 after 500 steps, and 0.9 is exactly what a network that outputs 0.1 for everything scores. That is consistent with the network first learning that each digit is about a tenth of the data and only later learning to tell them apart, though I did not inspect the outputs to confirm it.
+
+The 92% is lower than the roughly 96% the famous demo reports.[^1] The gap has ordinary causes: I used a sixth of the training data, 1,500 steps and a squared-error cost with sigmoid neurons, and I stopped there. It is a measurement of this setup, not of what this network could reach.
+
+## The learning rate is a dial with a cliff
+
+I repeated the run from one start, seed 0, for 500 steps at seven learning rates:
+
+<Chart
+  type="line"
+  height={340}
+  format="plain"
+  caption="Cost after 0 to 500 full-batch steps for different learning rates, same start. Too small crawls, a good value drops fast, and values of 30 and above get stuck at exactly 1.000."
+  label="Line chart of cost against step for learning rates 0.1, 0.5, 1, 3, 10 and 30. At step 500: 0.1 gives 0.894, 0.5 gives 0.745, 1 gives 0.376, 3 gives 0.131, 10 gives 0.128. The 30 line sits at 1.0 from step 100 on."
+  labels={[0,100,200,300,400,500]}
+  series={[
+    { name: 'lr 0.1', data: [3.053,0.904,0.897,0.896,0.895,0.894] },
+    { name: 'lr 0.5', data: [3.053,0.894,0.886,0.87,0.83,0.745] },
+    { name: 'lr 1', data: [3.053,0.886,0.831,0.63,0.462,0.376] },
+    { name: 'lr 3', data: [3.053,0.722,0.348,0.208,0.156,0.131] },
+    { name: 'lr 10', data: [3.053,0.848,0.656,0.241,0.15,0.128] },
+    { name: 'lr 30', data: [3.053,1.0,1.0,1.0,1.0,1.0] },
+  ]}
+  xTitle="gradient descent steps"
+  yTitle="cost"
+/>
+
+After 500 steps the test accuracy was 16.2% at a rate of 0.1, 57.2% at 0.5, 78.3% at 1, 90.2% at 3, and 89.0% at 10. At 30 and 100 it was 11.3% and 10.1%, with the cost frozen at exactly 1.000.[^2]
+
+That 1.000 is the cost of a network whose outputs are all zero. My reading is that one huge step pushed the neurons into the flat ends of the sigmoid, where the slope is near zero, and from there the gradient has nothing to say. I did not look at the weights to confirm that, so treat it as a hypothesis. It is also a different failure from the 1D blow-up above: there the numbers exploded, and here the network went quiet.
+
+The practical lesson is that there is a wide usable range (3 and 10 behave alike), with a sharp cliff just above it. Too small a rate is wasteful, too large a rate may ruin the run silently.
+
+## What this does not tell you
+
+- **The cost must be smooth for this to work.** Gradient descent needs a slope to follow, which is why artificial neurons produce any value between 0 and 1 instead of switching fully on or off.
+- **Reaching a low cost is not the same as understanding.** The network scores well on test digits, and Part 4 will show what it does when shown something that is not a digit.
+- **Everything here used the whole dataset per step.** That is affordable for 10,000 images. It is hopeless at LLM scale, and the standard remedy is the subject of Part 3's last section.
+
+## Where this leads
+
+The procedure needs one ingredient that this part treated as given: the gradient of the cost with respect to all 13,002 parameters. Computing it by nudging each parameter in turn means 13,002 runs of the network per step. Backpropagation gets the same list from roughly one extra pass. Part 3 explains how, and measures the saving.
+
+## References
+
+[^1]: Grant Sanderson (3Blue1Brown), [Gradient descent, how neural networks learn](https://www.youtube.com/watch?v=IHZwWFHWa-w). The cost function, the downhill picture and the roughly 96% figure for this network are from that video.
+[^2]: Methodology. [llm-series-02-cost-and-gradient-descent.py](/files/llm-series-02-cost-and-gradient-descent.py), run in October 2026 on Python 3.12.10 and NumPy 2.5.3 (the gradient check was re-run after a change that only altered which eight parameters it samples). Network 784-16-16-10, sigmoid activations, cost = mean over images of the sum of squared output errors, weights ~ N(0, 1/n_inputs), biases 0. Random-start cost: 20 seeds on the 10,000 test images. Training: first 10,000 MNIST training images, learning rate 3.0, 1,500 full-batch steps, seeds 0 to 4, accuracy on the 10,000 test images. Learning-rate sweep: seed 0, 500 steps, rates 0.1, 0.5, 1, 3, 10, 30, 100. Gradient check: 200 images, float64, forward difference with a nudge of 1e-5. The code that computes the gradient is backpropagation, written out and explained in Part 3.
