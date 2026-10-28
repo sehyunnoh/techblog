@@ -130,7 +130,7 @@ For the first test image, a 7, the ten outputs were `0.19, 0.52, 0.84, 0.90, 0.8
 
 Everything an LLM does comes from this arrangement, scaled up and rearranged: numbers in layers, weights and biases between them, matrix multiplication as the workhorse, and a loop that picks from output probabilities. What changes is the layout of the layers and how many parameters there are. GPT-3, for example, has about 175 billion where our demo has 13,002.[^5]
 
-The main open question after this part is where good weights come from. A network with random weights is useless, and nobody sets 13,002 numbers by hand. Part 2 covers how a computer finds them: define a score for "how wrong is the network", then nudge every parameter in the direction that lowers it.
+The main open question after this part is where good weights come from. A network with random weights is useless, and nobody sets 13,002 numbers by hand. [Part 2](/guides/llm-explained-02-cost-and-gradient-descent) covers how a computer finds them: define a score for "how wrong is the network", then nudge every parameter in the direction that lowers it.
 
 ## Limits of these measurements
 

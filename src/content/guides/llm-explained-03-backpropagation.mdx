@@ -1,0 +1,146 @@
+---
+title: 'How an LLM Works, Part 3: Backpropagation, and Why Training Uses Mini-Batches'
+description: 'How a network gets all 13,002 gradients from one backward pass instead of 13,002 experiments, checked against brute force, plus why training takes small noisy steps instead of exact ones.'
+pubDate: 2026-10-28
+updatedDate: 2026-10-28
+tags: ['ai', 'llm', 'tutorial', 'deep-dive']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+[Part 2](/guides/llm-explained-02-cost-and-gradient-descent) took one ingredient as given: the gradient, a list with one number per parameter saying how much the cost would change if that parameter moved. This part is about getting that list. It is the algorithm called **backpropagation**, and it is what makes training a network with billions of parameters possible at all. The second half covers the other shortcut every real training run takes, the **mini-batch**.
+
+The matching videos are 3Blue1Brown's two backpropagation chapters, one intuitive and one with the calculus.[^1] This text stands without them.
+
+## The slow way, and what it costs
+
+There is an obvious way to get the gradient, and it is the one Part 2 used to check the answers: nudge one parameter, re-run the network, see how the cost moved, put the parameter back, and do that for every parameter. With central differences (nudge up, nudge down) that is 26,004 runs of the network for our 13,002 parameters.
+
+I timed it on a batch of 100 images in NumPy, then timed backpropagation on the same batch and parameters.[^2] One forward pass took about 0.12 to 0.14 ms. One full backpropagation, forward pass included, took about 0.20 to 0.22 ms, roughly 1.5 to 1.7 times a forward pass. The brute-force gradient took 5 to 7.6 seconds across two runs. That puts backpropagation at 25,000 to 35,000 times faster. (Part of that gap is Python loop overhead in my brute-force code. Counting only the 26,004 forward passes at 0.12 ms each, the ratio is still about 15,000.)
+
+The two methods also agree. The largest absolute difference between the backpropagation gradient and the brute-force one, over all 13,002 entries, was 9.3×10⁻¹⁰. What follows from that is worth holding onto: the cost of computing every gradient is about the cost of one extra forward pass, no matter how many parameters there are. Nothing else in this series matters more for the scale of modern models.
+
+## The idea: pass the blame backward
+
+Take the network's output for one training image. Each of the ten output values has a target, and the error is the gap. For the output neuron of the correct digit, the gap says "go up". For the others, "go down". The bigger the gap, the louder the message.
+
+An output neuron cannot change its own value directly, only through the three things that feed it: its bias, its weights, and the previous layer's values. Each of these gets a share of the message:
+
+- the **bias** is told to move in the direction that raises or lowers the output;
+- each **weight** is told the same, scaled by how active its input was, since a weight on a silent input changes nothing;
+- each **neuron in the previous layer** is told what value the neuron after it would prefer, scaled by the connecting weight.
+
+That last message is the trick. A neuron in the previous layer now has a wish about its own value, collected from all the neurons it feeds. It is exactly the same kind of message as the one the output layer received, so the same three rules apply one layer further back, and then again, until the input is reached.
+
+<Mermaid
+  caption="Data goes forward to produce the cost. Wishes about each layer's values go backward, one layer at a time, and each layer turns its incoming wish into gradients for its own weights and biases."
+  label="Diagram. A forward row: input, hidden layer 1, hidden layer 2, output, then cost. A backward row runs the other way: cost gives an error signal to the output layer, which passes a signal to hidden layer 2, which passes one to hidden layer 1. Each layer also emits gradients for its own weights and biases."
+  code={`
+flowchart LR
+  X["Input"] -->|forward| H1["Hidden 1"] -->|forward| H2["Hidden 2"] -->|forward| O["Output"] -->|forward| C["Cost"]
+  C -.->|error signal| O
+  O -.->|signal| H2
+  H2 -.->|signal| H1
+  O -.-> GO["gradients of output weights and biases"]
+  H2 -.-> G2["gradients of hidden 2 weights and biases"]
+  H1 -.-> G1["gradients of hidden 1 weights and biases"]
+`}
+/>
+
+## The same idea as arithmetic
+
+The calculus version of this is the **chain rule**. Start with the simplest network that still shows it, one neuron per layer, so that a weight `w` feeds into a weighted sum `z`, then an activation `a`, then the cost `C`. A small change in `w` changes `z`, which changes `a`, which changes `C`. The sensitivity of the cost to `w` is the product of the sensitivities at each link:
+
+`dC/dw = (dz/dw) × (da/dz) × (dC/da)`
+
+Each factor has a plain meaning, and I computed them for a three-layer chain of single neurons with random weights:[^2]
+
+| Factor | Meaning | Value |
+|---|---|---|
+| dz/dw | the input to this weight (its previous activation) | 0.7534 |
+| da/dz | the slope of the sigmoid at this point | 0.2221 |
+| dC/da | twice the error | −0.6657 |
+| **Product** | gradient for the last weight | **−0.111366** |
+
+Nudging that weight and measuring the cost change gave −0.111366 as well. The first term says that a bright input makes its weight matter more, which I check on real data below. The third says a bigger error means a bigger gradient.
+
+Now the weight in the very first layer of the same chain. Its effect has to travel through two more layers, so two more factors of the form "weight times sigmoid slope" join the product. The result was −0.000997, again matching the numerical derivative, and it is 0.9% of the last layer's gradient.
+
+That ratio points at a real weakness. The slope of a sigmoid never exceeds 0.25, so each layer the signal travels back through can shrink it to a quarter or less. In a deep stack of sigmoid layers, the earliest layers get almost no signal, which is called the **vanishing gradient** problem. It is the main reason networks moved from sigmoids to ReLU, and Part 4 measures the difference.
+
+### More than one neuron per layer
+
+With many neurons per layer, only one thing is added. A neuron in the previous layer feeds several neurons in the next one, so its influence on the cost runs along several paths, and the contributions are summed. In matrix form that sum is a single multiplication. This is the whole backward pass for our network, as written in the script I used, where `delta` is the error signal at a layer:
+
+```python
+delta = 2 * (a - t) * a * (1 - a) / n              # error signal at the output
+for l in range(len(ws) - 1, -1, -1):
+    gw[l] = delta.T @ acts[l]                      # gradient of this layer's weights
+    gb[l] = delta.sum(axis=0)                      # gradient of this layer's biases
+    if l:
+        delta = (delta @ ws[l]) * acts[l] * (1 - acts[l])   # pass it one layer back
+```
+
+A few lines. The forward pass has to save every layer's activations, because the backward pass reuses them. That is part of what a large model's memory goes to during training.
+
+## Why bright inputs matter
+
+The `delta.T @ acts[l]` line says that a weight's gradient is its error signal times the activation of the input it multiplies. If that input is always zero, the gradient is exactly zero. MNIST has a good test for this, since the borders are always black.
+
+On 1,000 training images, 175 of the 784 pixels were exactly 0 in every image. The matching 175 columns of the first-layer gradient were exactly zero too, which is 2,800 of the 12,544 first-layer weights.[^2] The weights on the 78 pixels that are brightest on average had a mean absolute gradient of 0.00277, against 0.00052 for the rest, about five times larger. A weight learns from inputs that actually show up.
+
+This is the engineering version of a slogan from neuroscience that the 3Blue1Brown video points out, "neurons that fire together wire together". The resemblance is a curiosity. Artificial networks are not claimed to learn the way brains do.
+
+The last weights carry most of the gradient early on. At initialization the squared length of the gradient split as 2%, 5% and 93% across the three layers.
+
+## The second shortcut: mini-batches
+
+Even with a cheap gradient, computing it over every training image for every step is wasteful. Part 2's runs used 10,000 images and still needed 1,500 steps. Real training sets have billions of tokens. The standard fix is to shuffle the data, cut it into **mini-batches**, and take a step using the gradient of one batch at a time. This is **stochastic gradient descent** (SGD).
+
+The gradient of a small batch is a noisy version of the real one. I measured how noisy, using a network partway through training (cost 0.348) and the full gradient over 10,000 images as the reference, with 100 random batches per size:[^2]
+
+| Batch size | Cosine similarity to the full gradient | Size of the error, relative to the full gradient |
+|---|---|---|
+| 1 | 0.039 | 31.3× |
+| 10 | 0.080 | 13.2× |
+| 100 | 0.233 | 4.3× |
+| 1,000 | 0.611 | 1.3× |
+| 10,000 (all) | 1.000 | 0 |
+
+(A cosine similarity of 1 means the same direction, 0 means perpendicular.) One image's gradient is almost perpendicular to the true direction, and its error is thirty times the length of the thing it estimates. Batch size 100 is still only 0.23 aligned. Taken one at a time, these steps look nearly useless.
+
+The point is that they are cheap, and their errors average out over many steps. So the useful question is what happens for a fixed amount of work. I gave each batch size the same budget, 10 passes over the 10,000 training images, which is the same number of image-gradients, and the same learning rate of 3.0 from the same start:[^2]
+
+<Chart
+  type="bar"
+  height={320}
+  format="percent"
+  caption="Test accuracy after the same amount of gradient work (10 passes over 10,000 images), spent as 10, 100, 1,000 or 10,000 steps. Smaller batches mean more steps from the same work."
+  label="Bar chart of test accuracy by batch size. Batch size 10,000 with 10 steps: 11.4 percent. Batch size 1,000 with 100 steps: 53.2 percent. Batch size 100 with 1,000 steps: 91.2 percent. Batch size 10 with 10,000 steps: 90.7 percent."
+  labels={['10,000 (10 steps)', '1,000 (100 steps)', '100 (1,000 steps)', '10 (10,000 steps)']}
+  series={[{ name: 'test accuracy', data: [11.4, 53.2, 91.2, 90.7] }]}
+  xTitle="batch size (number of steps)"
+  yTitle="test accuracy"
+/>
+
+Full-batch descent, with the best possible direction every step, had only taken 10 steps and was still stuck near its starting plateau at 11.4%. Batch size 100 took 1,000 noisy steps and reached 91.2%, with a training cost of 0.096. Batch size 10 took 10,000 steps and did about the same, 90.7%. In this run the smaller batches were also faster by the clock (4.6 s for full batches, 1.2 s for 100), and I did not investigate why.
+
+So the picture to keep is that a step does not need to be accurate, it needs to be roughly right and cheap enough that you can take a great many. 3Blue1Brown compares it to a person stumbling quickly downhill versus one calculating each careful step. That is what the numbers show.
+
+## Limits of these measurements
+
+- Every training run uses one random start (seed 0), one learning rate (3.0) for every batch size, and no tuning. A larger batch might do better with a different rate, though 10 steps is not much to work with. The result is a demonstration of the mechanism, not a ranking of batch sizes. The usual practice is somewhere between 1 and a few thousand examples, depending on the model and hardware.
+- The brute-force check ran at 10⁻⁶ nudges in 64-bit floats. Fifty-two entries had a relative difference above 10⁻⁴ against the backpropagation values. I checked them: every one has an absolute gradient of 4.2×10⁻⁶ or less (the other 8,351 of the 8,403 entries above 10⁻⁶ agree more closely), and the absolute error on those 52 is at most 6.1×10⁻¹⁰. I read them as rounding noise in the numerical derivative on tiny numbers.
+- Timings are single-machine NumPy numbers, and they shift between runs (the speedup ranged from about 25,000x to 35,000x). They show the order of magnitude, not a benchmark.
+- Real frameworks do not write the backward pass by hand. They record the forward operations and differentiate through them automatically. The idea is the same one shown here.
+
+## Where this leads
+
+The network can now learn, and the learning loop is complete: forward, cost, backward, small step, repeat over mini-batches. Part 4 runs it for real and asks what comes out. Sigmoid against ReLU, how it behaves on something that is not a digit, and what the network does when you scramble the labels.
+
+## References
+
+[^1]: Grant Sanderson (3Blue1Brown), [Backpropagation, intuitively](https://www.youtube.com/watch?v=Ilg3gGewQ5U) and [Backpropagation calculus](https://www.youtube.com/watch?v=tIeHLnjs5U8). The team-blame framing, the one-neuron-per-layer chain rule derivation and the mini-batch discussion follow those videos.
+[^2]: Methodology. [llm-series-03-backpropagation.py](/files/llm-series-03-backpropagation.py), run on Python 3.12.10 and NumPy 2.5.3, 64-bit floats, same 784-16-16-10 sigmoid network and squared-error cost as Part 2. A: batch of the first 100 training images, central differences with a nudge of 1e-6 over all 13,002 parameters, forward and backward times averaged over 200 repeats; the script was run twice and the ranges quoted are from the two runs. B: three single-neuron layers, weights and biases drawn with seed 1, input 0.7, target 1. C: first 1,000 training images, seed 0 weights, untrained. D: the first 10,000 training images, a network after 200 full-batch steps at learning rate 3.0 (cost 0.348), 100 random batches per size without replacement (3 repeats for the full 10,000). E: seed 0, learning rate 3.0, 10 shuffled passes over the first 10,000 training images, accuracy on the 10,000 test images.
