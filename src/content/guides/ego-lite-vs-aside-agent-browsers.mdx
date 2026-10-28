@@ -1,0 +1,133 @@
+---
+title: 'ego lite Explained, and How It Compares with Aside'
+description: 'ego lite and Aside are both browsers built for AI agents, but one has no agent of its own and the other ships with one. A guide to what each is, with the same page-reading test run on both.'
+pubDate: 2026-10-28
+updatedDate: 2026-10-28
+tags: ['ai', 'llm', 'web', 'architecture', 'benchmark']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+If you let a coding agent use a browser, the default is usually a blank, headless one. It has no logins, no cookies, and every site greets it with a sign-in page. ego lite and Aside both exist to fix that, and they fix it from opposite ends. ego lite is a browser with no AI inside it, built so that agents you already use (Claude Code, Codex, Cursor) can borrow it. Aside is a browser with its own agent inside, which can also be driven from the outside. I installed both on one Windows 11 machine and ran the same small test on each, so this guide mixes what the vendors say with what I saw.
+
+## What ego lite is
+
+ego lite is a free, Chromium-based browser from Citro Labs. Its README describes it as a browser where you and your AI agents work in parallel.[^1] Three ideas matter.
+
+**Task spaces.** Each agent job gets its own isolated workspace, called a Space, with its own tabs. Your own tabs are not touched. You can see which Space has an agent running, take it over, or stop it.[^1]
+
+**Your logins come along.** On first launch it offers to import your Chrome data, and the README says the agent then inherits your logins, cookies, extensions and bookmarks.[^1] There is also a command for this: `ego-browser import --browser chrome --profile Default`.
+
+**The agent writes a script.** There is no model inside ego lite. The agent you already run writes a short JavaScript program against a small API (`goto`, `snapshot`, `click`, `fill`, `waitForSelector`) and sends it to `ego-browser nodejs`. One script can do many steps and print one final snapshot, instead of one tool call per click.[^1][^2] The API is deliberately not Playwright. The bundled usage guide tells the agent not to invent Playwright methods like `locator()` or `getByRole()`.[^2]
+
+A snapshot is a text view of the page, with short references like `@21` that later actions can point at. That is how a model "sees" a page without a screenshot.
+
+On my machine: ego lite 0.6.1.13 on Chromium 156, Windows 11. The README lists macOS and Windows as supported and Linux as planned.[^1]
+
+## What Aside is
+
+Aside is also a Chromium-based desktop browser, but it ships with an agent. Its site says it gets work done "across your websites, accounts, and history."[^3] Its own pieces:
+
+- **Memory.** It turns browsing history into notes so you do not repeat context.[^3] The CLI can search them (`aside memory search`).
+- **A password manager (Aside Vault).** The site says agents sign in through autofill and the credentials are not exposed to the agent, and that sensitive actions wait for human approval.[^3]
+- **Three ways to drive it from a terminal.** `aside exec` hands a task to Aside's own agent, like spawning a subagent. `aside repl` runs Playwright-style JavaScript directly. `aside mcp` exposes it as an MCP server.[^4]
+
+So an outside agent (say, Claude Code) has a choice that does not exist in ego lite: delegate the whole task to Aside's agent, or use Aside only as a remote-controlled browser. The CLI guide recommends `exec` for most tasks and `repl` only when you need to look at the screenshot and DOM yourself.[^4]
+
+Windows support is real but newer than macOS. The changelog shows macOS first (v1.0.225.1, February 2026) and Windows in v1.0.914.1, whose entry reads "Aside is now officially available on Windows!"[^5] I covered that gap in [a post on the cost of standalone browsers](/posts/agent-browser-platform-tax). On my machine: Aside app 1.0.1022.1 and CLI 1.26.916.1741.
+
+<Mermaid
+  caption="Who runs the agent loop. In ego lite the model lives in your own agent and the browser is a tool. In Aside you can do the same through the REPL, or hand the whole task to the agent inside the browser."
+  label="Two flow diagrams. ego lite: your agent writes a script, ego-browser runs it in an isolated task space, and a snapshot returns to your agent. Aside: either your agent uses the REPL, or exec delegates the task to Aside's built-in agent, which uses the browser, memory and password manager"
+  code={`
+flowchart LR
+  subgraph E["ego lite"]
+    EA["Your agent<br/>(Claude Code, Codex...)"] -->|"JS script"| EB["ego-browser<br/>task space"]
+    EB -->|"snapshot"| EA
+  end
+  subgraph S["Aside"]
+    SA["Your agent"] -->|"repl / mcp"| SB["Aside browser"]
+    SA -->|"exec: whole task"| SG["Aside's built-in agent"]
+    SG --> SB
+    SG --> SM["Memory +<br/>password manager"]
+  end
+`}
+/>
+
+## Where they differ
+
+| | ego lite | Aside |
+|---|---|---|
+| Built-in agent | No. Bring your own | Yes, plus memory and a password manager |
+| How outside agents drive it | `ego-browser nodejs` scripts | `exec`, `repl`, or MCP |
+| Isolation | Each job in its own Space, by design | REPL can list and attach to your open tabs; external agent tabs are grouped in the sidebar[^4][^5] |
+| Model choice | Whatever your agent uses | Set per task with `-m`, `--effort`, and a permission mode (`ask`/`guard`/`full-access`)[^4] |
+| Page snapshot | Viewport or `scope: "full_page"` | Accessibility tree, capped at 16 KiB (below) |
+| License | Skill and docs are MIT; the app is a separate free download[^1] | Closed product, bring your own subscription or API key[^3] |
+
+The isolation row is the one I would think hardest about. ego lite's default is to keep the agent away from the tabs you are using. In Aside's REPL, `listBrowserTabs()` returned all 23 tabs I had open, and the guide says to use `attachActiveBrowserTab()` when you want the agent to work on the page you are looking at.[^4] That is convenient and also a larger blast radius. Neither is wrong, but it is a decision to make on purpose.
+
+## The same test on both
+
+I wanted one number that was not a vendor benchmark. The test: open a URL, then read it as a snapshot. Three pages, five runs each, one machine, one network. Scripts are in the repo.[^6]
+
+- `example.com` (tiny)
+- `lleg.dev` home page (this blog)
+- the English Wikipedia article "Web browser" (large)
+
+Two caveats come before the numbers. The two tools do not wait for the same thing. ego's `goto` reuses one page and waits for the `load` event. Aside's `openTab` creates a new tab each time and waits until the page is interactive and the DOM is stable. So "open" time is not an apples-to-apples speed contest, and I did not try to make it one.
+
+<Chart
+  type="bar"
+  height={320}
+  format="plain"
+  caption="Median time to open a page, five runs each, in milliseconds. ego reuses a page and waits for load; Aside opens a new tab and waits for interactive and a stable DOM, so the two measure different things."
+  label="Bar chart of median open time in milliseconds. example.com: ego 211, Aside 3928. lleg.dev: ego 333, Aside 2443. Wikipedia Web browser: ego 501, Aside 3678."
+  labels={['example.com', 'lleg.dev', 'Wikipedia']}
+  series={[{ name: 'ego lite', data: [211, 333, 501] }, { name: 'Aside', data: [3928, 2443, 3678] }]}
+  xTitle="page"
+  yTitle="median open time (ms)"
+/>
+
+ego was faster to open on all three, by roughly 7 to 19 times. Variation was large on both sides: Aside's `example.com` runs ranged from 2.9 to 7.6 seconds, and one Wikipedia run took 15.2 seconds; ego's first run on each page was the slowest (up to 2.6 seconds) and the rest were close to the median. I do not know how much of Aside's gap is tab creation and stability waiting versus the browser itself, so I would not quote the ratio without that caveat.
+
+The snapshot step is more interesting, because it shows a real design difference.
+
+| Page | ego full page | ego viewport | Aside default |
+|---|---|---|---|
+| example.com | 1,176 chars | 1,176 | 265 |
+| lleg.dev | 10,118 | 3,992 | 5,374 |
+| Wikipedia | 306,375 | 16,287 | 16,437 |
+
+Time to read the snapshot was small everywhere except one case: ego's full-page Wikipedia snapshot took a median 8.2 seconds, against 0.8 seconds for Aside's.
+
+That is not Aside being faster at the same job. Aside's Wikipedia snapshot ended with `[snapshot truncated at 16 KiB; narrow it with { interactive: true }, selector or ref]`. It returned the first 411 lines, and ego's full-page snapshot of the same page was 4,668 lines. Both are reasonable defaults. Aside's keeps each read small enough to fit a model's context and asks you to narrow the query. ego's `full_page` gives you everything and leaves the budgeting to the agent, which on a long article means a few hundred thousand characters, roughly tens of thousands of tokens if you pasted it into a model whole. The default viewport snapshot (16 KB here) is the cheap path.
+
+What I did not measure: `aside exec` (Aside's own agent), end-to-end task success, token cost, anything behind a login, or Linux and macOS behavior. One of my first Aside runs hung for 34 minutes and left the browser disconnected from its CLI until I restarted it, so there is a robustness note too, though I could not reproduce it on the second attempt.
+
+## What the vendors claim
+
+Both publish benchmark numbers, and they cannot be compared with each other.
+
+ego lite's README says its tool completes complex web tasks "47% to 63% faster than the other tools" on 31 live-site tasks, run with the vendor's choice of agent and model.[^1] Aside's site says it ranks first on three agent benchmarks, with 99.0% on Online-Mind2Web against 97.7% for Browser Use.[^3] These are different benchmarks, run by the companies selling the product, measuring different things (speed of a tool versus success of a built-in agent). I could not verify either, and neither README nor site links raw per-task results I could check.
+
+On privacy, Aside says tasks and memory are local by default and that "nothing is shared with LLM providers."[^3] The same page offers bring-your-own subscription, which sends requests to a provider, and does not reconcile the two statements. ego lite says browsing data and cookies stay on the device.[^1] But note what that covers: when your agent reads a snapshot, the page text goes to whichever model is behind that agent. That is true for any agent browser and is my inference, not a claim from either vendor.
+
+## Which one to pick
+
+- **You already work in Claude Code or Codex and want it to use sites you are logged into.** ego lite is the smaller step. It adds a browser and nothing else, and Spaces keep the agent out of your tabs.
+- **You want to hand a whole chore to an agent and read the result.** Aside's `exec`, memory and password manager are built for that. I did not test `exec`, so try it on something low-stakes first.
+- **You care most about token budget.** Look at the snapshot defaults before anything else. Aside caps a read; ego lets you choose viewport or full page.
+- **You are on Linux.** ego lite lists it as planned, not shipped.[^1] For Aside I could only confirm macOS and Windows, so check its download page.
+- **You will run unattended jobs.** Test a long loop first. My one hang with Aside is a single observation, not a verdict.
+
+## References
+
+[^1]: Citro Labs, [ego lite README](https://github.com/citrolabs/ego-lite), read 2026-10-28. Source of Spaces, Chrome data import, platforms, MIT license of the skill repo, and the benchmark claims (31 tasks, 47% to 63%), which are the vendor's own.
+[^2]: `ego-browser skill` usage guide v2.1.0, printed by the installed 0.6.1.13 on 2026-10-28. Source of the script-based API and the instruction not to assume Playwright methods.
+[^3]: Aside, [homepage](https://aside.com) and [Help Center](https://docs.aside.com), read 2026-10-28. Memory, Aside Vault, "local by default", bring-your-own subscription and the benchmark figures are vendor statements.
+[^4]: `aside guide` and `aside guide repl`, `aside --help`, CLI version 1.26.916.1741, run 2026-10-28. Source of `exec`/`repl`/`mcp`, model and permission flags, `listBrowserTabs()` and `attachActiveBrowserTab()`, and the 16 KiB snapshot truncation message (observed directly).
+[^5]: Aside, [native app changelog](https://docs.aside.com/changelog/native). v1.0.225.1 initial release, v1.0.914.1 Windows availability and the "Agent Tabs" sidebar group for tabs used through MCP or CLI.
+[^6]: Methodology. 2026-10-28, Windows 11, one machine, one network, five runs per page, medians reported. Scripts: [`ego-vs-aside-bench-ego.mjs`](/files/ego-vs-aside-bench-ego.mjs) and [`ego-vs-aside-bench-aside.js`](/files/ego-vs-aside-bench-aside.js). ego used `page.goto` then `snapshot({ scope: "full_page" })` and `snapshot()`; Aside used `openTab` then `snapshot(page, {})`. Aside was run one URL per call because the REPL has a 120-second limit. Wikipedia full-page and truncation line counts come from separate single checks.
