@@ -1,0 +1,139 @@
+---
+title: 'How an LLM Works, Part 5: Embeddings, Softmax and Temperature, the Ends of a Transformer'
+description: 'How text becomes vectors and vectors become next-word probabilities, with directions measured in a real embedding space, softmax and temperature on real counts, and GPT-3''s first parameter lines.'
+pubDate: 2026-10-28
+updatedDate: 2026-10-28
+tags: ['ai', 'llm', 'tutorial', 'deep-dive']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+Parts 1 to 4 built a small digit classifier and the machinery that trains it. This part starts on the model that the whole series has been heading toward, the **transformer**, by looking at its two ends: how text goes in, and how a prediction comes out. The middle of the transformer is the next two parts, attention and the feed-forward block.
+
+GPT stands for Generative Pre-trained Transformer: it generates text, it is trained in advance on a large amount of it, and its architecture is the transformer, which Google researchers introduced in 2017 for machine translation.[^1] The matching video is 3Blue1Brown's chapter on transformers.[^2] This text does not depend on it.
+
+## The whole pipeline in one picture
+
+<Mermaid
+  caption="The path of one prompt through a GPT-style model. This part covers the first two boxes and the last three. The repeated block in the middle is Parts 6 and 7."
+  label="Flowchart from top to bottom. Text is split into tokens. Each token becomes a vector through the embedding matrix. The vectors pass through a block of attention and then a feed-forward network, repeated many times. The last position's vector is multiplied by the unembedding matrix to give one score per vocabulary entry, called logits. Softmax turns the logits into probabilities. One token is sampled, appended to the text, and the process repeats."
+  code={`
+flowchart TB
+  A["Text"] --> B["Tokens"]
+  B --> C["Embedding: one vector per token"]
+  C --> D["Attention: vectors exchange information"]
+  D --> E["Feed-forward block: each vector processed on its own"]
+  E -->|"repeated many times"| D
+  E --> F["Last position's vector"]
+  F --> G["Unembedding: one score (logit) per vocabulary entry"]
+  G --> H["Softmax: scores become probabilities"]
+  H --> I["Sample a token, append it, go again"]
+`}
+/>
+
+How a prompt is cut into tokens, and what the loop at the bottom costs in time and memory, are covered with measurements in [How an LLM Answers One Prompt](/guides/how-an-llm-answers-one-prompt), so I will not repeat them. For this series, "token" means a piece of text, often a word and sometimes part of one.
+
+## The one rule that shapes everything: numbers in, weighted sums out
+
+Deep learning has three habits that make the structure of a transformer less arbitrary than it looks. Everything the network handles has to be an array of numbers, so text must be converted first. Every layer's output is again an array of numbers. And the learned parameters meet the data only through weighted sums, which is why almost all the computation is matrix multiplication, exactly the operation from Part 1.
+
+Keep one distinction in your head from here on. The **weights** are the learned parameters. They are fixed once training ends. The **activations** are the numbers flowing through for the current input, and they change with every prompt. When the next parts say "a matrix", it is a weight matrix, a piece of what the model has learned.
+
+## Step 1: tokens become vectors
+
+The model has a fixed list of every token it knows. GPT-3's list has 50,257 entries.[^2] The **embedding matrix** has one column per entry, and each column is a list of numbers, a **vector**, for that token. In GPT-3 each vector has 12,288 numbers.[^3] To embed a token, look up its column. Nothing is computed, only copied.
+
+Initially those columns are random. Training, using the same gradient descent as Part 2, moves them until tokens that behave alike in text sit near each other. So each token is a point in a space with 12,288 coordinates, and the space has structure.
+
+### Directions in that space
+
+I wanted to measure that structure instead of just asserting it, but the weights of a real GPT model were not something I could get on this machine. So I built a stand-in. It is not a neural network. It counts which words appear near which others in text8 (17,005,207 words of cleaned English Wikipedia), turns those counts into a table of "surprising co-occurrences" (positive pointwise mutual information), and compresses that table to 100 numbers per word with a matrix factorization (SVD). This count-based method is a classic one, and a well-known comparison finds that it can come close to the neural methods when tuned carefully.[^4] I kept the 20,000 most common words, which cover 94.1% of the text.[^5]
+
+**Neighbors.** The nearest words to a few probes by cosine similarity (1 means the same direction):
+
+| Word | Nearest words |
+|---|---|
+| king | iii, crowned, iv, ii, throne |
+| tower | towers, palace, tallest, building, skyscraper |
+| bank | monetary, fund, banks, exchange, multilateral |
+| paris | les, du, rieure, le, sur |
+
+Mostly sensible, and the failures are informative. "paris" is closest to French function words, because in this corpus its neighbors are mostly French text. And "bank" has only financial neighbors, because the table has exactly one vector per word. A river bank gets the same vector as a savings bank. This is the limit of an embedding on its own, and the reason attention exists.
+
+**Analogies.** The well-known demonstration is `king - man + woman`, which should land near "queen", on the idea that "man to woman" is a direction in the space. I wrote 21 test analogies in four categories, of the form `b - a + c` with the three input words excluded from the answers:
+
+| Category | Usable | Top-1 correct | Right answer in top 5 |
+|---|---|---|---|
+| Capital and country (paris:france :: rome:?) | 8 | 6 | 8 |
+| Gender (king:queen :: man:?) | 6 | 3 | 6 |
+| Verb tense (walking:walked :: ...) | 3 | 1 | 3 |
+| Plural (car:cars :: house:?) | 4 | 1 | 2 |
+| **All** | **21** | **11** | **19** |
+
+So the idea works about half the time as a first guess, and almost always when you allow five. The specific famous example did not work in my model. `king - man + woman` gave marries, consort, princess, isabella and aragon, with "queen" not among the top five, which are royal-marriage words and so at least in the right neighborhood. A model trained on 17 million words is far smaller than the ones behind the famous demonstrations, which used billions of words.[^6] I did not try tuning to make it come out.
+
+**A direction as a measuring stick.** The **dot product** of a vector with a unit-length direction tells you how much of that direction the vector contains: positive for the same way, zero for perpendicular, negative for opposite. It is also just a weighted sum, so a network computes it natively. To test whether "plural" is a direction, I averaged the difference vector (plural minus singular) over five pairs (cat, dog, year, day, war), then projected eight unseen words and their plurals onto it. The plural form scored higher in 8 of 8 pairs. The average projection was -0.027 for singular words and 0.121 for plural ones.[^5] The model was never told what plurals are. The direction came out of counting.
+
+## Step 2: the vector at the end becomes probabilities
+
+After the middle layers, the last position's vector has absorbed information from the whole prompt, and the model uses only that one to predict the next token. (During training, every position predicts the token after it simultaneously, which gives many training examples per passage. At generation time only the end matters.)
+
+A second matrix, the **unembedding matrix**, multiplies that vector and produces one score per vocabulary entry. These scores can be any real number and are called **logits**. They are not probabilities, which is the same lesson as Part 1, where ten sigmoid outputs summed to 6.85.
+
+**Softmax** fixes that. Raise e to the power of each score, so every value is positive, then divide each by the total, so they sum to 1. Scores of 2.0, 1.0 and 0.1 become 0.659, 0.242 and 0.099, which sum to 1.0. The biggest score gets the biggest share, and unlike simply picking the maximum, a small change in a score gives a small change in probabilities, which keeps training smooth.
+
+### Temperature
+
+Dividing the scores by a constant **T** before softmax changes how sharp the result is. I tested it on a real next-word distribution: the words that followed "the model" in this blog's own text, 41 occurrences with 32 different next words. I used the log of each count as the score, so that T = 1 reproduces the counts exactly (the most common word, "is", had probability 4/41 = 9.8%).[^5]
+
+<Chart
+  type="bar"
+  height={320}
+  format="percent"
+  caption="Probability of the single most likely next word after 'the model', for different temperatures, from 32 candidate words. Low temperature concentrates almost everything on one word; high temperature approaches a uniform 1 in 32, which is 3.1 percent."
+  label="Bar chart of top-1 probability by temperature. T 0.1: 94.3 percent. T 0.25: 60.0. T 0.5: 23.9. T 1: 9.8. T 2: 5.7. T 5: 4.0."
+  labels={['T = 0.1', 'T = 0.25', 'T = 0.5', 'T = 1', 'T = 2', 'T = 5']}
+  series={[{ name: 'top-1 probability', data: [94.3, 60.0, 23.9, 9.8, 5.7, 4.0] }]}
+  yTitle="probability of the most likely word"
+/>
+
+| T | Entropy (bits) | Effective number of words | Distinct words in 1,000 draws |
+|---|---|---|---|
+| 0.1 | 0.34 | 1.3 | 4 |
+| 0.25 | 2.14 | 4.4 | 30 |
+| 0.5 | 4.21 | 18.5 | 32 |
+| 1 | 4.85 | 28.9 | 32 |
+| 2 | 4.97 | 31.3 | 32 |
+| 5 | 5.00 | 31.9 | 32 |
+
+Entropy measures how spread out the distribution is, and "effective number of words" is 2 raised to the entropy. At T = 0.1 the model behaves as if it had 1.3 choices, at T = 5 almost all 32. Note T = 0.25: the top word has 60%, but 1,000 draws still hit 30 of the 32 words, because even a small share comes up now and then over a thousand tries. Low temperature makes rare words rarer, not impossible.
+
+### Why T = 0 is special
+
+Temperature cannot literally be 0, since it is a divisor. Implementations treat it as "always take the highest score". There is also a numerical reason to be careful near zero. With scores of 10, 9 and 8 at T = 1, everything is fine. At T = 0.1 they become 100, 90 and 80, and a plain `exp` in 32-bit floating point overflows, because the largest value it can handle is `exp(88.7)`. I ran it: the naive softmax returned `nan, nan, 0.0` at T = 0.1 and `nan, nan, nan` at T = 0.01. Subtracting the largest score from all of them first changes nothing mathematically and gives the correct `1.0, 0.0, 0.0` in both cases.[^5] Every real implementation does this.
+
+## The first lines of the parameter ledger
+
+GPT-3's published configuration has a model width of 12,288 and a context window of 2,048 tokens.[^3] With 50,257 vocabulary entries, the embedding matrix has 50,257 × 12,288 = 617,558,016 numbers, and the unembedding matrix is the same size. Together that is 1,235,116,032 parameters, or 0.71% of the 175 billion total.[^5] A full prompt of 2,048 tokens is 2,048 × 12,288 = 25,165,824 numbers at the start of the middle layers. The other 99.3% or so of the model is almost all in the repeated block. Parts 6 and 7 count where.
+
+## Limits of these measurements
+
+- The embeddings in the first half are a count-based stand-in, not the matrix of any GPT model. They show that directions exist in a learned space. They do not show what GPT's own space looks like. The analogy test set is 21 items I wrote, in four categories, and is too small for percentages to mean much.
+- The temperature experiment is on a counting model with 32 candidates. A real model's logits come from a network, and the shapes of its distributions differ, but the arithmetic of temperature is the same.
+- The corpus for that experiment is this blog's Markdown at the time of the run, 68 files and 120,844 tokens, which includes the earlier parts of this series. Rerunning the script later gives different counts.
+- Vocabulary size and layout details differ between model families, and the GPT-3 numbers here are one example.
+
+## Where this leads
+
+The vectors that come out of the embedding step know about their own token and nothing else. The "bank" result above is the demonstration. Part 6 covers **attention**, the mechanism that lets every vector look at the others and update itself using context, which is the invention the transformer is named for.
+
+## References
+
+[^1]: Vaswani et al., [Attention Is All You Need](https://arxiv.org/abs/1706.03762), 2017. The transformer, introduced for machine translation.
+[^2]: Grant Sanderson (3Blue1Brown), [Transformers, the tech behind LLMs](https://www.youtube.com/watch?v=wjZofJX0v4M). The framing of the data journey, GPT-3's 50,257-token vocabulary and 12,288-dimensional embeddings, and the logits, softmax and temperature discussion follow this video.
+[^3]: Brown et al., [Language Models are Few-Shot Learners](https://arxiv.org/abs/2005.14165), 2020, Table 2.1: GPT-3 175B has 96 layers, model width 12,288, 96 attention heads and a context window of 2,048 tokens. The vocabulary size is from reference 2; the paper describes using the same tokenization as GPT-2.
+[^4]: Levy, Goldberg, Dagan, [Improving Distributional Similarity with Lessons Learned from Word Embeddings](https://aclanthology.org/Q15-1016/), 2015. Describes count-based methods (positive PMI with SVD, and the 0.75 smoothing of the context distribution that I used) and their comparison with neural embeddings.
+[^5]: Methodology. [llm-series-05-tokens-embeddings-softmax.py](/files/llm-series-05-tokens-embeddings-softmax.py), Python 3.12.10, NumPy 2.5.3, SciPy 1.18.1. Embeddings: [text8](http://mattmahoney.net/dc/textdata.html) (17,005,207 tokens, 253,854 distinct), top 20,000 words, window of 5 words on each side (19,740,344 nonzero co-occurrence cells), positive PMI with context smoothing 0.75 (14,719,278 nonzero cells), truncated SVD to 100 dimensions, rows scaled to unit length, built in 36 seconds. Analogy items and the five "plural" training pairs are in the script; the eight test pairs were chosen before computing. Temperature: counts of the word after "the model" in the `blog` and `guides` Markdown on 2026-10-28, same cleaning as Part 1, log counts as scores, 1,000 draws with seed 0. Softmax overflow: float32 scores 10, 9 and 8 divided by T. Ledger: arithmetic from the figures in reference 3.
+[^6]: Mikolov et al., [Efficient Estimation of Word Representations in Vector Space](https://arxiv.org/abs/1301.3781), 2013. Reports word-vector analogy tests trained on billions of words.
