@@ -1,0 +1,102 @@
+---
+title: 'How an LLM Works: A Measured Tour in Eight Parts'
+description: 'Index and reading guide for an eight-part series that goes from a single neuron to the transformer, with one NumPy measurement per idea, the surprises along the way, and how to rerun everything.'
+pubDate: 2026-10-28
+updatedDate: 2026-10-28
+tags: ['ai', 'llm', 'tutorial', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+
+This is the map for a series of eight guides on how a large language model works, written for readers who have heard the terms (neural network, attention, embedding) and want to see them as arithmetic. The series starts from one artificial neuron and ends at the geometry that lets a transformer store more ideas than it has dimensions.
+
+Its one rule is that every idea comes with something I ran myself. The measurements are small, mostly NumPy on a laptop, and they say what they are and are not. Where a result contradicted what I expected, or what a source said, the guide says so, and four of those are listed below.
+
+## The path
+
+<Mermaid
+  caption="The order of the series. Parts 1 to 4 build and train a small network. Part 5 turns that into the two ends of a transformer, and parts 6 to 8 fill in the middle."
+  label="Flowchart from left to right. Parts 1 to 4 form one group on neural networks and training: what a network is, how it learns, backpropagation, training in practice. An arrow leads to part 5, the ends of a transformer. Then arrows lead through part 6, attention, part 7, the feed-forward block, and part 8, superposition."
+  code={`
+flowchart LR
+  A["1 Network"] --> B["2 Learning"] --> C["3 Backprop"] --> D["4 Practice"]
+  D --> E["5 Ends"] --> F["6 Attention"] --> G["7 MLP"] --> H["8 Superposition"]
+`}
+/>
+
+Read them in order the first time. Each part is written to stand alone when you look something up later, but the later ones lean on vocabulary introduced earlier: gradient in part 2, the weighted sum in part 1, softmax and the dot product in part 5.
+
+## The eight parts
+
+| Part | You will learn | What I measured |
+|---|---|---|
+| [1. A Next-Word Function and the Neural Network Inside It](/guides/llm-explained-01-next-word-and-neural-networks) | An LLM is a function from text to next-word probabilities; a neuron is a weighted sum | A counting model that generates text, and 13,002 parameters scoring at chance |
+| [2. How a Network Learns](/guides/llm-explained-02-cost-and-gradient-descent) | Cost, gradient descent, the learning rate | Cost and accuracy curves from five starts; a learning-rate sweep that ends at exactly 1.000 |
+| [3. Backpropagation and Mini-Batches](/guides/llm-explained-03-backpropagation) | How all gradients come from one backward pass | Backprop against brute force (25,000 to 35,000 times faster); mini-batch size against progress |
+| [4. Training in Practice](/guides/llm-explained-04-training-in-practice) | ReLU, vanishing gradients, overconfidence, memorization | Eight-layer sigmoid versus ReLU; noise images read as digits; shuffled labels |
+| [5. Embeddings, Softmax and Temperature](/guides/llm-explained-05-tokens-embeddings-softmax) | The two ends of a transformer | Directions in an embedding space; temperature on a real distribution; softmax overflow |
+| [6. Attention](/guides/llm-explained-06-attention) | Query, key, value, the mask, the n-squared cost | A hand-written backward pass that trains one head to 100% |
+| [7. The MLP Block](/guides/llm-explained-07-mlp-facts) | A feed-forward block as a table of if-then rules | A ReLU AND gate; how many neurons memorize 900 facts; the full GPT-3 parameter ledger |
+| [8. Superposition](/guides/llm-explained-08-superposition) | Why more features than dimensions can fit | The Welch bound against real vectors; reading features back from a sum; a 5-dimensional autoencoder |
+
+## What the numbers add up to
+
+The parameter ledger of GPT-3, built a piece at a time across parts 5 to 7 from the published configuration, comes out as:
+
+| Piece | Parameters | Share of 175B |
+|---|---|---|
+| Embedding and unembedding | 1,235,116,032 | 0.71% |
+| Attention, 96 layers | 57,982,058,496 | 33.1% |
+| Feed-forward blocks, 96 layers | 115,970,015,232 | 66.3% |
+| Sum | 175,187,189,760 | |
+
+Two thirds of the model is the block that part 7 describes as a table of rules, and a third is the attention that part 6 builds.
+
+## Four things that did not go the way I expected
+
+- **ReLU lost to sigmoid at first.** On the shallow digit network, ReLU hidden neurons scored 85.5% against sigmoid's 94.4% until I paired them with a cross-entropy cost, where they became the best of four combinations. Dead neurons were not the cause. ([Part 4](/guides/llm-explained-04-training-in-practice))
+- **Almost-perpendicular has a hard limit.** In 100 dimensions, at most about 103 vectors can sit within 1 degree of perpendicular to each other, and no optimizer can fix the typical pair, which stays about 5.6 degrees off. ([Part 8](/guides/llm-explained-08-superposition))
+- **A trained attention head was untidy.** It solved its task perfectly while putting nearly half its weight on the query position itself. ([Part 6](/guides/llm-explained-06-attention))
+- **Trained feed-forward neurons were not sparse.** In the hand-built block, at most 1 neuron in 12 was on. In the trained blocks, 40% to 50% were. ([Part 7](/guides/llm-explained-07-mlp-facts))
+
+## What this series did not do
+
+No part measured the weights of a real transformer. I could not download any on the machine I used, so every statement about GPT-3 or similar models is arithmetic from a published table or a cited paper, never an inspection. The embeddings in part 5 are count-based, from the text8 corpus, not a neural model's. The networks are small, each result is mostly one random start, and the guides repeat these limits where they matter. Treat the experiments as demonstrations of mechanisms.
+
+For the inference side of the story, which is what happens between pressing send and reading the first word, there is a separate guide with timing measurements: [How an LLM Answers One Prompt](/guides/how-an-llm-answers-one-prompt).
+
+## Rerunning everything
+
+Each guide ends with a methodology footnote and links to its script. They are single files that need only NumPy (plus SciPy for part 5). I ran them on Python 3.12 and NumPy 2.5. Each script's docstring lists its arguments, and most can run one experiment at a time with `--only=`. Parts 1 to 4 download the MNIST digits (about 11 MB) the first time, and part 5 needs the 31 MB text8 corpus, which you fetch yourself. The two long ones are part 2 (about 17 minutes for everything in my run) and part 4 (more than 10 minutes).
+
+| Part | Script |
+|---|---|
+| 1 | [llm-series-01-next-word-and-network.py](/files/llm-series-01-next-word-and-network.py) |
+| 2 | [llm-series-02-cost-and-gradient-descent.py](/files/llm-series-02-cost-and-gradient-descent.py) |
+| 3 | [llm-series-03-backpropagation.py](/files/llm-series-03-backpropagation.py) |
+| 4 | [llm-series-04-training-in-practice.py](/files/llm-series-04-training-in-practice.py) |
+| 5 | [llm-series-05-tokens-embeddings-softmax.py](/files/llm-series-05-tokens-embeddings-softmax.py) |
+| 6 | [llm-series-06-attention.py](/files/llm-series-06-attention.py) |
+| 7 | [llm-series-07-mlp-facts.py](/files/llm-series-07-mlp-facts.py) |
+| 8 | [llm-series-08-superposition.py](/files/llm-series-08-superposition.py) |
+
+Parts 1 and 5 read this site's Markdown as their text corpus, so their exact counts change whenever I publish, and they say so.
+
+## Watch alongside
+
+The structure of the series follows 3Blue1Brown's deep learning videos,[^1] which I link as companions in each part. They explain with animation what the guides explain with measurements, and the guides do not require them.
+
+| Video | Used in |
+|---|---|
+| [Large Language Models explained briefly](https://www.youtube.com/watch?v=LPZh9BOjkQs) | Part 1 |
+| [But what is a neural network?](https://www.youtube.com/watch?v=aircAruvnKk) | Part 1 |
+| [Gradient descent, how neural networks learn](https://www.youtube.com/watch?v=IHZwWFHWa-w) | Parts 2 and 4 |
+| [Backpropagation, intuitively](https://www.youtube.com/watch?v=Ilg3gGewQ5U) and [Backpropagation calculus](https://www.youtube.com/watch?v=tIeHLnjs5U8) | Part 3 |
+| [Transformers, the tech behind LLMs](https://www.youtube.com/watch?v=wjZofJX0v4M) | Part 5 |
+| [Attention in transformers, step-by-step](https://www.youtube.com/watch?v=eMlx5fFNoYc) | Part 6 |
+| [How might LLMs store facts](https://www.youtube.com/watch?v=9-Jl0dxWQs8) | Parts 7 and 8 |
+
+## References
+
+[^1]: Grant Sanderson (3Blue1Brown), the [deep learning series](https://www.3blue1brown.com/topics/neural-networks). All figures quoted in this index come from the guides listed above, each of which documents its own method.
