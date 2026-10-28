@@ -1,0 +1,137 @@
+---
+title: 'How an LLM Works, Part 7: The MLP Block, Where Facts Are Thought to Live'
+description: 'A feed-forward block as a table of if-then rules, built by hand and trained, with the ReLU AND gate measured, how many neurons it takes to memorize 900 facts, and the finished GPT-3 parameter ledger.'
+pubDate: 2026-10-28
+updatedDate: 2026-10-28
+tags: ['ai', 'llm', 'tutorial', 'deep-dive']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+[Part 6](/guides/llm-explained-06-attention) moved information between tokens. After attention, each token's vector carries context from the others, and the transformer now does something that looks plain by comparison. It runs every vector, separately, through a **feed-forward block**, also called an **MLP** (multilayer perceptron), which is the same layer-matrix-ReLU-layer-matrix structure as the digit network in Part 1. This block holds about two thirds of GPT-3's parameters, and there is evidence, though not a proof, that it is where much of a model's factual knowledge sits.[^1]
+
+The matching video is 3Blue1Brown's chapter on how LLMs might store facts.[^1] It uses a toy example to show how a block like this could store "Michael Jordan plays basketball". I built that example and measured it, then trained a block to do something similar from scratch.
+
+## What the block does, in three steps
+
+For each token's vector, independently and with the same weights at every position:
+
+1. **Up-projection.** Multiply by a big matrix and add a bias. Each *row* of the matrix is a question, and its dot product with the vector says how well the vector matches it. In GPT-3 there are 49,152 rows, four times the model width.[^2]
+2. **ReLU.** Negative answers become zero, positive ones stay. Each of the 49,152 numbers that results is a **neuron**: on or off, and by how much.
+3. **Down-projection.** Multiply by another big matrix. Each *column* is a direction in the vector space, and a neuron that is on adds its column to the output. A neuron that is off adds nothing. The result is added back onto the original vector.
+
+<Mermaid
+  caption="The feed-forward block. It runs separately on each token's vector. Rows of the first matrix ask questions, and columns of the second matrix are the answers that get written back."
+  label="Flowchart. A token vector goes into the up-projection, which asks many questions (one per row) and adds a bias. ReLU keeps only positive answers, giving neurons that are on or off. The down-projection adds the column belonging to each active neuron. The result is added back to the original vector."
+  code={`
+flowchart LR
+  A["Token vector"] --> B["Up-projection: one question per row, plus bias"]
+  B --> C["ReLU: neurons on or off"]
+  C --> D["Down-projection: each active neuron adds its column"]
+  D --> E["Added back onto the token vector"]
+  A --> E
+`}
+/>
+
+Seen this way, the block is a large collection of rules of the form "if the vector looks like this, add that". The up-projection holds the "if", the down-projection holds the "that".
+
+## A hand-built block that stores facts
+
+To see the idea work, I constructed such a block directly, with no training. The setting is a toy vector space of 256 dimensions. Twenty random directions stand for first names, twenty for last names and five for attributes (a sport, say). Because directions in 256 dimensions are almost perpendicular to each other by chance, their largest overlap was 0.18.[^3] A token that is "a person called first-name 7 and last-name 3" is the sum of those two directions.
+
+To store a fact, "first-name 7 and last-name 3 means attribute 2", add one neuron:
+
+- its row in the up-projection is the sum of the two name directions, and its bias is −1;
+- its column in the down-projection is the attribute direction.
+
+Now see what that neuron computes. The dot product of the input vector with the row should be about 2 when both names match, because each name contributes 1, about 1 when only one name matches, and about 0 when neither does. For the first neuron I built, the measured values were 1.95, 1.10 and 0.08. Subtract the bias of 1 and you have 1, 0 and −1. ReLU turns the −1 into 0. So the neuron is on only when both names are present, an **AND gate** made out of an addition, a threshold and a ReLU.
+
+I stored 12 facts this way, then fed in all 400 possible (first name, last name) combinations. Twelve are stored facts, 324 share a first or last name with one, and 64 share nothing:
+
+<Chart
+  type="bar"
+  height={320}
+  format="plain"
+  caption="Length of the vector the block writes, by kind of input, with ReLU and with the ReLU removed. The AND gate writes something only for stored facts. Without it, every input gets a large, meaningless output."
+  label="Grouped bar chart. With ReLU: stored facts 1.015, inputs sharing one name 0.056, inputs sharing nothing 0.000. Without ReLU: stored facts 5.024, sharing one name 4.992, sharing nothing 5.370."
+  labels={['stored fact', 'shares one name', 'shares nothing']}
+  series={[
+    { name: 'with ReLU', data: [1.015, 0.056, 0.0] },
+    { name: 'ReLU removed', data: [5.024, 4.992, 5.370] },
+  ]}
+  yTitle="length of the written vector"
+/>
+
+With ReLU, all 12 stored facts came out right and wrote a vector of length 1.015, while the inputs that shared one name got 0.056 and the unrelated ones got exactly 0. Without ReLU, the block was still right on all 12 stored facts, which is easy to miss, but it wrote a vector of length about 5 for *every* input, because the neurons that should be off were producing −1 and that goes straight through a linear layer. In other words, the nonlinearity is what turns a pile of dot products into "do nothing unless the condition holds".
+
+The result is not perfectly clean. About 0.69 neurons per partial-match input switched on, weakly, and the output for those was 0.056 against 1.015 for a real hit, a leak of about 5.5%. The cause is the overlap between nominally different directions: for neuron 0, an input with one matching name scored 1.10 before the bias, not 1.00, so it cleared the threshold. In a real model, with thousands of facts and directions that overlap more, this kind of crosstalk is a central problem, and Part 8 is about it.
+
+## Can gradient descent build one?
+
+Constructing a block by hand shows the mechanism could work. Whether training finds it is a separate question. I set up a pure memorization task: 30 first names and 30 last names, each an almost-orthogonal random vector, and all 900 combinations assigned one of 10 attributes *at random*. There is no pattern to find, so the only way to get the answers right is to store them. The table holds 900 × log₂(10) ≈ 2,990 bits of information. I trained blocks of different widths (hidden neurons) to recall it, with the same loss, optimizer and 3,000 full-batch steps for each:[^3]
+
+<Chart
+  type="bar"
+  height={320}
+  format="percent"
+  caption="Share of the 900 random facts a trained block recalls correctly, by number of hidden neurons. A guess is right 10 percent of the time."
+  label="Bar chart of recall by hidden neurons. 4 neurons: 26.1 percent. 8: 36.3. 16: 74.9. 32: 100. 64: 100. 128: 100. 256: 100. 512: 100."
+  labels={['4', '8', '16', '32', '64', '128', '256', '512']}
+  series={[{ name: 'facts recalled', data: [26.1, 36.3, 74.9, 100, 100, 100, 100, 100] }]}
+  xTitle="hidden neurons"
+  yTitle="facts recalled"
+/>
+
+| Hidden neurons | Parameters | Facts recalled |
+|---|---|---|
+| 4 | 310 | 26.1% |
+| 8 | 610 | 36.3% |
+| 16 | 1,210 | 74.9% |
+| 32 | 2,410 | 100% |
+| 128 | 9,610 | 100% |
+| 512 | 38,410 | 100% |
+
+Recall rises with width and hits 100% at 32 neurons, which is 2,410 parameters for 900 facts. I did not test widths between 16 and 32, so the real threshold lies somewhere in that gap. A few thousand parameters hold hundreds of arbitrary facts: 16 neurons and 1,210 parameters recalled 674 of the 900 (pure guessing would get about 90), and 32 neurons held all 900 with 2,410 parameters. That is a few tenths of a fact per parameter in this toy setting.
+
+One thing the hand-built version predicted did not show up. In the hand-built block, at most 1 neuron in 12 was on for the average input. In the trained blocks, about 40% to 50% of neurons were on for the average input, at every width.[^3] Gradient descent found a way to store the table, but not the tidy sparse "one neuron per fact" form. This matches what the video says about real models, that the clean version is a convenient story and the reality is messier, and it sets up Part 8.
+
+## The GPT-3 ledger, finished
+
+The pieces of the parameter count are now all on the table. With a width of 12,288 and 96 layers, and each MLP's hidden size four times the width:[^2]
+
+| Piece | Parameters | Share of 175B |
+|---|---|---|
+| Embedding and unembedding (Part 5) | 1,235,116,032 | 0.71% |
+| Attention, 96 layers (Part 6) | 57,982,058,496 | 33.1% |
+| MLP, 96 layers (this part) | 115,970,015,232 | 66.3% |
+| **Sum** | **175,187,189,760** | |
+
+One MLP is 2 × 12,288 × 49,152 = 1,207,959,552 weights, exactly twice an attention block's 4 × 12,288², since the MLP's hidden layer is four times as wide. So two thirds of the model sits here, in 4,718,592 neurons across the 96 layers.[^3]
+
+The sum lands within 0.11% of the advertised 175 billion. One caveat on that closeness: I counted the output matrix as separate from the embedding matrix, following the video. If instead the two share one set of numbers, which is how GPT-2 is built and which, as far as I can tell, the GPT-3 paper does not state, the sum becomes 174,569,631,744, which is 0.25% under and rounds to 175 billion just as well. The arithmetic cannot tell the two apart, and a learned position table (25 million parameters, if built as in GPT-2), the biases and the normalization layers are all small enough to vanish in the rounding.
+
+## What is and is not established
+
+The idea that facts live mostly in the MLP blocks has real support. Researchers have argued that these layers behave like key-value memories, where the up-projection rows match patterns and the down-projection columns hold what follows.[^4] Work on editing models found that changing weights in mid-layer MLPs can rewrite a single fact, which fits the picture of facts being stored there.[^5] But the evidence is of a particular kind. It shows where an edit takes effect, and the picture of the model as a clean table of if-then rules is an idealization, as the 40% to 50% activity in my trained blocks suggests. I would say "much of the factual recall appears to run through the MLPs", and that is also about as far as I trust it.
+
+## Limits of these measurements
+
+- The hand-built block uses random, nearly orthogonal directions and a single bias. Real embeddings are not like that, and real facts are not independent pairs. It is a model of the mechanism, not of any model's contents.
+- The trained experiment memorizes random labels, which is the extreme case of "no pattern". Real facts are structured, and a model can share neurons between related facts. The capacity numbers describe this task only, with one seed per width and no tuning.
+- "Facts per parameter" ignores that real models also use their parameters for everything else.
+- Activity rates of 40% to 50% depend on this input encoding and this optimizer. I did not try to push them down.
+- The ledger arithmetic is from the paper's table and the 4× rule it states, not from a real checkpoint.
+
+## Where this leads
+
+One question from the hand-built block is still open. If each fact needs its own neuron, and each name needs its own direction, a space of 12,288 dimensions could only hold 12,288 independent directions. Yet models seem to know far more than that. The overlap that caused a 5.5% leak in my toy is the key to this. In high dimensions, many more directions fit if you accept a little overlap, and that is what Part 8, the last of the series, measures.
+
+## References
+
+[^1]: Grant Sanderson (3Blue1Brown), [How might LLMs store facts](https://www.youtube.com/watch?v=9-Jl0dxWQs8). The three-step description of the block, the Michael Jordan toy example and the AND-gate role of ReLU follow this video. It says that exactly how models store facts is not settled.
+[^2]: Brown et al., [Language Models are Few-Shot Learners](https://arxiv.org/abs/2005.14165), 2020. Table 2.1 lists 96 layers and width 12,288. The text of Section 2.1 states that the feed-forward layer is always four times the size of the bottleneck layer.
+[^3]: Methodology. [llm-series-07-mlp-facts.py](/files/llm-series-07-mlp-facts.py), Python 3.12.10, NumPy 2.5.3. Hand-built block: width 256, 20 first-name, 20 last-name and 5 attribute directions, random unit vectors, seed 0; 12 stored facts, bias -1 on each neuron, evaluated on all 400 combinations; the "without ReLU" run keeps everything else the same. Trained block: width 64 inputs (sum of two fixed random unit vectors), one hidden ReLU layer, a softmax over 10 classes, 900 facts with random labels, Adam at learning rate 0.01, 3,000 full-batch steps, seed 1; "facts recalled" is training-set accuracy, and the active fraction is the share of hidden neuron outputs above zero over all 900 inputs. Ledger: arithmetic from reference 2.
+[^4]: Geva, Schuster, Berant, Levy, [Transformer Feed-Forward Layers Are Key-Value Memories](https://arxiv.org/abs/2012.14913), 2021.
+[^5]: Meng, Bau, Andonian, Belinkov, [Locating and Editing Factual Associations in GPT](https://arxiv.org/abs/2202.05262), 2022.
