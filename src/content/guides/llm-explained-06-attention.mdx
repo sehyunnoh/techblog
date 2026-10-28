@@ -1,0 +1,151 @@
+---
+title: 'How an LLM Works, Part 6: Attention, With Q, K and V Learned From Scratch'
+description: 'How attention lets each token look at the others, built in NumPy, with a leak test for the mask, a tiny model trained to 100 percent by hand-written backprop, and what the n by n pattern costs.'
+pubDate: 2026-10-28
+updatedDate: 2026-10-28
+tags: ['ai', 'llm', 'tutorial', 'deep-dive']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+[Part 5](/guides/llm-explained-05-tokens-embeddings-softmax) ended on a problem. An embedding gives every token one fixed vector, so "bank" means the same thing next to "river" as next to "interest rate". **Attention** is the step that fixes this. It lets each token's vector look at the other tokens' vectors and update itself using what it finds, so that the vector leaving the step reflects the context and not only the word. It is the part of the transformer the architecture is named for, and the part that makes it expensive.
+
+The matching video is 3Blue1Brown's chapter on attention.[^1] This text does not depend on it. Following the series' habit, I built the mechanism, tested it, and trained a miniature version to see whether the vocabulary of the next section describes anything real.
+
+## Queries, keys and values
+
+Think of a lookup in a library. You have a **query**: what you are looking for. Every book has a **key**: what it says it is about. When a query matches a key, you take something from that book, its **value**. Attention does this in a soft way, for every token at once, with numbers.
+
+Each token's vector `x` is multiplied by three learned weight matrices:
+
+- `q = x · W_Q` is the question this token asks ("is there an adjective in front of me?").
+- `k = x · W_K` is how each token advertises itself to those questions ("I am an adjective, right before you").
+- `v = x · W_V` is what each token hands over if it is looked at.
+
+For every pair of tokens, take the dot product of one token's `q` with the other's `k` (Part 5: a dot product measures how well two directions line up). A big number means "this token is relevant to that one". That gives a table of scores with one row per asking token. Softmax turns each row into weights that sum to 1, and the output for that token is the weighted sum of all the `v` vectors. In the paper this is one line, `softmax(QKᵀ / √d_k) V`.[^2] The division by `√d_k` keeps the scores from growing with the vector length.
+
+<Mermaid
+  caption="One attention head. The three weight matrices are learned. Everything else is fixed arithmetic, and the output is added onto the original vectors."
+  label="Flowchart. The input x is multiplied by W_Q, W_K and W_V to give Q, K and V. Q times K transposed, divided by the square root of d_k, with future positions set to minus infinity, gives a table of scores. Softmax on each row gives the attention pattern. The pattern times V gives the output."
+  code={`
+flowchart LR
+  X["Input x"] --> Q["Q = x W_Q"]
+  X --> K["K = x W_K"]
+  X --> V["V = x W_V"]
+  Q --> S["Scores Q K^T / sqrt(d_k), future set to -inf"]
+  K --> S
+  S --> P["Softmax per row: the pattern"]
+  P --> O["Output = pattern x V"]
+  V --> O
+`}
+/>
+
+The whole head, as I wrote it in NumPy, is these lines:[^3]
+
+```python
+def attention(x, wq, wk, wv, causal=True):
+    q, k, v = x @ wq, x @ wk, x @ wv
+    s = q @ k.T / np.sqrt(wq.shape[1])
+    if causal:
+        s = np.where(np.tril(np.ones_like(s, dtype=bool)), s, -np.inf)
+    a = softmax_rows(s)          # the attention pattern, one row per token
+    return a @ v, a
+```
+
+The result is added onto the token's original vector, as a change to it. In the video's example, "creature" receives a nudge from "fluffy" and "blue", and ends up as a vector meaning "a fluffy blue creature". The original is kept and refined, not replaced.
+
+## The mask: no peeking at the future
+
+Part 5 mentioned that during training, every position predicts the token after it, all at once. That only works if position 5 cannot see position 6, because position 6 is the answer. The fix is the line with `np.tril`: before the softmax, every score where the asker is earlier than the looked-at token is set to minus infinity. After softmax those weights are exactly 0, and the rest of each row still sums to 1.
+
+To be sure it actually blocks the leak, I tested it. I made a random 16-token sequence, changed the vector at position 10, and compared every output before and after the change.[^3]
+
+| | Largest output change at positions before 10 | Largest output change at positions 10 and after |
+|---|---|---|
+| With the mask | 0 (exactly) | up to 16.5 |
+| Without the mask | 16.3 | up to 30.2 |
+
+With the mask, nothing before the change moved at all, so information only flows forward. Without it, the earlier positions changed substantially too. A model trained without the mask would learn to read the answer off the page.
+
+## Does it really learn to ask and answer?
+
+Everything above is a description. Does gradient descent, given only a loss, actually produce matrices that behave like "queries" and "keys"? To check, I built the smallest task I could think of that needs attention, and a model with nothing but one head.
+
+The task is **associative recall**. Each sequence has three key-value pairs and then a question. For example, keys 0, 3 and 4 with values 6, 0 and 1, then "what goes with key 4?" The right answer is 1. Each key appears once per sequence, values are random, and chance is 1 in 8. The model embeds each pair as the sum of a key embedding and a value embedding, runs one attention head from the question position, and reads the answer off the output with a final matrix.
+
+There is no framework here. I wrote the backward pass by hand, using the rules from Part 3 and the derivative of softmax, and checked it against nudging parameters: across 24 sampled parameters in all six weight matrices, the largest relative difference was 1.2×10⁻⁶.[^3] Then I trained two models for 3,000 steps with the same settings. One could learn everything. In the other I set `W_Q` and `W_K` to zero and froze them, which makes every score 0 and the attention uniform.
+
+| Model | Accuracy after 100 steps | After 3,000 steps |
+|---|---|---|
+| Learned attention | 100.0% | 100.0% |
+| Uniform attention (frozen) | 45.5% | 45.7% |
+
+(5,000 fresh sequences each time. Chance is 12.5%.) The learned version solved it within 100 steps. The uniform version stalled at 45.7%, which is well above chance but is a ceiling for this model, and the ceiling has a simple explanation. Without attention, the output is an average of all four positions' values, so the model can tell which values are present in the sequence but not which key each one belongs to. The best you can do from that is to guess the most repeated value among the three. A short calculation of that strategy gives 45.3% (it is right 1/3 of the time when all three values differ, 2/3 when two match, always when all three match). The measured 45.7% sits on top of it.[^3]
+
+So the model without attention is doing as well as the information it has can possibly allow, and it is the attention step that supplies the missing link between a key and its value.
+
+What did the trained head look at? Averaged over the 5,000 test sequences, from the question position:
+
+<Chart
+  type="bar"
+  height={300}
+  format="plain"
+  caption="Average attention weight from the question position after training, over 5,000 sequences. The head concentrates on the matching pair and almost ignores the other two. A uniform head would put 0.25 on each position."
+  label="Bar chart of attention weights. Matching pair 0.506. Each of the two other pairs 0.012. The question position itself 0.470."
+  labels={['matching pair', 'each other pair', 'question position itself']}
+  series={[{ name: 'attention weight', data: [0.506, 0.012, 0.470] }]}
+  yTitle="average attention weight"
+/>
+
+The matching pair got the highest weight of the three pairs in 100% of the sequences, while each non-matching pair got about 1%. This is the mechanism the library analogy promised: the question's `q` lines up with the matching pair's `k`, and that pair's `v` carries the value across.
+
+One result I did not expect: about 47% of the weight went to the question position itself, not only to the matching pair. The answer is still read out perfectly, since the question position holds no value to pass on, but it means the head's pattern is not the clean one-hot lookup that the library story suggests. I did not investigate why. Trained attention patterns in real models are generally untidy, and this is a small example of it.
+
+## Many heads at once
+
+One head can ask one kind of question. Language needs many: grammar, who a pronoun refers to, topic, tone. So a transformer layer runs many heads in parallel, each with its own `W_Q`, `W_K` and `W_V`, each producing its own pattern and its own proposed change, and all the changes are added to the original vector. GPT-3 has 96 heads per layer, with 128 numbers per head's query and key (96 × 128 = 12,288, the model width).[^4] I did not test multi-head attention. It is the same computation repeated with different weights, and the training run above is a single head.
+
+The ledger from Part 5 continues here. Each head has four matrices of 12,288 × 128 (query, key, and the value step written as a down-projection and an up-projection, as in the video), which is 6,291,456 parameters. Times 96 heads is 603,979,776 per layer, which is exactly 4 × 12,288², and times 96 layers is 57,982,058,496, about 58 billion, or 33.1% of 175 billion.[^3] With the 0.7% from Part 5, about a third of the model is accounted for, and the rest is the subject of Part 7.
+
+## What the n × n table costs
+
+The attention pattern has one row and one column per token, so the table grows with the square of the number of tokens. I measured one head on CPU in float32, with a key size of 128, as the number of tokens doubled:[^3]
+
+<Chart
+  type="line"
+  height={320}
+  format="plain"
+  logY
+  caption="Time for one attention head (scores, mask, softmax, weighted sum) in NumPy on CPU as the number of tokens doubles. Each doubling costs roughly four times as much, the signature of an n-squared table."
+  label="Line chart on a log scale. Number of tokens 256, 512, 1024, 2048, 4096, 8192 against milliseconds: 0.34, 1.46, 4.86, 19.99, 82.41, 303.99."
+  labels={['256', '512', '1,024', '2,048', '4,096', '8,192']}
+  series={[{ name: 'milliseconds per head', data: [0.34, 1.46, 4.86, 19.99, 82.41, 303.99] }]}
+  xTitle="tokens"
+  yTitle="milliseconds (log scale)"
+/>
+
+Each doubling multiplied the time by 4.25, 3.34, 4.11, 4.12 and 3.69, close to the 4.0 that pure n² would give. The pattern itself is 4 bytes per entry: 16 MiB at 2,048 tokens, 64 MiB at 4,096 and 256 MiB at 8,192, for one head in one layer.
+
+Scale that to GPT-3's own numbers. A 2,048-token window means 4,194,304 entries per pattern, times 96 heads and 96 layers, or 38.7 billion entries, which would be 72 GiB at two bytes each if all of them were stored at once.[^3] Real implementations do not store them all. They compute the pattern in small tiles and throw it away as they go, a technique introduced as FlashAttention, which cuts the memory without cutting the n² arithmetic.[^5] That is why the cost of a long context shows up as time even when memory is under control, and why the context size from Part 5 is a hard design decision and not a free setting.
+
+## Limits of these measurements
+
+- The trained model is one head, one layer, a toy task with no word order at all. Real models add position information to the embeddings, because nothing in this attention knows which token came first. The experiment shows that gradient descent can build query-key matching. It says nothing about what GPT-3's 9,216 heads do.
+- The timings are NumPy on a CPU with 32-bit floats and one head. GPU kernels are very different in speed, and they scale as n² in arithmetic too. Only the shape of the curve transfers.
+- The 72 GiB figure is arithmetic on a naive implementation. No production system stores that.
+- The mask test used random weights and one changed position. It demonstrates the mechanism; it does not audit any model.
+- I did not examine why the trained head puts half its weight on the question position.
+
+## Where this leads
+
+Attention moves information between tokens. It does not do much with that information once it arrives. Each token's vector now carries context, and the next step, the feed-forward block of Part 7, processes every vector independently. That block holds about two thirds of the parameters, and, as Part 7 explains, it is where the evidence points for where a model stores facts.
+
+## References
+
+[^1]: Grant Sanderson (3Blue1Brown), [Attention in transformers, step-by-step](https://www.youtube.com/watch?v=eMlx5fFNoYc). The query, key and value framing, the "fluffy blue creature" example, the mask, multi-head attention, and the parameter counting follow this video.
+[^2]: Vaswani et al., [Attention Is All You Need](https://arxiv.org/abs/1706.03762), 2017. Defines scaled dot-product attention as `softmax(QKᵀ/√d_k)V`.
+[^3]: Methodology. [llm-series-06-attention.py](/files/llm-series-06-attention.py), Python 3.12.10, NumPy 2.5.3. Mask test: 16 tokens, width 32, head size 8, standard normal weights, position 10 perturbed with a random vector. Timing: one head, d_k = 128, float32, causal mask, median of 5 runs per length, on an Intel Core Ultra 7 258V (8 cores) laptop on Windows 11. Associative recall: 8 possible keys, 8 possible values, 3 distinct keys per sequence, width 16, one head, hand-written backward pass (gradient checked by central differences with a nudge of 1e-6), plain gradient descent with learning rate 0.5, mini-batches of 64 sequences, 3,000 steps, seed 0, evaluation on 5,000 fresh sequences. The "uniform" model has W_Q and W_K set to zero and not trained. GPT-3 arithmetic uses the figures in reference 4.
+[^4]: Brown et al., [Language Models are Few-Shot Learners](https://arxiv.org/abs/2005.14165), 2020, Table 2.1: GPT-3 175B has 96 layers, model width 12,288, 96 heads of size 128 and a context window of 2,048 tokens.
+[^5]: Dao et al., [FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness](https://arxiv.org/abs/2205.14135), 2022.
