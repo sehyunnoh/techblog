@@ -1,0 +1,145 @@
+---
+title: 'How an LLM Works, Part 8: Superposition, Fitting More Ideas Than Dimensions'
+description: 'Why a 12,288-dimensional space can hold far more than 12,288 features: the geometry of almost-perpendicular vectors, a read-back test, and a tiny network that packs 20 features into 5 dimensions.'
+pubDate: 2026-10-28
+updatedDate: 2026-10-28
+tags: ['ai', 'llm', 'tutorial', 'deep-dive']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+
+[Part 7](/guides/llm-explained-07-mlp-facts) left a puzzle. A block that stores one fact per neuron needs one direction per name and one direction per fact, but a space with 12,288 coordinates has only 12,288 mutually perpendicular directions, and models seem to know far more than that. The resolution is that directions do not need to be perfectly perpendicular, only nearly so, and that costs a little interference. This is the last part of the series, and after the measurements I put the whole thing back together.
+
+The matching section is at the end of 3Blue1Brown's chapter on how LLMs might store facts, and the idea comes from a line of research on **superposition**.[^1] [^2] This text does not depend on the video.
+
+## The geometry: how many directions fit?
+
+In a plane, at most 2 directions are exactly perpendicular, in 3 dimensions 3, and in `d` dimensions, `d` of them. Allow a little slack and the picture changes, but it is easy to overstate how much. Here is what is actually true in 100 dimensions.
+
+A mathematical result called the **Welch bound** says that among `N` unit vectors in `d` dimensions, some pair has a cosine of at least `√((N − d) / (d(N − 1)))`, in absolute value.[^3] Evaluated for `d = 100`:[^4]
+
+| Vectors N | Smallest possible largest \|cos\| | That pair is at best this far from perpendicular |
+|---|---|---|
+| 100 | 0 | 0° (exactly perpendicular is possible) |
+| 101 | 0.0100 | 0.6° |
+| 200 | 0.0709 | 4.1° |
+| 1,000 | 0.0949 | 5.4° |
+| 10,000 | 0.0995 | 5.7° |
+
+A tempting way to describe the idea is that thousands of vectors fit in 100 dimensions with every pair within a degree of perpendicular. The bound says that cannot be true. A tolerance of 1° (all pairs between 89° and 91°) allows at most about 103 vectors in 100 dimensions, hardly more than the dimension itself. A looser tolerance is not ruled out. The bound only sets a floor: it says every pair within about 6° of perpendicular is not excluded for 10,000 vectors in 100 dimensions, but it does not prove such a set exists. The video, following the research literature, says the number of vectors that fit at a fixed tolerance grows exponentially with the dimension. I did not verify that, and my bound constrains only one side.
+
+I checked how close real vectors come. I drew 10,000 random unit vectors in 100 dimensions and measured every one of the 50 million pairs:[^4]
+
+- The root-mean-square cosine was 0.1000, within 0.5% of the lowest value the Welch bound permits for that many vectors (0.0995). Random directions are about as spread out as any directions can be, on average.
+- The largest cosine was 0.533, a pair only 57.8° apart, so random vectors have some badly overlapping pairs.
+- 86.3% of pairs fell outside the 89° to 91° band, and 38.6% outside 85° to 95°.
+
+Then I tried to push the vectors apart with gradient descent, on 2,000 vectors, by penalizing any pair with a cosine above 0.15:[^4]
+
+| Step | Largest \|cos\| | RMS cos | Pairs outside 85° to 95° |
+|---|---|---|---|
+| 0 (random) | 0.514 | 0.1000 | 38.6% |
+| 50 | 0.354 | 0.0977 | 41.1% |
+| 150 | 0.276 | 0.0976 | 43.2% |
+| 300 | 0.224 | 0.0976 | 44.4% |
+
+The worst pair improved a lot, from 0.514 to 0.224. The typical pair did not move: the RMS settled at 0.0976, which is the Welch limit for 2,000 vectors (0.0975). The share of pairs outside 85° to 95° even rose, because the penalty only acts on the tail and squeezes pairs up against the 0.15 threshold. So the optimizer could tame the tail but not the middle, and the middle sits about 5.6° off perpendicular no matter what. I also tried the same optimizer on all 10,000 vectors, and after 150 steps the largest cosine had only dropped from 0.533 to 0.475. That is a limit of my optimizer and step size and not a result about the problem.[^4]
+
+The takeaway is a specific one. In a high-dimensional space you can store far more directions than dimensions if you accept that every pair overlaps by about 10% in cosine terms, and the overlap is the price.
+
+## Reading features back from a sum
+
+Does that overlap ruin things? It depends on how many features are active at the same time. I assigned a random direction to each of `N` features in 100 dimensions, then built an input by adding up `k` randomly chosen active features. To decode, I took the dot product of the input with all `N` directions and kept the `k` largest. The question is whether that set is exactly the active set:[^4]
+
+<Chart
+  type="line"
+  height={340}
+  format="percent"
+  caption="How often the exact set of active features is recovered from their sum, in 100 dimensions, for N features of which k are active (1,000 trials each). Sparse sums survive 100 times more features than dimensions. Dense sums do not. The lines for k = 1 and k = 2 lie on top of each other at 100 percent."
+  label="Line chart of exact recovery rate against number of features N (100, 300, 1000, 3000, 10000) for k active features. k=1 and k=2 stay at 100 percent. k=3 is 99.9, 99.9, 100, 99.9 and 98.9. k=5 falls from 93.1 to 87.4, 74.2, 57.7 and 39.8. k=10 falls from 17.0 to 4.0, 0.2, 0.0 and 0.0."
+  labels={['100', '300', '1,000', '3,000', '10,000']}
+  series={[
+    { name: 'k = 1', data: [100, 100, 100, 100, 100] },
+    { name: 'k = 2', data: [100, 100, 100, 100, 100] },
+    { name: 'k = 3', data: [99.9, 99.9, 100.0, 99.9, 98.9] },
+    { name: 'k = 5', data: [93.1, 87.4, 74.2, 57.7, 39.8] },
+    { name: 'k = 10', data: [17.0, 4.0, 0.2, 0.0, 0.0] },
+  ]}
+  xTitle="number of features N (in 100 dimensions)"
+  yTitle="exact recovery"
+/>
+
+With 10,000 features in 100 dimensions, 100 times more features than dimensions, a sum of 3 active features was decoded exactly 98.9% of the time, and 1 or 2 active features 100% of the time. Make the input denser and it degrades quickly: 5 active features were recovered 39.8% of the time at 10,000 features, and 10 active features almost never once there were 1,000 or more features.
+
+That is the condition under which superposition is cheap. Each feature contributes a small interference to the dot products of all the others, and when only a few features are on, the interference stays below the signal. When many are on, it adds up. Language plausibly fits this, since at any one token almost none of the concepts a model knows about are relevant, though I did not measure that.
+
+## Will training find it?
+
+Everything so far used random directions I chose. The experiment that matters is whether gradient descent, given a small space and many features, goes for superposition on its own. I trained a tiny network: 20 features go in, are squeezed into just 5 dimensions, and come out through a ReLU, with the goal of reproducing the input. A feature is active with probability `1 − sparsity` and then takes a random value in [0, 1]. I counted how many features the network kept, meaning how many columns of its weight matrix ended up with length above 0.5, over three random starts per sparsity level:[^4]
+
+<Chart
+  type="line"
+  height={320}
+  format="plain"
+  caption="Features the network kept out of 20 when the hidden space has only 5 dimensions, by how sparse the inputs are (mean of 3 random starts). Dense inputs: about as many as there are dimensions. Sparse inputs: all 20."
+  label="Line chart of features kept against sparsity. Sparsity 0: 6.3. 0.5: 10. 0.8: 14. 0.9: 18.7. 0.95: 20. 0.99: 20. A dashed line at 5 shows the number of hidden dimensions."
+  labels={['0', '0.5', '0.8', '0.9', '0.95', '0.99']}
+  series={[
+    { name: 'features kept', data: [6.3, 10, 14, 18.7, 20, 20] },
+    { name: 'hidden dimensions', data: [5, 5, 5, 5, 5, 5], dashed: true },
+  ]}
+  xTitle="sparsity of the inputs"
+  yTitle="features kept (of 20)"
+/>
+
+| Sparsity | Features kept, three starts | Loss per input |
+|---|---|---|
+| 0 | 5, 5, 9 | 1.250 |
+| 0.5 | 10, 10, 10 | 1.436 |
+| 0.8 | 15, 15, 12 | 0.653 |
+| 0.9 | 18, 19, 19 | 0.259 |
+| 0.95 | 20, 20, 20 | 0.091 |
+| 0.99 | 20, 20, 20 | 0.008 |
+
+When every feature is always on, the network keeps about as many features as it has dimensions (5, 5 and, in one start, 9). As the inputs get sparser it keeps more: 10, then about 14, then 19, and at 95% sparsity all 20 features live in 5 dimensions. Nothing in the code asks for this. It is simply what training settled on.
+
+Two details are worth noting. At sparsity 0.5 the kept features come in pairs lying along shared lines (the largest absolute cosine among them was 1.000, which in this setup typically means opposite directions; I did not check the signs), so those 10 features are probably 5 directions used with both signs, which is not the nearly-perpendicular packing from the geometry section. And the "kept" count depends on my 0.5 threshold on the column length, which is a judgment call.
+
+## What this means for looking inside a model
+
+If a model packs more features than dimensions, then a single neuron or direction will usually not stand for a single idea. Features become particular patterns across many neurons, and a given neuron takes part in many features. That matches the leak I measured in Part 7, where a neuron meant for one name pair fired weakly for other names. According to this line of work, it is also one reason why reading a model by inspecting individual neurons has been so hard. One response is to train a second, much wider network (a sparse autoencoder) to unfold a layer's activations into many sparse features, and that has produced features that scored well on interpretability measures.[^5] I did not test that here. What this part shows is only that the geometry allows the packing, that sparse sums can be read back, and that a small network trained from scratch chooses it.
+
+## The whole series in one table
+
+| Part | Question | A number from the measurements |
+|---|---|---|
+| [1](/guides/llm-explained-01-next-word-and-neural-networks) | What is an LLM, and what is a neural network? | The digit network has 13,002 parameters, and with random values it answers "8" for 6 images in 10 |
+| [2](/guides/llm-explained-02-cost-and-gradient-descent) | How does it learn? | Cost fell from about 3.05 to 0.06; a step size of 30 froze it at exactly 1.000 |
+| [3](/guides/llm-explained-03-backpropagation) | How does it get the gradient? | Backpropagation was 25,000 to 35,000 times faster than nudging each parameter |
+| [4](/guides/llm-explained-04-training-in-practice) | What goes wrong in practice? | A deep sigmoid network stayed at 11.3%; ReLU reached 92.9% |
+| [5](/guides/llm-explained-05-tokens-embeddings-softmax) | How do text and probabilities connect to the vectors? | Directions in a count-based embedding space: 8 of 8 plurals scored higher |
+| [6](/guides/llm-explained-06-attention) | How do tokens use context? | A learned head solved a recall task at 100%; with uniform attention the ceiling was 45.3% |
+| [7](/guides/llm-explained-07-mlp-facts) | Where might facts live? | A block with 32 hidden neurons memorized 900 random facts |
+| 8 | How can there be more features than dimensions? | 3 active features among 10,000 were read back exactly 98.9% of the time in 100 dimensions |
+
+And the GPT-3 ledger, which the series built a piece at a time: 0.7% for embeddings, 33.1% for attention and 66.3% for the feed-forward blocks, totalling 175.19 billion by arithmetic against the advertised 175 billion.
+
+## Questions I cannot settle here
+
+A few questions from the series deserve to stay open. The attention table grows with the square of the context length, and the measured curve in Part 6 follows it, so how do long-context models avoid paying it? Even at temperature 0, which should always pick the top word, hosted models are often reported to answer slightly differently on repeated runs; one plausible cause is that parallel hardware adds floating-point numbers in varying orders, but I did not test it. If facts live in the feed-forward weights, a wrong fact could be edited in place, and the work cited in Part 7 suggests this can be done for single facts. And if features are superposed, how far can anyone trust a reading of the inside of a model? None of these are answered by the measurements here.
+
+## Limits of these measurements
+
+- The geometry uses random vectors and a simple optimizer in 100 dimensions. The bound is exact, but the optimizer is not tuned, and the stalled run at 10,000 vectors says nothing about what a better one would reach.
+- The read-back test decodes with plain dot products. Real models do not decode this way. The test only shows that the information survives in the sum.
+- The trained network has 20 features and 5 dimensions, one hidden layer and a ReLU output, with three random starts per row. A feature counts as kept when the column length passes 0.5.
+- No part of this series measured a real transformer's weights. I could not get them on this machine, and every claim about real models is cited, not tested.
+
+## References
+
+[^1]: Grant Sanderson (3Blue1Brown), [How might LLMs store facts](https://www.youtube.com/watch?v=9-Jl0dxWQs8). The part on how many nearly perpendicular directions fit in a high-dimensional space follows this video. Other 3Blue1Brown chapters used in the series: [But what is a neural network?](https://www.youtube.com/watch?v=aircAruvnKk), [Gradient descent](https://www.youtube.com/watch?v=IHZwWFHWa-w), [Backpropagation, intuitively](https://www.youtube.com/watch?v=Ilg3gGewQ5U), [Backpropagation calculus](https://www.youtube.com/watch?v=tIeHLnjs5U8), [Transformers](https://www.youtube.com/watch?v=wjZofJX0v4M), [Attention](https://www.youtube.com/watch?v=eMlx5fFNoYc) and [Large Language Models explained briefly](https://www.youtube.com/watch?v=LPZh9BOjkQs).
+[^2]: Elhage et al., [Toy Models of Superposition](https://arxiv.org/abs/2209.10652), 2022. The superposition hypothesis and the small ReLU autoencoder experiments that my last experiment re-creates in simplified form.
+[^3]: L. R. Welch, "Lower bounds on the maximum cross correlation of signals", IEEE Transactions on Information Theory, 1974. The relative bound I use, `N ≤ d(1 − ε²)/(1 − dε²)` for a largest cosine ε with `dε² < 1`, follows by rearranging the same inequality.
+[^4]: Methodology. [llm-series-08-superposition.py](/files/llm-series-08-superposition.py), Python 3.12.10, NumPy 2.5.3, 32-bit floats for the vectors. Geometry: 100 dimensions, all pairs measured (50 million for 10,000 vectors, 2 million for 2,000), optimizer is gradient descent on the sum of max(0, |cos| − 0.15)² with step size 20, both chosen by a short trial on 2,000 vectors, 300 steps on 2,000 vectors. The 10,000-vector attempt used the same settings for 150 steps and is run with `--big`; it ended at a largest cosine of 0.475 from 0.533. Read-back: 1,000 trials per cell, active set chosen at random, decoded by the top-k dot products. Autoencoder: 20 features, 5 hidden dimensions, output ReLU, squared-error loss, Adam at learning rate 0.01, batch 1,024, 6,000 steps, seeds 0 to 2, "kept" meaning a weight column of length above 0.5.
+[^5]: Cunningham et al., [Sparse Autoencoders Find Highly Interpretable Features in Language Models](https://arxiv.org/abs/2309.08600), 2023.
