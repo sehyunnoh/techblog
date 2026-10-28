@@ -1,0 +1,115 @@
+---
+title: 'How an LLM Works, Part 4: Training in Practice, Vanishing Gradients and Overconfidence'
+description: 'Run the learning loop for real and test the usual stories: sigmoid versus ReLU (the shallow result surprised me), deep networks that cannot learn, noise read as digits, and memorized random labels.'
+pubDate: 2026-10-28
+updatedDate: 2026-10-28
+tags: ['ai', 'llm', 'tutorial', 'deep-dive']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+
+[Part 3](/guides/llm-explained-03-backpropagation) finished the learning loop: forward pass, cost, backward pass, a small step, repeated over mini-batches. This part runs that loop on real data and tests four things people say about it. Two of them held up. One I had expected to confirm and it did not, at least not in the form I expected, and that is the first section.
+
+Where a result went against my plan I changed the plan and say so. The matching 3Blue1Brown material for the last two sections is the gradient descent chapter.[^1]
+
+## Claim 1: ReLU trains better than sigmoid
+
+Parts 1 to 3 used the **sigmoid** activation, which squashes any number into the range 0 to 1. Most modern networks use **ReLU** instead, which is just `max(0, x)`: negative inputs become 0, positive ones pass through unchanged. It is cheaper to compute, and as the next section shows, it avoids a real problem with sigmoids.
+
+So I trained the same 784-16-16-10 network from Part 1 both ways: mini-batches of 100, 10 passes over 55,000 training images, a handful of learning rates per activation, and the best rate chosen on a held-out 5,000-image slice, not on the test set.[^2]
+
+The result was the reverse of what I expected. Sigmoid reached 94.4% on the 10,000 test images. ReLU reached 85.5%.
+
+Two explanations came to mind. ReLU neurons can "die": if a neuron's input is negative for every image, its output is always 0, its gradient is 0, and it can never recover. With only 16 neurons per layer, losing a few would hurt. Or the problem was the pairing with the cost function, since I had been using sigmoid outputs and a squared-error cost throughout this series. I tested both by crossing the two activations with a second cost function, **cross-entropy** with a softmax output layer. (Softmax turns the ten output scores into probabilities that sum to 1, and cross-entropy charges the network the negative logarithm of the probability it gave to the right digit. Part 5 explains softmax properly.)
+
+| Hidden activation | Squared error, sigmoid outputs | Cross-entropy, softmax outputs |
+|---|---|---|
+| Sigmoid | 94.4% | 94.9% |
+| ReLU | 85.5% | 95.5% |
+
+The dead-neuron explanation did not hold. After training, 1 of the 32 hidden ReLU neurons never fired on the validation images in the squared-error run, and 0 of 32 in the cross-entropy run. The pairing explanation did: ReLU with cross-entropy was the best of the four at 95.5%, and ReLU with squared error was ten points behind. I did not investigate the mechanism. One guess is that large ReLU outputs push the sigmoid output layer into its flat regions where the squared-error gradient nearly vanishes, but that is a guess.
+
+The honest summary is that on this small, shallow network the activation function mattered much less than I assumed, the choice of cost function mattered a lot, and the gaps among the other three entries (94.4%, 94.9%, 95.5%) are small enough that I would not trust a ranking drawn from one random start and a coarse learning-rate grid.
+
+## Claim 2: deep sigmoid networks cannot learn
+
+Part 3 measured a first-layer gradient that was 0.9% of the last layer's in a three-layer chain, and said it would compound. To see how badly, I built a network with eight hidden layers of 16 neurons and measured the size of the gradient in every layer's weight matrix at the start, on 1,000 images.[^2]
+
+<Chart
+  type="line"
+  height={340}
+  format="plain"
+  logY
+  caption="How many times smaller each layer's gradient is than the output layer's gradient, in a network with eight hidden layers at initialization. With sigmoids the signal fades by roughly five times per layer through the middle of the network. With ReLU it stays within a factor of about three."
+  label="Line chart on a log scale. Y is how many times smaller the gradient is than the output layer's, for layers 1 (input side) to 9 (output). Sigmoid: 58600, 51000, 15200, 2270, 542, 136, 27.7, 5.54, 1. ReLU: 0.53, 3.16, 2.56, 2, 1.55, 2.52, 1.73, 1.63, 1."
+  labels={['1 (input side)','2','3','4','5','6','7','8','9 (output)']}
+  series={[
+    { name: 'sigmoid', data: [58600.0, 51000.0, 15200.0, 2270.0, 542.0, 136.0, 27.7, 5.54, 1.0] },
+    { name: 'ReLU', data: [0.53, 3.16, 2.56, 2.0, 1.55, 2.52, 1.73, 1.63, 1.0] },
+  ]}
+  xTitle="layer (1 = nearest the input)"
+  yTitle="times smaller than output layer (log)"
+/>
+
+With sigmoids, the first layer's gradient is 1.7×10⁻⁵ of the last layer's, about 58,000 times smaller. Through the middle of the network it falls by a factor of roughly 4 to 7 per layer, consistent with the 0.25 ceiling on a sigmoid's slope from Part 3, and it levels off near 3×10⁻⁵ in absolute size in the first two layers. With ReLU the first layer's gradient is 1.9 times the last layer's, so the signal reaches the front intact.
+
+The consequence shows up in training. I trained both deep networks for 5 epochs at two learning rates each. The sigmoid network sat at 11.3% test accuracy at both rates, which is chance. The ReLU network reached 91.2% and 92.9%.[^2] I tried only two rates and one start for the sigmoid network, and tricks like different initializations or much longer training do exist, so "cannot learn" overstates it. What the measurement supports is narrower: under the same simple recipe that works for ReLU, the deep sigmoid network did not move.
+
+This is the real argument for ReLU, and for the other changes that let transformers stack dozens of layers. Depth only helps if the learning signal can get through it.
+
+## Claim 3: a network knows when it is shown garbage
+
+In the 3Blue1Brown video, a digit network shown random noise confidently answers "5". I wanted to see how general that is. I made 1,000 images of uniformly random pixels, which are not digits by any reasonable standard, and asked each of the four networks from Claim 1 what it saw.[^2]
+
+| Network | Mean top output on real digits | Mean top output on noise | Noise images with top output ≥ 0.9 | Digit chosen for noise |
+|---|---|---|---|---|
+| Sigmoid, squared error | 0.913 | 0.517 | 0 | 0 for 806 images, 8 for 186 |
+| ReLU, squared error | 0.840 | 0.898 | 638 | 8 for 572, 0 for 427 |
+| Sigmoid, cross-entropy | 0.955 | 0.608 | 38 | 5 for 821, 3 for 177 |
+| ReLU, cross-entropy | 0.962 | 0.886 | 653 | 3 for 845, 8 for 150 |
+
+(For the two squared-error networks the "top output" is an unnormalized score. For the two cross-entropy networks it is a genuine probability.)
+
+The ReLU cross-entropy network, the best classifier here at 95.5%, assigned 90% or more probability to some digit for 653 of the 1,000 noise images, almost always "3". Its average confidence on noise, 0.886, was close to its average confidence on real digits, 0.962. The sigmoid cross-entropy network was more restrained on noise, with 38 images above 0.9, and said "5" for 821 of them, the same answer as in the video, though I would not read anything into that.
+
+So the claim holds for some networks and not others, and it does not track accuracy. What it does track is what the network was trained on. Every training example was a digit and every label was one of ten classes. There was never an option for "none of these". Softmax forces the ten probabilities to sum to 1, so the network has to put its probability somewhere, and a high number says only that one class is the best of ten bad fits.
+
+This has an obvious cousin in language models. A language model's output is also a softmax over its vocabulary, which always produces a distribution and never an "I don't know". I would not claim that explains hallucination, because I did not test it, but it is the same structural fact, and it is a reason to treat a high probability as a statement about the model's habits, not about the world.
+
+## Claim 4: the network learns the pattern, not the answers
+
+A network with enough parameters can memorize anything. To test that, I used a larger network (784-256-256-10, 269,322 parameters) and only 2,000 training images, which it can easily store. I trained one copy on the real labels and another on the same images with the labels randomly shuffled, so that the labels carry no information at all.[^2]
+
+| Epoch | Real labels: training accuracy | Real labels: test accuracy | Shuffled labels: training accuracy | Shuffled labels: test accuracy |
+|---|---|---|---|---|
+| 5 | 92.8% | 88.0% | 27.4% | 16.1% |
+| 20 | 99.1% | 90.5% | 50.2% | 14.5% |
+| 50 | 100% | 90.9% | 94.7% | 16.2% |
+| 100 | 100% | 90.9% | 100% | 13.2% |
+| 400 | 100% | 90.9% | 100% | 12.9% |
+
+Both reached 100% accuracy on the training set. The one trained on noise labels got there too, by memorizing every example, and its test accuracy stayed around chance (between 11% and 18% at every epoch I recorded; chance is 10%). This is the result reported by Zhang and colleagues for much larger networks.[^3]
+
+The more interesting column is the speed. At epoch 20, the real-label network was at 99.1% and the shuffled one at 50.2%. The shuffled one needed somewhere between 50 and 100 epochs to reach 99%, so real structure was learned in well under half the epochs that pure memorization needed here. Arpit and colleagues describe the same pattern, that networks pick up the regular examples first.[^4] That is consistent with what the 3Blue1Brown video says, that when the data has structure, finding it is the easier path.
+
+Capacity alone does not explain why a trained network works on new data, because this network had the capacity to do the useless thing and did it when it was the only option. It works because the data has a pattern to find, and finding a pattern is faster than storing examples.
+
+## Limits of these measurements
+
+- **One random start per configuration.** Gaps of about a point (94.4, 94.9, 95.5) are not distinguishable from noise here. The gaps that matter in this part are large: 85.5% against 95.5%, 11.3% against 92.9%, 99% against 50% at epoch 20.
+- **Tiny networks and one dataset.** Everything is MNIST, with 32 or 512 hidden neurons. Findings about what ReLU "usually" does belong to far larger experiments.
+- **Coarse learning-rate grids.** I tried three to four rates per setup and chose on validation accuracy. A finer search might change the small gaps and probably not the large ones.
+- **The noise test uses uniform random pixels,** which is one kind of non-digit. Other inputs would give different numbers.
+- The mechanism behind the ReLU and squared-error result is a guess I did not test.
+
+## Where this leads
+
+That finishes the neural-network half of the story. Everything that follows is built from these parts: weights, layers of matrix multiplications, activation functions, a cost, and a gradient pushed backward through all of it. Part 5 starts on the transformer, with the first and last steps of the pipeline: how text becomes numbers, and how numbers become next-word probabilities, with the softmax that this part kept leaning on.
+
+## References
+
+[^1]: Grant Sanderson (3Blue1Brown), [Gradient descent, how neural networks learn](https://www.youtube.com/watch?v=IHZwWFHWa-w). Source of the random-noise "5" and the shuffled-label discussion.
+[^2]: Methodology. [llm-series-04-training-in-practice.py](/files/llm-series-04-training-in-practice.py), Python 3.12.10, NumPy 2.5.3, 32-bit floats, seed 0 throughout. Weights: scaled by 1/√n inputs for sigmoid layers and by √(2/n) for ReLU layers (He et al., [Delving Deep into Rectifiers](https://arxiv.org/abs/1502.01852), 2015), biases 0. Claim 1: mini-batch 100, 10 epochs, first 55,000 training images, validation on the last 5,000, the first comparison tried learning rates 1, 3, 10 (sigmoid) and 0.03, 0.1, 0.3, 1 (ReLU) with squared error; the 2 by 2 table then tried 0.1, 0.3, 1, 3 for squared error and 0.03, 0.1, 0.3, 1 for cross-entropy, for both activations. In each case the rate with the best validation accuracy at epoch 10 was kept (1 for sigmoid, 0.3 for ReLU) and its test accuracy reported. Claim 2: sizes 784, eight layers of 16, then 10, squared error; gradient length measured on 1,000 images before training; trained 5 epochs with rates 3 and 10 (sigmoid) and 0.1 and 0.3 (ReLU). Claim 3: 1,000 images of uniform random pixels in [0, 1), the four networks chosen in Claim 1. Claim 4: 784-256-256-10, ReLU, cross-entropy, learning rate 0.05, mini-batch 50, 400 epochs on the first 2,000 training images; shuffled labels are a permutation of the same 2,000 labels; test accuracy always uses the true test labels.
+[^3]: Zhang, Bengio, Hardt, Recht, Vinyals, [Understanding deep learning requires rethinking generalization](https://arxiv.org/abs/1611.03530), 2016. Networks fit training sets with random labels perfectly.
+[^4]: Arpit et al., [A Closer Look at Memorization in Deep Networks](https://arxiv.org/abs/1706.05394), 2017. Networks learn simple patterns before memorizing noise.
