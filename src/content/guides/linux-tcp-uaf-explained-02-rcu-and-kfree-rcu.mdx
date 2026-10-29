@@ -1,0 +1,80 @@
+---
+title: 'A Linux TCP Use-After-Free, Part 2: RCU and Why kfree_rcu Exists'
+description: 'Read-copy-update and the grace period in plain language, and the difference between freeing memory now and freeing it after every reader has left, which is the whole CVE-2026-98432 fix.'
+pubDate: 2026-10-29
+updatedDate: 2026-10-29
+tags: ['security', 'systems', 'tutorial', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+
+[Part 1](/guides/linux-tcp-uaf-explained-01-handshake-and-request-sockets) ended with a question: if one CPU frees a block of memory while another is still reading it, what keeps that from being a crash or worse? For a large part of the Linux kernel the answer is a mechanism called **RCU**, read-copy-update. The fix for CVE-2026-98432 is a change from one free function to another, and this guide explains why that difference matters.
+
+## The problem RCU solves
+
+Suppose many CPUs read a shared structure often and one CPU occasionally replaces it. A lock would make every reader wait, and readers vastly outnumber writers. RCU takes the opposite approach: readers take no lock at all and are never blocked. The cost moves to the writer, which must not free the old structure until it is sure no reader can still be looking at it.
+
+The kernel documentation describes the contract from both sides.[^1] A reader marks its work with `rcu_read_lock()`, which tells the reclaimer that the reader "is entering an RCU read-side critical section," and inside that section it is illegal to block. A writer publishes the new version with a pointer update, then waits, in the documentation's words, for "all pre-existing RCU read-side critical sections on all CPUs" to finish.
+
+That wait is the **grace period**. Once it has passed, every reader that could have seen the old pointer has finished, and the old memory can be released safely. Readers that begin after the pointer update cannot see the old structure at all, so the writer does not need to wait for them.
+
+## Two ways to free
+
+The kernel offers two shapes for the final step.
+
+`kfree(p)` releases the memory immediately. It is correct only if no one else can still hold `p`.
+
+`kfree_rcu(p, ...)` schedules the release for after a grace period. The documentation introduces it as a convenience over `call_rcu()`, which "invokes func(head) after a grace period has elapsed," so that you can avoid "having to write your own callback."[^1]
+
+<Mermaid
+  caption="The same sequence with a plain free and with a deferred free. The reader holds the pointer inside an RCU read-side section; only the deferred free respects that."
+  label="Two timelines side by side. With kfree, a reader enters a read section and loads a pointer, the writer frees the memory right away, and the reader then dereferences freed memory. With kfree_rcu, the reader enters a read section and loads a pointer, the writer calls kfree_rcu which waits, the reader finishes and leaves its section, a grace period ends, and only then is the memory released."
+  code={`
+flowchart TB
+  subgraph B["kfree_rcu(): free after a grace period"]
+    direction TB
+    b1["Reader: rcu_read_lock, load pointer"] --> b2["Writer: kfree_rcu(pointer), returns at once"]
+    b2 --> b3["Reader: dereference<br/>memory still valid"]
+    b3 --> b4["Reader: rcu_read_unlock"]
+    b4 --> b5["Grace period ends: memory released"]
+  end
+  subgraph A["kfree(): free immediately"]
+    direction TB
+    a1["Reader: rcu_read_lock, load pointer"] --> a2["Writer: kfree(pointer)"]
+    a2 --> a3["Reader: dereference<br/>USE AFTER FREE"]
+  end
+`}
+/>
+
+## The trap: readers who follow the rules, writers who do not
+
+RCU only works when both sides agree. A reader inside `rcu_read_lock()` is promising to finish quickly and not block. The writer is promising to wait for such readers before freeing. If the writer uses plain `kfree()`, the reader's discipline buys nothing, because nothing waits for it.
+
+That is exactly the shape of this bug, and the commit message states it directly. The functions that build a SYN-ACK, `tcp_v4_send_synack()` and `inet_csk_route_req()`, read the options "under rcu_read_lock() only," and the code that frees them, in `inet_sock_destruct()` and `tcp_v4_reqsk_destructor()`, used a plain `kfree()`.[^2] The commit adds: "Readers already use RCU, and other paths replacing inet_opt (do_ip_setsockopt(), cipso_v4_sock_setattr()...) already use kfree_rcu()." In other words, the protection was in place everywhere except in the two destructors.
+
+The fix is therefore small. The diff touches two files, `net/ipv4/af_inet.c` and `net/ipv4/tcp_ipv4.c`, with one line added and one removed in each.[^2]
+
+## What RCU does not give you
+
+This is worth saying because "just use RCU" can sound like a universal answer. It is narrower than that.
+
+- **It protects readers from a writer, not writers from each other.** The documentation says the primitive "protects concurrent readers from the updater, **not** concurrent updates from each other."[^1] The patch here needs no more than that, since the problem is a reader and a destructor.
+- **Readers cannot sleep inside the section.** The documentation states that blocking there is illegal.[^1] That is acceptable for building a packet, and not acceptable for work that waits on I/O.
+- **Memory stays allocated a little longer.** Deferred freeing means a burst of frees holds memory until the grace period ends. For a few option bytes per connection that is a minor cost, though in general it is the price of lock-free reads.
+- **It only helps if the pointer is dropped from view first.** A writer that frees a structure still reachable by new readers has the same bug with extra steps. I did not check the full call paths in this case, and rely on the commit message for the claim that the fix is complete for the paths it names. The commit also says it is not complete for IPv6: a similar problem with `ipv6_opt`, which is only set by CALIPSO, "will be addressed in a separate patch."[^2]
+
+## What to carry into part 3
+
+A use-after-free like this one is not a failure of a missing lock around the data. It is a mismatch between how readers protect themselves and how a writer reclaims memory. The cure is to make the writer wait for the readers who are already doing the right thing.
+
+[Part 3](/guides/linux-tcp-uaf-explained-03-the-bug-and-what-to-do) puts the pieces together: the exact race, the timeline, the severity scores that disagree, and how to check whether a machine is covered.
+
+## Method
+
+Like part 1, this guide relies on the kernel's RCU documentation and the commit message, not on running code. I did not write or run a kernel experiment. The diagram is a simplified model of the ordering, not a trace.
+
+## References
+
+[^1]: Linux kernel documentation, [What is RCU?](https://docs.kernel.org/RCU/whatisRCU.html), the sections on `rcu_read_lock()`, `synchronize_rcu()`, `call_rcu()` and `kfree_rcu()`.
+[^2]: Eric Dumazet, [ipv4: free inet_opt and ireq_opt after an RCU grace period](https://github.com/torvalds/linux/commit/e3f33b0a1d89d738e2b913dab519226eaf76e15b), commit `e3f33b0a1d89`.

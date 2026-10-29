@@ -1,0 +1,78 @@
+---
+title: 'A Linux TCP Use-After-Free, Part 1: The Handshake and the Request Socket'
+description: 'Before reading CVE-2026-98432 you need one picture: what the kernel keeps for a half-open TCP connection, who touches it, and why a retransmitted SYN can race with the final ACK.'
+pubDate: 2026-10-29
+updatedDate: 2026-10-29
+tags: ['security', 'systems', 'tutorial', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+
+This is the first of three guides on CVE-2026-98432, a use-after-free in the Linux kernel's IPv4 TCP code that was published on 15 October 2026. The bug itself is explained in [part 3](/guides/linux-tcp-uaf-explained-03-the-bug-and-what-to-do). It is hard to read without two pieces of background, and this part supplies the first one: what the kernel holds in memory while a TCP connection is half open. [Part 2](/guides/linux-tcp-uaf-explained-02-rcu-and-kfree-rcu) supplies the second, a memory-reclamation scheme called RCU.
+
+Nothing here requires kernel experience. If you know that TCP starts with SYN, SYN-ACK and ACK, you can follow it, and the next section is only a reminder of that.
+
+## The handshake, from the server's side
+
+A client opens a TCP connection by sending a SYN. The server answers with a SYN-ACK, and the client finishes with an ACK. Only after that third packet does the connection count as established and become something the application can `accept()`.
+
+Between the second and third packets the server has agreed to a connection that does not fully exist yet. It has to remember the client's address, the sequence numbers it chose, and any options the SYN carried, and it has to do this for every client that sends a SYN, including ones that never send the ACK. That makes the half-open state a classic place for a server to be attacked, so Linux keeps it cheap. Instead of a full socket, it creates a small structure called a **request socket**. The `tcp_max_syn_backlog` sysctl caps how many of these one listener may hold, and the kernel documentation puts the cost at about 304 bytes per entry.[^1]
+
+The full socket, which the kernel source calls the **child socket**, is created only when the final ACK arrives. In the IPv4 code the function that does it is `tcp_v4_syn_recv_sock()`.[^2]
+
+<Mermaid
+  caption="What exists on the server at each step. The request socket is small and short-lived; the child socket is the real connection that the application receives."
+  label="Sequence diagram with a client, the Linux kernel on the server, and the application. The client sends SYN. The kernel creates a request socket and replies SYN-ACK. The client sends ACK. The kernel creates a child socket and puts it on the accept queue. The application calls accept and receives the child socket."
+  code={`
+sequenceDiagram
+  participant C as Client
+  participant K as Server kernel
+  participant A as Application
+  C->>K: SYN
+  Note over K: create request socket
+  K->>C: SYN-ACK
+  C->>K: ACK
+  Note over K: create child socket<br/>(request socket's job is done)
+  K->>A: accept() returns the child
+`}
+/>
+
+## Options travel with the request
+
+A SYN can carry IP options, small extra headers that most traffic never uses. The kernel stores a copy on the request socket in a field named `ireq_opt`. When the child socket is created, the child needs the same options, and the commit message that fixes this bug says what the code does: `tcp_v4_syn_recv_sock()` transfers ownership of `ireq->ireq_opt` to the child as `inet_opt`, "without copying it."[^2]
+
+Handing over a pointer instead of copying the data is a reasonable optimization. It also changes who is responsible for freeing the memory, and that is where this story starts.
+
+## The packet that arrives twice
+
+SYN-ACKs get lost. When the client does not answer, it sends its SYN again, and a retransmitted SYN for a request socket that already exists makes the kernel send another SYN-ACK. The kernel documentation lists `tcp_synack_retries` for the server's own retransmissions, with a default of 5.[^1] From the point of view of the reader of this guide, the important fact is simple: the same request socket can be processed by two different CPUs at nearly the same time, one handling the final ACK and building the child, the other handling a repeated SYN and building a SYN-ACK.
+
+Whether those two CPUs exclude each other depends on locking. Early in the history of this code the answer was yes, because both paths took the listening socket's lock. A change authored by Eric Dumazet in October 2015, commit `079096f103fa`, moved request sockets into the same hash table as established connections. Its stated goal was that ACK packets "find SYN_RECV pseudo sockets without having to find and lock the listener," which "halves pressure on listener lock" in nominal conditions.[^3] That was a good engineering trade. The fix commit for this CVE names it as the point after which "request sockets are processed without holding the listener lock," so nothing prevents the child socket from being freed while the SYN-ACK is still being built.[^2]
+
+I read that as the central lesson of the whole case: removing a lock is a performance win only if everything that used to be protected by it has a new protection. Here one piece of it did not, for about eleven years. The CVE record lists kernel 4.4 and later as affected, which fits a change made in late 2015.[^4]
+
+## A second path: migration
+
+There is a related path, and the fix covers it too. If `net.ipv4.tcp_migrate_req` is set to 1 (the default is 0), connections still in the handshake when a listening socket closes can be moved to another listener on the same port that uses `SO_REUSEPORT`.[^1] A BPF program of type `BPF_SK_REUSEPORT_SELECT_OR_MIGRATE` can request the same thing. Migration clones the request socket, and the clone and the original end up sharing the same options pointer.[^2] This is the same mistake in a different place, and it is the reason the fix touches two destructors.
+
+## What to carry into part 2
+
+Three facts are enough:
+
+- A half-open connection is a request socket. A completed one is a child socket.
+- The child takes over the request's IP options by pointer, not by copy.
+- Since 2015, a retransmitted SYN can be handled on another CPU with no listener lock held, while the child may already be getting freed.
+
+Whether that last sentence is dangerous depends on how freed memory is reclaimed while another CPU is still reading it. That is the question [part 2](/guides/linux-tcp-uaf-explained-02-rcu-and-kfree-rcu) answers.
+
+## Method
+
+This guide is built from the kernel commit messages and the kernel's own documentation, not from running anything. I did not read the full source of the functions named here, so statements about what the code does are limited to what the commit messages say. I also did not reproduce the bug, and this series does not publish exploit details.
+
+## References
+
+[^1]: Linux kernel documentation, [IP Sysctl](https://docs.kernel.org/networking/ip-sysctl.html): `tcp_migrate_req`, `tcp_max_syn_backlog`, `tcp_synack_retries`.
+[^2]: Eric Dumazet, [ipv4: free inet_opt and ireq_opt after an RCU grace period](https://github.com/torvalds/linux/commit/e3f33b0a1d89d738e2b913dab519226eaf76e15b), commit `e3f33b0a1d89`, 1 October 2026 (author date). Read through the GitHub mirror of the kernel tree.
+[^3]: Eric Dumazet, [tcp/dccp: install syn_recv requests into ehash table](https://github.com/torvalds/linux/commit/079096f103faca2dd87342cca6f23d4b34da8871), commit `079096f103fa`, 2 October 2015.
+[^4]: [CVE-2026-98432 on OpenCVE](https://app.opencve.io/cve/CVE-2026-98432), which reproduces the CVE record's affected-version data.
