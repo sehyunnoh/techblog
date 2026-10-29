@@ -1,0 +1,119 @@
+---
+title: 'Claude Code''s 3-Word Agent Summary: One Extra Request Every 32 Seconds, Measured'
+description: 'A Hacker News post said Claude Code burns 15 to 20 percent of tokens on a status line. The status line is innocent. I reproduced the real culprit, an agent summary, and measured what it costs.'
+pubDate: 2026-10-29
+tags: ['ai', 'llm', 'cost-engineering', 'benchmark', 'observability']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+
+Today a post reached the top 20 of Hacker News under the title "Claude Code burns ~15-20% of your tokens on a 3-word status line."[^1] I read it twice before I understood that the title and the content disagree. Claude Code's status line, the bar you configure with a shell script, is not what the post is about. The official documentation says the status line "runs locally and does not consume API tokens."[^3] What the post actually describes is a different feature: a background request that asks the model for a three-to-five-word description of what each working agent is doing.
+
+That is a more interesting claim, and it is one I can test on my own machine. So I did, with Claude Code 2.1.312, the newest version the post's author tested. Short version: the extra request is real, it fires about every 32 seconds per working subagent, and in my small test it took 16 to 21 percent of the session's cost. Why that number does not transfer to your bill is the rest of this post.
+
+## The vocabulary
+
+A **subagent** is a second model conversation that Claude Code starts to do part of a job, such as searching a codebase, while the main conversation waits or continues. A **background agent** is one that keeps working without the main conversation waiting for it.
+
+A **side-query** is any request Claude Code sends that is not a reply to you: generating a session title, compacting history, or, here, writing a short summary of what an agent is doing.
+
+The **prompt cache** lets the provider reuse the already-processed beginning of a prompt. A request that starts with exactly the same text as a recent one reads that part at a reduced price instead of processing it again. "Cache read" tokens are the cheap ones, but they are not free, and a long conversation has a lot of them.
+
+**OpenTelemetry** is a standard for exporting telemetry. Claude Code can emit one event per API request, tagged with where the request came from (`query_source`), token counts and an estimated cost. That tag is what makes this measurable at all.
+
+## What the post claims, and what Anthropic answered
+
+The gist's author says that for each background agent, Claude Code sends the agent's whole transcript to the agent's own model roughly every 30 seconds and asks it to describe the latest action in 3 to 5 words. The result only updates the agents panel. From their own OpenTelemetry data, the author reports this was 16.4 percent of spend and 19.7 percent of requests, 96 percent of it on Opus, and that it has been on by default since version 2.1.232.[^1] About 98 percent of these requests read the transcript from cache, and the author notes the roughly 2 percent that miss the cache carry over a third of the cost.[^1]
+
+In the Hacker News thread, a commenter identified as a Claude Code team member agreed on the mechanism but pushed back on the size. They said it runs only for background agents that are actively working, that across users it was about 2 percent of cost at API list prices and under 4 percent of requests (about 6 percent of cost in the terminal), that a fix for cache misses shipped in 2.1.311, and that a cheaper mode using a smaller model is being built.[^2] I cannot verify those figures. They are a comment, not a published analysis.
+
+So there are three numbers in play already: 16.4 percent from one heavy user, 2 to 6 percent claimed across all users, and whatever I measure. They can all be true at once, because the share depends on how an agent spends its time.
+
+## How I measured it
+
+I wrote the smallest job that exercises the feature. One `claude -p` run on the cheap Haiku model asks the main agent to start exactly one subagent. The subagent runs `sleep 20` as eight separate tool calls, then answers "done." That is about 160 seconds of working time. I turned on OpenTelemetry console output, so every API request prints an event with its `query_source`, and then ran the job twice: once with default settings, once with `CLAUDE_CODE_AGENT_PROGRESS_SUMMARIES=1`, the switch the gist's own test uses.[^1][^5]
+
+<Mermaid
+  caption="The mechanism as I observed it. A timer fires about every 32 seconds while the subagent works. Each tick sends the subagent's whole transcript to the model again, which mostly hits the cache, and the three-word answer only updates a label."
+  label="Flow diagram: a subagent is working through tool calls; every 32 seconds a timer forks a summary request containing the whole transcript; the request mostly reads from the prompt cache; the model returns three to five words; the words update the agents panel; none of it feeds back into the subagent's work"
+  code={`
+flowchart TD
+  A["Subagent works<br/>(tool calls, waits)"] --> T{"~32 s timer"}
+  T --> F["agent_summary request<br/>whole transcript"]
+  F --> C["Prompt cache read<br/>(~98% of input)"]
+  C --> M["Model writes<br/>3 to 5 words"]
+  M --> P["Agents panel label"]
+  A -. "unaffected" .- P
+`}
+/>
+
+## Result 1: nothing without the switch, steady pulses with it
+
+With default settings in `-p` mode I counted zero summary requests. With the switch on, the debug log shows six `[AgentSummary] Forking` lines, and the telemetry shows six `agent_summary` requests, one every 31 to 33 seconds, interleaved with the subagent's own turns:
+
+| Time | Source | Cache read | New cache | Output tokens |
+|---|---|---|---|---|
+| 11:42:11 | subagent turn | 25,908 | 1,869 | 90 |
+| 11:42:16 | **agent_summary** | 25,908 | 92 | 308 |
+| 11:42:34 | subagent turn | 27,777 | 129 | 90 |
+| 11:42:48 | **agent_summary** | 27,777 | 92 | 12 |
+| 11:43:19 | subagent turn | 28,035 | 129 | 90 |
+| 11:43:20 | **agent_summary** | 28,035 | 92 | 149 |
+
+The pattern in the cache-read column is the finding. Each summary request reads exactly the same number of tokens as the subagent turn just before it: 25,908 and 25,908, then 27,777 and 27,777, then 28,035 and 28,035. A summary is not a short note about the last step. It is a full re-read of the whole conversation so far, plus a small instruction. In the second run, where the subagent also read a large file first, the pairs matched again (28,932 and 28,932, 29,091 and 29,091).
+
+The cache did its job. Across the six summaries, 97.7 percent of the input side was cache reads, and each one added only 92 new tokens to the cache. That agrees with the gist's "about 98 percent."[^1] Each summary cost between $0.00032 and $0.00041, against $0.00034 to $0.00035 for an ordinary subagent turn. In plain terms, a summary costs about one extra subagent turn, every 32 seconds, whether or not the agent did anything interesting in between. Twenty-second `sleep` calls produced as many summaries as real work would.
+
+## Result 2: the share in my test
+
+<Chart
+  type="bar"
+  height={320}
+  format="plain"
+  caption="Share of the whole session taken by agent_summary requests, in two runs with the summary switch on. The session included two main-conversation requests and nine or ten subagent requests."
+  label="Bar chart of agent_summary share of the session. Run 1: 35.3 percent of requests, 34.7 percent of tokens, 21.0 percent of cost. Run 2: 29.4 percent of requests, 29.0 percent of tokens, 15.6 percent of cost."
+  labels={['Requests', 'Tokens', 'Cost']}
+  series={[{ name: 'Run 1', data: [35.3, 34.7, 21.0] }, { name: 'Run 2', data: [29.4, 29.0, 15.6] }]}
+  xTitle="measure"
+  yTitle="agent_summary share of session (%)"
+/>
+
+Cost share is lower than request share mainly because the two main-conversation requests were each several times more expensive than a summary, since they carry the cache writes. The 15.6 to 21.0 percent cost range is close to the gist's 16.4 percent, which is a coincidence I would not lean on, because my job is built to maximize it.
+
+## Why my number is not your number
+
+Several things in my test push the share up, and I would be misleading you to skip them.
+
+The subagent spent about 160 of roughly 200 seconds waiting inside `sleep`. A timer that fires on the clock produces the same number of summaries whether the agent is idle or busy, so a job made of waiting makes summaries look large next to the work. A real agent that spends its time thinking in long, expensive turns would show a smaller share.
+
+The transcript was small, about 28,000 tokens, and most of that is Claude Code's own system prompt and tool definitions. The cost of a summary tracks the transcript, so a long session costs more per summary in absolute terms. I tried to show that with a second run where the subagent first read a 114 KB file, but the transcript grew by only about 1,000 tokens, and I did not find out why, so that run did not test the scaling. What I can say is the mechanism: each summary re-reads the whole transcript, as the matching cache-read counts show. A rough calculation, not a measurement: a subagent with a 100,000-token transcript working continuously would trigger about 112 summaries an hour at a 32-second interval, or about 11 million cache-read tokens an hour.
+
+Also, I used Haiku. The post's author reports 96 percent of the spend was on Opus, where cache reads cost more per token. And the session had only two main-conversation requests, which is a tiny denominator. A day of normal interactive work with one subagent now and then would dilute the share heavily, which is probably the gap between the author's heavy background-agent workload and the 2 to 6 percent the team member quoted.
+
+## Trade-offs and what I could not show
+
+I ran each condition once for the first pair and once for the second, so this is four runs, not a distribution. Costs are Claude Code's own estimate, not an invoice, and on a subscription the real cost is rate-limit headroom, which I cannot see.
+
+I did not test the default in an interactive session. In `-p` mode, no summaries appeared unless I set the switch, and commenters in the thread say there is no documented setting to turn the feature off, only ones that turn it on.[^2] I did not verify that last claim. I also did not test Claude Code versions before 2.1.311, so I cannot confirm the cache-miss problem the author describes; on 2.1.312 the cache was hit.
+
+The gist's fix is a preload script that replaces the timer functions and silences anything whose source text matches the summarizer. Its own warning is that it matches by source text, so an update that renames things can quietly turn summaries back on.[^1] I did not run it. Hooking a tool's timers is a heavy workaround for a cost that its vendor says is being redesigned.
+
+One more thing is worth knowing even if you never run background agents. These summary requests are billed but are not written to the session logs on disk, an open feature request says, so tools that add up your session files will undercount your usage.[^4] The OpenTelemetry export is the only place I saw them.
+
+## Takeaways
+
+- The status line is not the problem. It runs locally and sends no tokens; the cost comes from agent summaries for background agents.[^3]
+- On 2.1.312 with the feature enabled, one subagent triggered a summary about every 32 seconds, each costing about as much as one of its own turns, because it re-reads the whole transcript from cache.
+- My 16 to 21 percent cost share comes from a job built mostly of waiting, on a cheap model, with a small transcript. Treat it as an upper-end illustration, not an expected bill.
+- To see your own number, turn on OpenTelemetry and group `claude_code.api_request` events by `query_source`. Session files will not show it.
+- Vendor and author disagree about the typical size (2 to 6 percent versus 16 percent). Both can hold, depending on how much of your work is background agents.
+
+## References
+
+[^1]: "Claude Code `agent_summary` side-query: overview", [gist by flamerix-ai](https://gist.github.com/flamerix-ai/c3905705cc4205e5de3011fa2e74efce), read October 29, 2026. Source of the mechanism, the 16.4 percent and 19.7 percent figures, the 98 percent cache-hit figure, the version table and the preload workaround. The figures come from the author's own telemetry and I read the page through a fetch summary, not line by line.
+[^2]: Hacker News, [discussion of the gist](https://news.ycombinator.com/item?id=50284255), October 29, 2026. The Claude Code team member's figures (about 2 percent of cost, about 6 percent in the terminal, a fix in 2.1.311) and the objections are comments, quoted as such, via a fetch summary.
+[^3]: Claude Code documentation, [Customize your status line](https://code.claude.com/docs/en/statusline). Source of "The status line runs locally and does not consume API tokens."
+[^4]: GitHub, [anthropics/claude-code issue 104358](https://github.com/anthropics/claude-code/issues/104358), open when I read it. States that `agent_summary` and other side-queries are billed but leave no row in session logs. A user report, not confirmed by the maintainers on the page.
+[^5]: Methodology. Claude Code 2.1.312, model Haiku, Windows 11, October 29, 2026, run in `-p` mode from an empty working directory with `CLAUDE_CODE_ENABLE_TELEMETRY=1` and the OpenTelemetry console logs exporter. Scripts: [agent-summary-probe.sh](/files/agent-summary-probe.sh) and [agent-summary-aggregate.mjs](/files/agent-summary-aggregate.mjs). Counts are from the telemetry events; the `Forking` count is from `--debug-file`. The raw telemetry contains account identifiers and is not published.
