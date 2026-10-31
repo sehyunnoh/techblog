@@ -1,0 +1,125 @@
+---
+title: 'The Browserless Turnstile Solver Replays 23 Recorded Browser Answers From One Profile'
+description: 'cfsolve claims to solve Cloudflare Turnstile with no headless browser. Reading its source offline shows it replays recordings of a real browser, and what that means for a site owner.'
+pubDate: 2026-10-31
+tags: ['security', 'web', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+
+A library called cfsolve reached the Hacker News front page today with the pitch that it solves Cloudflare Turnstile "without a headless browser".[^1] That phrase is doing a lot of work. I read the repository this morning to see what it means in practice, and the short version is that the browser did not disappear. It moved from run time to recording time.
+
+Two limits first. I did not build or run the library, and I sent nothing to any website. Everything below comes from reading the source and the data files it ships with, so I cannot tell you whether it works against Cloudflare today. What I can describe is how it is built, and what a site owner should take from that.
+
+## Background: what Turnstile is checking
+
+**Turnstile** is Cloudflare's replacement for the old "click all the traffic lights" CAPTCHA. A small widget on your form runs some JavaScript in the visitor's browser, and if the result looks like a real browser, the widget hands back a **token**. Your server then forwards that token to Cloudflare's `siteverify` endpoint and gets a yes or no.
+
+A **headless browser** is a normal browser engine (Chrome, say) running without a window, driven by a script. It is the usual way to get past such a widget: let a real engine run the real challenge code. The downside is cost. Every solve needs a whole browser process.
+
+cfsolve takes the other road. Its README says it returns a Turnstile token, or a `cf_clearance` cookie for the full-page "Just a moment..." challenge, from a Rust program with no browser in the loop.[^2]
+
+## What the repository contains
+
+The challenge code that Cloudflare serves is deliberately obfuscated JavaScript. To run it without a browser, you have to do three jobs yourself: read the code, execute its custom instruction set, and answer its questions about the browser it thinks it is running in.
+
+The source folders line up with those jobs. I counted bytes of Rust per folder.[^3]
+
+<Chart
+  type="bar"
+  horizontal
+  height={360}
+  format="plain"
+  caption="Kilobytes of Rust source per folder in cfsolve's src/ directory (185 files, 47,232 lines in total). The largest folder, stage2, holds the code that answers the challenge's questions about the browser."
+  label="Bar chart of source size in kilobytes: stage2 522, deobfuscate 300, vm 284, challenge 172, capture 134, session 94, embedding_page 82, http 61, js 43"
+  labels={['stage2', 'deobfuscate', 'vm', 'challenge', 'capture', 'session', 'embedding_page', 'http', 'js']}
+  series={[{ name: 'Source size (KB)', data: [522, 300, 284, 172, 134, 94, 82, 61, 43] }]}
+  yTitle="Kilobytes of Rust source"
+/>
+
+Bytes of source are a crude proxy for effort, and folder names are the author's, not mine. Still, the shape is plain. The part that reads and de-obfuscates the challenge (`deobfuscate`, built on the swc JavaScript parser) and the part that interprets its virtual machine (`vm`) are big. The biggest piece is `stage2`, and its `probes` subfolder is a list of file names that reads like a browser feature checklist: clock, media, WebSocket echo, worker fetch, ICE, performance, DOM mutation.
+
+The repository also vendors a patched TLS library (BoringSSL, the one Chrome uses) and HTTP stack, about 31 MB on disk, so the network handshake looks like a particular browser's. The ordering of HTTP headers is stored in the profile too.
+
+None of that is a headless browser. It is a partial reimplementation of the parts of a browser that the challenge asks about.
+
+## The 23 recorded answers
+
+Here is the part that changed how I read the project. The README says each browser profile "references recorded responses to the challenge's browser checks, stored as JSON", and that producing them takes manual effort, aided by a capture proxy that records what a real browser sends to Cloudflare.[^2]
+
+The one shipped profile is `safari-26-ios`, Safari on an iPhone. I parsed its data files with Python, as data only.
+
+| File | Size | Probes | Answer fields | Late probes |
+|---|---|---|---|---|
+| `safari-26-ios.json` (transport, headers, timing) | 17,145 B | n/a | n/a | n/a |
+| `answers.json` | 92,624 B | 23 | 105 | 4 |
+| `challenge-page-answers.json` | 92,918 B | 23 | 105 | 4 |
+
+A **probe** here is one numbered question the challenge asks the browser, of the kind the module names suggest: media support, how fast a small task ran, how a rendered image comes out. The answers are recorded values, with a measured duration beside each. The two files have the same shape and the same `reference` identifier. They also differ in 612 values.
+
+Those 612 differences are the interesting bit. The ones I looked at are timings (a probe took 80 ms in one file and 97 in the other) and what looks like rendered-image data (I am inferring that from the values, the field names are obfuscated), where one pixel run reads `255,255,255,255,184,184,184,254` and the other `255,255,255,255,186,186,186,255`, with a different hash on top. That looks like two real recordings of the same kind of device, each with the small natural noise a real browser produces. I did not confirm it was the same physical device, so treat that as a reading, not a fact.
+
+<Mermaid
+  caption="The shape of the approach as the source and README describe it. The chain that starts at Real Safari runs once per profile. The other chain runs on every solve and reads the recording."
+  label="Flow diagram. One chain, run once per profile: a real Safari browser sends traffic through a capture proxy, which stores decoded payloads as answers JSON files inside a profile. The other chain, run on every solve: the Rust program fetches the challenge page, reads and interprets the challenge program, fills its questions with the recorded answers, and receives a token or a clearance cookie from Cloudflare."
+  code={`
+flowchart TD
+  S["ONCE PER PROFILE<br/>Real Safari"] --> P["capture-proxy"]
+  P --> J["profile + answers.json<br/>23 probes, 105 fields"]
+  F["EVERY SOLVE<br/>Fetch challenge page"] --> I["Parse + interpret<br/>challenge program"]
+  I --> R["Fill answers<br/>from the profile"]
+  R --> T["Token or<br/>cf_clearance cookie"]
+  J --> R
+`}
+/>
+
+The upshot is that "no headless browser" and "no real browser" are different claims. The solver does not need a browser each time, but it does need a real browser once per profile, and that recording is the asset. A challenge that asks a new question, or changes how it checks an old one, breaks the replay until someone records again. The README is honest about this: its error table lists `Unsupported` for "a new challenge build". The most recent commit I fetched, from October 29, is titled "fix challenge pages".
+
+## Where the claim gets narrower
+
+Several details in the README put limits on it.
+
+- **One profile.** Only `safari-26-ios` ships. The README says Safari and Chrome(ium) profile types are supported, and that making more is work.
+- **Identity must match.** The `cf_clearance` cookie has to be sent "from the same IP address and user agent as the profile, or Cloudflare will reject it."
+- **Time is modelled.** The profile has `timeline`, `intervals` and `resource_timing` sections, and the source carries a `performance_clock.rs` that mimics how Chrome derives `performance.now()`. Reproducing timing that looks human is part of the job, not a side issue.
+
+None of this is a reason to relax. A tool that needs refreshing is still a tool people will refresh. It does change what is worth defending, though.
+
+## What a site owner can do with this
+
+Turnstile's own documentation gives you more than most integrations use.[^4]
+
+1. **Always validate on the server.** The docs say it plainly: "The client-side widget alone does not protect your forms." A token that your backend never checks is decoration.
+2. **Treat a token as short-lived and single-use.** Each token is valid for 300 seconds and can be validated once. A pipeline that solves tokens in advance and stockpiles them runs into that, so do not extend the window on your side.
+3. **Bind the token to the action.** The widget accepts an `action` and `cData` string, and `siteverify` returns them. If your login form uses `action: login` and your signup form uses `action: signup`, check the returned value, so a token minted for one is useless for the other. cfsolve's CLI has `--action` and `--cdata` options, which means it can set them, so this raises the bar only if the values are meaningful on your side (a session-bound `cData`, for example, not a constant).
+4. **Check the hostname.** `siteverify` returns the hostname where the challenge was served. Compare it with yours.
+5. **Pass the visitor IP.** The `remoteip` parameter is optional in the docs. Given that the README insists on one consistent IP for clearance cookies, sending it costs nothing.
+
+I did not try any of these against cfsolve, because I did not run it. They come from the Cloudflare documentation, and the connection to this tool is my reading of the README.
+
+This also fits the pattern from my earlier measurement of AI crawlers, where the gap between what a site's rules say and what its servers enforce was the real story.[^5] A Turnstile widget with no server-side check is the same gap in a different place.
+
+## Trade-offs and what this does not tell you
+
+- **I do not know if it works.** Not running the code is a deliberate choice. Everything about effectiveness here is unmeasured.
+- **Source size is not complexity.** Byte counts per folder are a rough guide to where the author spent time. A large file can be a lookup table, and a small one can be the clever part.
+- **My reading of the 612 differences is a guess.** I checked a sample, not all of them, and I did not verify where the recordings came from.
+- **A clean checkout is one snapshot.** I fetched the latest commit only, so I cannot say how often the profile has been re-recorded. The commit history would tell you, and I did not pull it.
+- **Defenders have costs too.** Stricter `action` and `cData` binding means more code and more ways to reject a real visitor, such as a user who leaves a form open for ten minutes and hits the 300-second expiry.
+
+## What I would take away
+
+- **"No headless browser" describes the runtime, not the origin.** The solver depends on recordings of a real browser, and the recording is the part that has to be redone when the challenge changes.
+- **The cost to the attacker shifts to maintenance.** One profile, a patched TLS stack and a 47,000-line codebase is a lot to keep current. That is useful information for deciding how much weight to put on Turnstile alone.
+- **Your server-side check is the control.** Validate every token, bind it to an action, and compare hostname and expiry.
+- **A tool being public is not the same as it being effective today.** Read the README's limits, not only its first sentence.
+
+## References
+
+[^1]: Hacker News front page, October 31, 2026 (listed at 206 points when I read it), linking to the repository below.
+[^2]: chris124567, [cfsolve](https://github.com/chris124567/cfsolve), README and `src/challenge/orchestrator.rs`. I read commit `98240dd` (October 29, 2026, "fix challenge pages"), fetched with `--depth 1`, so I have no history.
+[^3]: [cfsolve-profile-stats.py](/files/cfsolve-profile-stats.py), a script that only reads files. Run with `python -I` on a fresh clone in an otherwise empty directory. The counts quoted in this post come from its output on October 31, 2026.
+[^4]: Cloudflare, [Turnstile server-side validation](https://developers.cloudflare.com/turnstile/get-started/server-side-validation/). I read it through a summarizing fetch, not the raw page. The 300-second validity, single-use rule, returned `action`, `cdata` and `hostname` fields, and optional `remoteip` come from there.
+[^5]: [robots.txt Allowed 87 AI Requests. The Servers Blocked 25 of Them Anyway.](/posts/robots-txt-allowed-ai-requests-servers-blocked), this blog, October 19, 2026.
