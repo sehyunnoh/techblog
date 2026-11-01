@@ -3,6 +3,7 @@ import type { MarkdownHeading } from 'astro';
 import BaseLayout from './BaseLayout.astro';
 import TagBadge from '../components/TagBadge.astro';
 import Toc from '../components/Toc.astro';
+import ReadingProgress from '../components/ReadingProgress.astro';
 import { withBase } from '../utils/url';
 import { formatDate, isoDate, readingTime, type Post } from '../utils/posts';
 
@@ -37,6 +38,7 @@ const toc = headings.filter(
 >
   {/* data-pagefind-body scopes the search index to post content, keeping the
       chrome (nav, footer, tag lists) out of every result excerpt. */}
+  <ReadingProgress />
   <article class="post" data-pagefind-body>
     <header class="post__header">
       <div class="post__meta">
