@@ -1,0 +1,57 @@
+---
+/**
+ * Adds a small "#" link after every h2/h3 in the article body, so a reader
+ * can link straight to a section. Added in the browser, like the copy
+ * buttons, so the content files stay untouched. The visually hidden
+ * footnote heading is skipped: it is not a section of the post.
+ */
+---
+
+<script>
+  const headings = document.querySelectorAll<HTMLElement>(
+    'article .prose :is(h2, h3)[id]:not(#footnote-label)',
+  );
+
+  headings.forEach((h) => {
+    const a = document.createElement('a');
+    a.className = 'heading-anchor';
+    a.href = `#${h.id}`;
+    a.textContent = '#';
+    a.setAttribute('aria-label', 'Link to this section');
+    a.setAttribute('data-pagefind-ignore', '');
+    h.appendChild(a);
+  });
+</script>
+
+<style is:global>
+  .heading-anchor {
+    margin-left: 0.4em;
+    font-weight: 500;
+    text-decoration: none;
+    color: var(--fg-faint);
+    opacity: 0;
+    transition: opacity 0.12s ease;
+  }
+
+  .prose :is(h2, h3):hover > .heading-anchor,
+  .heading-anchor:focus-visible {
+    opacity: 1;
+  }
+
+  .heading-anchor:hover {
+    color: var(--accent);
+  }
+
+  /* No hover on touch screens, so keep a faint marker visible there. */
+  @media (hover: none) {
+    .heading-anchor {
+      opacity: 0.45;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .heading-anchor {
+      transition: none;
+    }
+  }
+</style>

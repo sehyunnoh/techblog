@@ -5,6 +5,7 @@ import TagBadge from '../components/TagBadge.astro';
 import Toc from '../components/Toc.astro';
 import ReadingProgress from '../components/ReadingProgress.astro';
 import CopyCode from '../components/CopyCode.astro';
+import HeadingAnchors from '../components/HeadingAnchors.astro';
 import { withBase } from '../utils/url';
 import { formatDate, isoDate, readingTime, type Post } from '../utils/posts';
 
@@ -41,6 +42,7 @@ const toc = headings.filter(
       chrome (nav, footer, tag lists) out of every result excerpt. */}
   <ReadingProgress />
   <CopyCode />
+  <HeadingAnchors />
   <article class="post" data-pagefind-body>
     <header class="post__header">
       <div class="post__meta">
