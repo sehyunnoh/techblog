@@ -1,0 +1,121 @@
+---
+/**
+ * Adds a "Copy" button to every highlighted code block in an article.
+ *
+ * Done in the browser rather than at build time so it applies to anything
+ * the Markdown processor emits, without touching the content files. Only
+ * Shiki blocks (`pre.astro-code`) are wrapped, which leaves Mermaid's own
+ * markup alone. The page is fully readable without the script.
+ */
+---
+
+<script>
+  const blocks = document.querySelectorAll<HTMLPreElement>('article .prose pre.astro-code');
+
+  async function copyText(text: string): Promise<boolean> {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Clipboard API needs a secure context; fall back for plain http previews.
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      let ok = false;
+      try {
+        ok = document.execCommand('copy');
+      } catch {
+        ok = false;
+      }
+      ta.remove();
+      return ok;
+    }
+  }
+
+  blocks.forEach((pre) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'code-block';
+    pre.parentNode?.insertBefore(wrap, pre);
+    wrap.appendChild(pre);
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'code-copy';
+    btn.textContent = 'Copy';
+    btn.setAttribute('aria-label', 'Copy code to clipboard');
+    btn.setAttribute('data-pagefind-ignore', '');
+    wrap.appendChild(btn);
+
+    let timer: number | undefined;
+    btn.addEventListener('click', async () => {
+      const code = pre.querySelector('code') ?? pre;
+      const ok = await copyText((code.textContent ?? '').replace(/\n$/, ''));
+      btn.textContent = ok ? 'Copied' : 'Press Ctrl+C';
+      btn.dataset.state = ok ? 'done' : 'failed';
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        btn.textContent = 'Copy';
+        delete btn.dataset.state;
+      }, 1600);
+    });
+  });
+</script>
+
+<style is:global>
+  .code-block {
+    position: relative;
+    margin: 1.5rem 0;
+  }
+
+  .code-block > pre {
+    margin: 0;
+  }
+
+  .code-copy {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    padding: 0.2rem 0.55rem;
+    font: inherit;
+    font-size: 0.75rem;
+    line-height: 1.4;
+    color: var(--fg-muted);
+    background-color: var(--bg-subtle);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+  }
+
+  .code-block:hover .code-copy,
+  .code-copy:focus-visible,
+  .code-copy[data-state] {
+    opacity: 1;
+  }
+
+  .code-copy:hover {
+    color: var(--fg);
+  }
+
+  .code-copy[data-state='done'] {
+    color: var(--accent);
+  }
+
+  /* Touch screens have no hover, so keep the button visible there. */
+  @media (hover: none) {
+    .code-copy {
+      opacity: 1;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .code-copy {
+      transition: none;
+    }
+  }
+</style>
