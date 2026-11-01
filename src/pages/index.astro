@@ -1,14 +1,59 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
-import PostCard from '../components/PostCard.astro';
 import TagBadge from '../components/TagBadge.astro';
 import { SITE } from '../consts';
 import { withBase } from '../utils/url';
-import { getPublishedPosts, getTagCounts } from '../utils/posts';
+import { getPublishedPosts } from '../utils/posts';
+import { formatDate, isoDate, readingTime } from '../utils/content';
+import { getPublishedGuides } from '../utils/guides';
+import type { Tag } from '../tags';
 
 const posts = await getPublishedPosts();
-const recent = posts.slice(0, 6);
-const tags = (await getTagCounts()).slice(0, 12);
+const guides = await getPublishedGuides();
+const latest = posts[0];
+
+// Entry points by subject. Each topic groups tags from the controlled
+// vocabulary; the counts are distinct entries, so a post tagged with two of a
+// topic's tags is counted once.
+const TOPICS: { title: string; blurb: string; tags: Tag[] }[] = [
+  {
+    title: 'AI and LLMs',
+    blurb: 'How models run, fail and get measured, and the agents and tooling built around them.',
+    tags: ['ai', 'llm'],
+  },
+  {
+    title: 'Security',
+    blurb: 'Vulnerabilities, supply-chain incidents and defenses, checked against the code or a local test.',
+    tags: ['security'],
+  },
+  {
+    title: 'Web and frontend',
+    blurb: 'Browsers, standards and rendering, plus what the numbers say about page performance.',
+    tags: ['web', 'frontend', 'analytics'],
+  },
+  {
+    title: 'Backend and data',
+    blurb: 'APIs, databases and the services behind them, with the timings to back up the claims.',
+    tags: ['backend', 'data'],
+  },
+  {
+    title: 'DevOps and observability',
+    blurb: 'Delivery, containers, and the metrics, traces and logs that tell you what broke.',
+    tags: ['devops', 'observability'],
+  },
+  {
+    title: 'Systems and performance',
+    blurb: 'CPUs, memory and the low-level behavior that explains why software is slow.',
+    tags: ['systems'],
+  },
+];
+
+const topics = TOPICS.map((t) => {
+  const hit = (e: { data: { tags: string[] } }) => e.data.tags.some((x) => (t.tags as string[]).includes(x));
+  return { ...t, posts: posts.filter(hit).length, guides: guides.filter(hit).length };
+});
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 ---
 
 <BaseLayout title={SITE.title} description={SITE.description} path="/" narrow>
@@ -21,36 +66,53 @@ const tags = (await getTagCounts()).slice(0, 12);
   </section>
 
   {
-    tags.length > 0 && (
-      <section class="topics" aria-label="Browse by tag">
-        {tags.map((t) => <TagBadge tag={t.tag} count={t.count} />)}
+    latest && (
+      <section class="latest" aria-label="Latest post">
+        <p class="latest__label">Latest</p>
+        <p class="latest__meta">
+          <time datetime={isoDate(latest.data.pubDate)}>{formatDate(latest.data.pubDate)}</time>
+          <span aria-hidden="true"> · </span>
+          {readingTime(latest.body)} min read
+        </p>
+        <h2 class="latest__title">
+          <a href={withBase(`/posts/${latest.id}`)}>{latest.data.title}</a>
+        </h2>
+        <p class="latest__desc">{latest.data.description}</p>
       </section>
     )
   }
 
-  <section class="feed">
-    <div class="feed__head">
-      <h2 class="feed__title">Latest</h2>
-      {posts.length > recent.length && <a href={withBase('/posts')}>All {posts.length} posts →</a>}
-    </div>
-
+  <section class="topics" aria-label="Browse by subject">
     {
-      recent.length === 0 ? (
-        <p class="empty">No posts yet. The first one is being written.</p>
-      ) : (
-        recent.map((post, i) => <PostCard post={post} featured={i === 0} />)
-      )
+      topics.map((t) => (
+        <article class="topic">
+          <h2 class="topic__title">{t.title}</h2>
+          <p class="topic__blurb">{t.blurb}</p>
+          <p class="topic__count">
+            {plural(t.posts, 'post', 'posts')} · {plural(t.guides, 'guide', 'guides')}
+          </p>
+          <div class="topic__tags">
+            {t.tags.map((tag) => <TagBadge tag={tag} />)}
+          </div>
+        </article>
+      ))
     }
   </section>
+
+  <p class="all">
+    <a href={withBase('/posts')}>All {posts.length} posts →</a>
+    <a href={withBase('/guides')}>All {guides.length} guides →</a>
+    <a href={withBase('/tags')}>All tags →</a>
+  </p>
 </BaseLayout>
 
 <style>
   .hero {
-    max-width: 40rem;
     padding-bottom: 2rem;
   }
 
   .hero__title {
+    max-width: 40rem;
     margin: 0;
     font-size: clamp(1.9rem, 1.3rem + 2.4vw, 2.9rem);
     line-height: 1.12;
@@ -63,29 +125,14 @@ const tags = (await getTagCounts()).slice(0, 12);
     font-size: 1.05rem;
     line-height: 1.7;
     color: var(--fg-muted);
+    text-wrap: pretty; /* avoids a one-word last line */
   }
 
-  .topics {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.45rem;
-    padding: 1.25rem 0;
-    border-top: 1px solid var(--line);
+  .latest {
+    padding-bottom: 1.75rem;
   }
 
-  .feed {
-    margin-top: 1.5rem;
-    max-width: 46rem;
-  }
-
-  .feed__head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 1rem;
-  }
-
-  .feed__title {
+  .latest__label {
     margin: 0;
     font-size: 0.75rem;
     font-weight: 620;
@@ -94,18 +141,103 @@ const tags = (await getTagCounts()).slice(0, 12);
     color: var(--fg-faint);
   }
 
-  .feed__head a {
+  .latest__meta {
+    margin: 0.7rem 0 0;
     font-size: 0.8125rem;
+    color: var(--fg-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .latest__title {
+    margin: 0.35rem 0 0;
+    font-size: 1.35rem;
+    line-height: 1.3;
+    letter-spacing: -0.02em;
+    font-weight: 660;
+  }
+
+  .latest__title a {
+    color: var(--fg);
+    text-decoration: none;
+  }
+
+  .latest__title a:hover {
+    color: var(--accent);
+  }
+
+  .latest__desc {
+    margin: 0.5rem 0 0;
+    font-size: 0.9375rem;
+    line-height: 1.65;
+    color: var(--fg-muted);
+  }
+
+  .topics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.9rem;
+    padding-top: 1.75rem;
+    border-top: 1px solid var(--line);
+  }
+
+  @media (max-width: 40rem) {
+    .topics {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  .topic {
+    display: flex;
+    flex-direction: column;
+    padding: 1.1rem 1.25rem;
+    background-color: var(--bg-subtle);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+  }
+
+  .topic__title {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 650;
+    letter-spacing: -0.012em;
+  }
+
+  .topic__blurb {
+    margin: 0.4rem 0 0;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: var(--fg-muted);
+  }
+
+  .topic__count {
+    margin: 0.7rem 0 0;
+    font-size: 0.8125rem;
+    color: var(--fg-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .topic__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: auto;
+    padding-top: 0.8rem;
+  }
+
+  .all {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+    margin: 1.75rem 0 0;
+    font-size: 0.8125rem;
+  }
+
+  .all a {
     color: var(--fg-muted);
     text-decoration: none;
   }
 
-  .feed__head a:hover {
+  .all a:hover {
     color: var(--accent);
-  }
-
-  .empty {
-    padding: 2rem 0;
-    color: var(--fg-muted);
   }
 </style>
