@@ -1,0 +1,191 @@
+---
+/**
+ * Table of contents for posts and guides.
+ *
+ * Renders two lists from the same headings: an inline box above the article
+ * (narrow screens) and a sticky rail beside it (wide screens). Only one is
+ * visible at a time, so there is a single set of links on screen. The rail
+ * is positioned against the nearest positioned ancestor, which the layouts
+ * set to the article element.
+ */
+interface Props {
+  toc: { depth: number; slug: string; text: string }[];
+}
+
+const { toc } = Astro.props;
+---
+
+{
+  toc.length >= 3 && (
+    <>
+      <nav class="toc toc--inline" aria-label="Table of contents" data-pagefind-ignore>
+        <p class="toc__title">Contents</p>
+        <ol class="toc__list">
+          {toc.map((h) => (
+            <li class:list={['toc__item', h.depth === 3 && 'toc__item--sub']}>
+              <a href={`#${h.slug}`}>{h.text}</a>
+            </li>
+          ))}
+        </ol>
+      </nav>
+
+      <div class="toc-rail" data-pagefind-ignore>
+        <nav class="toc-rail__nav" aria-label="On this page" data-toc-rail>
+          <p class="toc__title">On this page</p>
+          <ol class="toc__list">
+            {toc.map((h) => (
+              <li class:list={['toc__item', h.depth === 3 && 'toc__item--sub']}>
+                <a href={`#${h.slug}`} data-toc-link={h.slug}>
+                  {h.text}
+                </a>
+              </li>
+            ))}
+          </ol>
+        </nav>
+      </div>
+    </>
+  )
+}
+
+<style>
+  .toc {
+    margin: 2rem 0 0;
+    padding: 1.1rem 1.35rem;
+    background-color: var(--bg-subtle);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+  }
+
+  .toc__title {
+    margin: 0 0 0.6rem;
+    font-size: 0.75rem;
+    font-weight: 620;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+
+  .toc__list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .toc__item {
+    line-height: 1.75;
+    font-size: 0.9rem;
+  }
+
+  .toc__item--sub {
+    padding-left: 1.1rem;
+    font-size: 0.85rem;
+  }
+
+  .toc__item a {
+    color: var(--fg-muted);
+    text-decoration: none;
+  }
+
+  .toc__item a:hover {
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .toc-rail {
+    display: none;
+  }
+
+  /* 46rem article + 2rem gap + 13rem rail = 61rem, centred in an 80rem
+     viewport that leaves 17rem on each side, so the rail never overlaps. */
+  @media (min-width: 80rem) {
+    .toc--inline {
+      display: none;
+    }
+
+    .toc-rail {
+      display: block;
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: calc(100% + 2rem);
+      width: 13rem;
+    }
+
+    .toc-rail__nav {
+      position: sticky;
+      top: 6rem;
+      max-height: calc(100vh - 8rem);
+      overflow-y: auto;
+      padding-left: 0.9rem;
+      border-left: 1px solid var(--line);
+    }
+
+    .toc-rail .toc__title {
+      margin-bottom: 0.4rem;
+    }
+
+    .toc-rail .toc__item {
+      font-size: 0.8125rem;
+      line-height: 1.45;
+      padding-block: 0.22rem;
+    }
+
+    .toc-rail .toc__item--sub {
+      font-size: 0.78rem;
+      padding-left: 0.8rem;
+    }
+
+    .toc-rail .toc__item a[aria-current='true'] {
+      color: var(--accent);
+      font-weight: 600;
+    }
+  }
+</style>
+
+<script>
+  // Marks the rail link of the section being read. Computed from live
+  // geometry on scroll (not cached offsets), so it stays right after Mermaid
+  // diagrams render and shift the headings below them.
+  const nav = document.querySelector<HTMLElement>('[data-toc-rail]');
+  if (nav) {
+    const links = Array.from(nav.querySelectorAll<HTMLAnchorElement>('[data-toc-link]'));
+    const targets = links
+      .map((a) => ({ a, el: document.getElementById(a.dataset.tocLink ?? '') }))
+      .filter((t): t is { a: HTMLAnchorElement; el: HTMLElement } => t.el !== null);
+
+    // A heading counts as "current" once it is within this many px of the top.
+    const OFFSET = 120;
+    let ticking = false;
+
+    const update = () => {
+      ticking = false;
+      let current = targets[0];
+      for (const t of targets) {
+        if (t.el.getBoundingClientRect().top - OFFSET <= 0) current = t;
+        else break;
+      }
+      for (const t of targets) {
+        if (t === current) t.a.setAttribute('aria-current', 'true');
+        else t.a.removeAttribute('aria-current');
+      }
+      // Keep the active link visible when the rail itself scrolls.
+      if (current && nav.scrollHeight > nav.clientHeight) {
+        const a = current.a.getBoundingClientRect();
+        const n = nav.getBoundingClientRect();
+        if (a.top < n.top || a.bottom > n.bottom) current.a.scrollIntoView({ block: 'nearest' });
+      }
+    };
+
+    const onScroll = () => {
+      if (!ticking) {
+        ticking = true;
+        requestAnimationFrame(update);
+      }
+    };
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    update();
+  }
+</script>
