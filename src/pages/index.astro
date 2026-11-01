@@ -11,7 +11,7 @@ const recent = posts.slice(0, 6);
 const tags = (await getTagCounts()).slice(0, 12);
 ---
 
-<BaseLayout title={SITE.title} description={SITE.description} path="/">
+<BaseLayout title={SITE.title} description={SITE.description} path="/" narrow>
   <section class="hero">
     <h1 class="hero__title">{SITE.tagline}</h1>
     <p class="hero__text">
