@@ -22,10 +22,10 @@ const years = [...byYear.keys()].sort((a, b) => b - a);
   narrow
 >
   <h1 class="page-title">All posts</h1>
+  <p class="page-count">{posts.length} {posts.length === 1 ? 'post' : 'posts'}</p>
   <p class="page-sub">
-    {posts.length} {posts.length === 1 ? 'post' : 'posts'}. Most posts start from something that
-    just happened and check a claim with a measurement. For reference material that gets revised
-    over time, see <a href={withBase('/guides')}>Guides</a>.
+    Most posts start from something that just happened and check a claim with a measurement. For
+    reference material that gets revised over time, see <a href={withBase('/guides')}>Guides</a>.
   </p>
 
   {
@@ -48,8 +48,15 @@ const years = [...byYear.keys()].sort((a, b) => b - a);
     font-weight: 680;
   }
 
+  .page-count {
+    margin: 0.4rem 0 0;
+    color: var(--fg-faint);
+    font-size: 0.8125rem;
+    font-variant-numeric: tabular-nums;
+  }
+
   .page-sub {
-    margin: 0.4rem 0 2rem;
+    margin: 0.25rem 0 2rem;
     color: var(--fg-muted);
     font-size: 0.9375rem;
     max-width: 34rem;

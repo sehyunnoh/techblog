@@ -30,9 +30,10 @@ const grouped = TAG_GROUPS.map((group) => ({
   narrow
 >
   <h1 class="page-title">Tags</h1>
+  <p class="page-count">{counts.length} {counts.length === 1 ? 'tag' : 'tags'}</p>
   <p class="page-sub">
-    {counts.length} {counts.length === 1 ? 'tag' : 'tags'} in use across Posts and Guides. Tags
-    come from a fixed vocabulary, so related content always lands under the same label.
+    Used across Posts and Guides. Tags come from a fixed vocabulary, so related content always
+    lands under the same label.
   </p>
 
   {
@@ -62,8 +63,15 @@ const grouped = TAG_GROUPS.map((group) => ({
     font-weight: 680;
   }
 
+  .page-count {
+    margin: 0.4rem 0 0;
+    color: var(--fg-faint);
+    font-size: 0.8125rem;
+    font-variant-numeric: tabular-nums;
+  }
+
   .page-sub {
-    margin: 0.4rem 0 2.5rem;
+    margin: 0.25rem 0 2.5rem;
     color: var(--fg-muted);
     font-size: 0.9375rem;
     line-height: 1.65;
