@@ -2,7 +2,7 @@ export const SITE = {
   title: "Lleg's study",
   tagline: 'Notes on AI, web, and the systems underneath',
   description:
-    'A tech blog by Lleg — deep dives on AI, web engineering, and infrastructure, with diagrams and data instead of hand-waving.',
+    'A tech blog by Lleg. Deep dives on AI, web engineering and infrastructure, with diagrams and measured numbers.',
   author: 'Lleg',
   locale: 'en',
   postsPerPage: 10,
