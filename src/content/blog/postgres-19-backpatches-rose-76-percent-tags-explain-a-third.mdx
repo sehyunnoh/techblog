@@ -1,0 +1,155 @@
+---
+title: 'Postgres Back-Patches Rose 76% in a Year. Commit Tags Explain Only a Third of It.'
+description: 'Robert Haas says LLM-found bugs made Postgres 19 late. I recounted his commits in the public repo and split the 188 extra back-branch fixes by CVE tag and AI credit.'
+pubDate: 2026-11-02
+tags: ['postgres', 'ai', 'security', 'benchmark']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+
+PostgreSQL 19 is late. For a decade the major release has landed between mid-September and mid-October, and this year it is heading into November. Robert Haas, a long-time Postgres committer, wrote on October 30 that the cause is AI: language models are finding far more bugs in old code, every bug needs a fix and a review, and the release got delayed while people dealt with them.[^1] The post reached the Hacker News front page, with a lot of argument in the comments and no data beyond Haas's own commit counts.
+
+That is a claim I can check, because Postgres keeps its whole history in a public git repository. I recounted his numbers, and then did the thing his post does not do: split the extra commits by what the commit messages say about where each bug came from. The counts hold up. The explanation is harder to read off the history than the headline suggests.
+
+## Background: stable branches and back-patches
+
+Postgres ships one major version a year. When a version is released, the project keeps a **stable branch** for it (`REL_18_STABLE` for Postgres 18) and keeps fixing bugs there for five years. A **back-patch** is a fix first committed to the main development line (`master`) and then copied onto the older stable branches that have the same bug. Each copy is its own commit.
+
+Two other terms matter below. A **feature freeze** is the date after which no new features go in; Haas gives April 8 for this cycle.[^1] And a **CVE** is a public ID for a security vulnerability, which the Postgres security team registers when a security fix ships.[^2]
+
+<Mermaid
+  caption="One fix becomes several commits. The count on a single stable branch therefore counts bugs once, while a count across all back branches multiplies each bug by the number of branches it lives in."
+  label="Diagram of a bug fix committed to master and then copied as separate commits onto the stable branches for versions 19, 18 and 17"
+  code={`
+flowchart LR
+  B["Bug found in code<br/>shared by several versions"] --> M["Fix committed<br/>to master"]
+  M --> R19["Copy on<br/>REL_19_STABLE"]
+  M --> R18["Copy on<br/>REL_18_STABLE"]
+  M --> R17["Copy on<br/>REL_17_STABLE"]
+`}
+/>
+
+That is why I count one branch per year, the newest released version's: `REL_12_STABLE` in 2020, up to `REL_18_STABLE` in 2026. In each year that branch is about a year old, so everything committed to it in the April 8 to September 25 window is a fix or a small branch-only change, and each year is compared at the same point in a release's life.
+
+## Check one: do Haas's numbers reproduce?
+
+I cloned the repository from GitHub (metadata only, no file contents) and ran `git log` over the window, April 8 to September 25 in both years.[^3]
+
+| Count | Haas | Mine |
+|---|---|---|
+| `master`, 2025 | 1,037 | 1,045 |
+| `master`, 2026 | 1,443 | 1,470 |
+| `REL_17_STABLE`, 2025 | 248 | 248 |
+| `REL_18_STABLE`, 2026 | 433 | 436 |
+| `REL_18_STABLE`, 2025 | 724 | 727 |
+| `REL_19_STABLE`, 2026 | 1,169 | 1,175 |
+
+Everything is within 2%. The small gaps are probably a date boundary, since I used the committer date and included all of September 25. The one that matters for this post is the bottom of the second block: **248 commits on the newest released branch in 2025, 436 in 2026, up 76%**.
+
+The two lower rows are less informative than they look. A branch that was created in the middle of the year inherits all of master's earlier history, so `REL_19_STABLE` in 2026 includes a lot of feature work. The prior-release branch does not have that problem.
+
+I also confirmed two of the late reverts Haas lists: SQL Property Graph Queries on September 7 and UPDATE/DELETE FOR PORTION OF on September 15.
+
+Going back to 2020 shows this is not a normal fluctuation. The same count was 261, 295, 259, 196, 235 and 248 for 2020 through 2025. The highest was 295. The 2026 value is 436.
+
+## Check two: how much of the jump is security?
+
+Postgres committers add a line like `Security: CVE-2026-6464` to a commit message when it fixes a registered vulnerability. Counting those lines on `REL_18_STABLE` in the window gave 63 commits in 2026. In 2025 it was 7.
+
+The distinct CVE IDs in those messages went from 6 in 2025 to 41 in 2026. The project's security page lists a similar jump by year: 3, 7, 7, 7 and 44 for 2022 through 2026.[^2] The two sets of numbers are not identical, because I count by commit window and the page counts by year of disclosure, but they agree on the shape.
+
+The commits are also bunched. 25 landed on a single Monday, May 11, and 38 on Monday, August 10. The security page ties the earlier batch to the 18.4 release and the later ones to 18.6. I did not check the exact release dates, only the commit dates.
+
+So the security work is real and large. It is also not the whole story, and the next chart shows why.
+
+<Chart
+  type="bar"
+  stacked
+  height={340}
+  caption="Commits on the newest released stable branch between April 8 and September 25, split by what the message says. The grey block is every commit with neither a CVE line nor an AI credit. <b>Measured</b> from the Postgres git history."
+  label="Stacked bar chart of commits per year from 2020 to 2026 on the newest released stable branch, split into untagged commits, AI-credited commits without a CVE and CVE-tagged commits, with 2026 far taller than any earlier year"
+  labels={['2020', '2021', '2022', '2023', '2024', '2025', '2026']}
+  series={[
+    { name: 'No CVE line, no AI credit', data: [257, 291, 253, 189, 231, 241, 362] },
+    { name: 'AI credit, no CVE line', data: [0, 0, 0, 0, 0, 0, 11] },
+    { name: 'CVE line', data: [4, 4, 6, 7, 4, 7, 63] },
+  ]}
+  yTitle="Commits in the window"
+  format="plain"
+/>
+
+Taking out the CVE-tagged commits still leaves a 2026 value of 373 against 241 in 2025, a rise of 55%. Every earlier year's total, CVE lines included, was between 196 and 295. The jump is not just the security release days.
+
+## Check three: what do the credits say?
+
+Postgres commit messages carry **trailers**, short lines such as `Reported-by:` that say who found the problem. I searched the 2026 messages for names of AI tools or AI-security products and matched them with word boundaries. A first version of my pattern matched "codex" inside the function name `DecodeXLogRecord`, which is why the script now uses `\b`.[^3]
+
+Thirty of the 436 commits carry an AI credit. In 2024 and 2025 the same search found none. The credits come in a few forms:
+
+- The reporter is a security product or research group: `Xint Code` appears on 13 commits (Theori sells it as an AI code security analyzer),[^4] and other lines name Claude, OpenAI's Codex Security, or AI security labs.
+- A committer wrote in the message that Claude Code found or diagnosed the problem, and that the committed test is a simplified version of what it produced.
+- A contributor marked their own analysis as done "using claude".
+
+Nineteen of the 30 are also CVE-tagged, so the AI credits that are not security fixes number 11.
+
+Putting the pieces together for 2026 against 2025, the rise of 188 commits breaks down as follows.
+
+| Part of the increase | Commits | Share |
+|---|---|---|
+| CVE-tagged (63 vs 7) | +56 | 30% |
+| AI-credited, no CVE line | +11 | 6% |
+| Neither (362 vs 241) | +121 | 64% |
+
+An explicit tag accounts for about a third of the extra commits. The other two thirds look like ordinary bug fixes.
+
+<Chart
+  type="bar"
+  height={320}
+  caption="Commits without a CVE line on the newest released stable branch, by month. The rise starts in April and is already large by June. <b>Measured</b> from the Postgres git history."
+  label="Grouped bar chart of non-security commits per month from April to September for 2025 and 2026, with 2026 higher in every month and roughly double in June, July and August"
+  labels={['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep']}
+  series={[
+    { name: '2025', data: [24, 40, 31, 53, 53, 40] },
+    { name: '2026', data: [42, 44, 73, 76, 85, 53] },
+  ]}
+  yTitle="Commits per month"
+  format="plain"
+/>
+
+There is one more signal in the reporting. The number of commits carrying a `Reported-by:` line went from 45 in 2024 to 93 in 2025 to 192 in 2026, and the number of distinct names on those lines from 34 to 83 to 143. More people, or more tools, are reporting problems. But notice that the doubling happened before 2026 too, which is a reason to be careful: the habit of crediting reporters may itself be changing.
+
+## What this does and does not show
+
+Haas's central claim, that the volume of back-branch fixes jumped in 2026 and was not a matter of committers being sloppy, is supported by the counts. A 76% rise against a six-year range of 196 to 295 is not noise. The security part of it is also concrete: 41 CVEs in a window where most years have two to six.
+
+What the history cannot show is the cause of the other 121 commits. Three readings fit the data equally well:
+
+- AI tools found those bugs too, and the reporters did not mention it. Plenty of people use a model to read code without saying so.
+- The project's own review of old code intensified because of the security wave, and ordinary bugs were found along the way.
+- Something else about the 18 branch, such as how much new code it shipped, made it unusually fixable. I did not compare the size of the releases.
+
+I would not use my breakdown to argue that Haas is wrong. A commit message records who reported a problem, and a model that helped without being credited leaves nothing to count. It is evidence that **the explicit AI attribution is small compared with the size of the rise**, not evidence that the rise has another cause.
+
+Some limits on the method itself:
+
+- **A commit is not a bug.** One fix can cover several problems, and one bug can need two commits. I did not test whether that ratio stayed the same across years.
+- **Six baseline years is a small sample.** The 2020 to 2025 range is 196 to 295, which is wide enough that a 436 is clearly outside, but I would not fit a trend line to it.
+- **The AI search is tied to 2026 wording.** I built the pattern from reading this year's messages, so it can only find credits of the kind it has seen. An older credit style would be missed, though I saw none in the 2024 and 2025 messages I scanned.
+- **I did not measure the delay.** Whether the release is late because of this work, or how much of the delay came from the three reverts, is Haas's inside knowledge, not something a commit count can tell.
+
+## Takeaways
+
+- **The headline numbers are real.** On the newest released branch, April 8 to September 25 went from 248 commits to 436, and the previous high in six years was 295.
+- **Count one branch, not all of them.** A fix copied onto five branches looks like five bugs. Using a single stable branch makes the year-to-year comparison honest.
+- **About a third of the extra commits carry a visible tag.** 63 CVE-tagged commits (up from 7) and 11 more with an AI credit, out of 188 extra.
+- **The rest is invisible in the history.** The 121 untagged extra commits are consistent with LLM-found bugs, but the commit messages do not say so, and I would not claim more than that.
+- **Check any count of "AI-found bugs" against the trailers.** If reporters say how they found a bug, the data to settle this exists in the history. If they do not, nobody outside the project can.
+
+## References
+
+[^1]: Robert Haas, [Postgres 19 is late, and it's AI's fault](https://rhaas.blogspot.com/2026/10/postgres-19-is-late-and-its-ais-fault.html), October 30, 2026 (originally on the Neon blog). I read it through a summarizing fetch and quote his numbers as relayed there, then compared them with my own count.
+[^2]: PostgreSQL project, [Security Information](https://www.postgresql.org/support/security/). Per-year CVE counts of 3, 7, 7, 7 and 44 (2022 to 2026) come from a summarizing fetch of its table of vulnerabilities in supported versions.
+[^3]: [pg-backpatch-count.py](/files/pg-backpatch-count.py), standard-library Python that reads a blobless bare clone of `github.com/postgres/postgres` and prints the table behind every number here. I cloned on November 2, 2026, when `master` was at commit `633dee1`.
+[^4]: Help Net Security, [Theori brings Xint Code to market for large-scale AI code security analysis](https://www.helpnetsecurity.com/2026/03/18/theori-xint-code/), March 18, 2026. I use it only to describe what the product is, not for any claim about what it found in Postgres, which I take from the commit messages.
