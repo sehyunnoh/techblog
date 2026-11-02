@@ -1,0 +1,111 @@
+---
+title: 'Control Plane vs Data Plane Explained: Two Halves of Almost Every System'
+description: 'The control plane decides how a system behaves and the data plane does the work. This guide defines both, walks through routers, AWS, Kubernetes and Envoy, and explains why the split matters.'
+pubDate: 2026-11-01
+updatedDate: 2026-11-01
+tags: ['architecture', 'backend', 'devops', 'kubernetes']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+
+Read enough system design material and two terms keep showing up: **control plane** and **data plane**. They appear in networking, cloud services, Kubernetes, service meshes and databases, usually without a definition, as if everyone had been told at some point. This guide gives the definitions, shows the same split in four familiar systems, and then covers the reason the split exists, which is more useful than the vocabulary.
+
+## The short version
+
+The **data plane** does the work the system exists to do. It handles each packet, each request, each read and write.
+
+The **control plane** decides how the data plane should behave. It holds the rules, the configuration and the desired state, and pushes them to the data plane.
+
+A rough analogy is an airport. Planes taking off and landing are the data plane. Air traffic control is the control plane: it never carries a passenger, but it decides which runway each plane uses. If the tower loses power, planes already in the air do not fall out of the sky, though nothing new gets organized until it comes back. That last point is the heart of the whole idea.
+
+## Where the terms come from: routers
+
+The vocabulary comes from networking. AWS's fault isolation whitepaper says the terms originate with routers: a router's main job is moving packets according to rules, which is its data plane, and those rules are created and distributed by its control plane.[^1]
+
+RFC 7426, which describes software-defined networking, states the same thing more formally. It defines the control plane as "the collection of functions responsible for controlling one or more network devices," which instructs devices how to process and forward packets. The forwarding plane, also called the data plane, is the collection of resources responsible for forwarding traffic.[^2]
+
+Concretely: a router runs a routing protocol such as BGP, learns which networks are reachable where, and builds a forwarding table. That is control plane work. Then millions of packets arrive and each one is looked up in the table and sent out an interface. That is data plane work. The two have very different shapes. Control work is occasional, complex and about the whole network. Data work is constant, simple and about one packet.
+
+## The same split in three more systems
+
+<Mermaid
+  caption="The pattern is the same everywhere: a control plane that accepts intent and computes configuration, and a data plane that carries the traffic or runs the workload under that configuration. Only the control plane is touched by operators."
+  label="A diagram with an operator on the left sending intent to a control plane box, which pushes configuration to a data plane box. Clients send requests to the data plane box and receive responses directly, without passing through the control plane"
+  code={`
+flowchart LR
+  OP["Operator or API caller"] -->|"intent: create, change, delete"| CP["Control plane"]
+  CP -->|"configuration, rules, desired state"| DP["Data plane"]
+  C["Clients"] -->|"requests"| DP
+  DP -->|"responses"| C
+`}
+/>
+
+### Cloud services (AWS)
+
+AWS splits most of its services this way and is unusually direct about it. Control plane operations are the administrative APIs that create, read, update, delete and list resources. Launching an EC2 instance, creating an S3 bucket and describing an SQS queue are the examples given. The data plane provides the service's primary function: the running EC2 instance, reading and writing an EBS volume, getting and putting S3 objects, answering Route 53 DNS queries.[^1]
+
+The same page explains why launching an instance is control plane work with many moving parts. The control plane has to find a host with capacity, allocate network interfaces, prepare a volume, generate IAM credentials, add security group rules and distribute networking information to other hosts. If any one step fails, the launch fails.[^1] Once the instance is running, none of that machinery sits in the path of its traffic.
+
+### Kubernetes
+
+Kubernetes names the split in its own docs. A cluster consists of a control plane and one or more worker nodes. The control plane components manage the overall state of the cluster: the API server exposes the Kubernetes API, etcd stores all API server data, the scheduler assigns unscheduled Pods to nodes, and the controller manager runs the controllers that implement API behavior.[^3]
+
+The worker side is the data plane in the AWS sense, though Kubernetes itself does not use that word on the components page. On every node the kubelet ensures that Pods and their containers are running, kube-proxy maintains network rules for Services, and the container runtime actually runs the containers.[^3] When you run `kubectl apply`, you are talking to the control plane. When a user hits your web app, the request goes to a container started by the data plane side and never touches the API server.
+
+### Service meshes and proxies (Envoy)
+
+A proxy like Envoy is a clean example because the two planes are separate programs. Envoy forwards traffic. Where its configuration comes from can be a static file or, in dynamic setups, a set of gRPC or REST APIs that Envoy's docs collectively call xDS, covering listeners, clusters, routes, endpoints and secrets.[^4] Whatever serves those APIs, often called a management server or control plane, decides what each Envoy should do. The proxies are the data plane.
+
+The xDS protocol documentation also answers what happens when the control plane goes away: the last known configuration Envoy received persists until the connection is reestablished, though the docs note this may not suit every service. If you want stale resources to expire, there is an optional TTL mechanism.[^5] So losing the control plane freezes the data plane's configuration instead of stopping its traffic.
+
+## Side by side
+
+| | Control plane | Data plane |
+|---|---|---|
+| Job | Decide, configure, orchestrate | Carry traffic, run the workload |
+| Typical operations | Create, update, delete, describe, schedule | Forward a packet, serve a request, read or write data |
+| Who calls it | Operators, deployment tools, other control systems | End users and application traffic |
+| Request rate | Low, bursty | High, constant |
+| Logic | Complex workflows with many dependencies | Deliberately simple |
+| Examples (AWS) | Launch EC2 instance, create S3 bucket | Running instance, S3 get and put |
+| Examples (Kubernetes) | API server, etcd, scheduler | kubelet, kube-proxy, container runtime |
+| If it fails | You cannot change things | Users feel it immediately |
+
+The last row is the one to remember, and it is the reason for the split.
+
+## Why separate them at all
+
+**Different failure behavior.** AWS states it plainly: control planes tend to be complex orchestration systems with nuanced business logic and many dependencies, while data planes are intentionally simpler, with fewer dependencies, which makes them more reliable. As a result, broad failure events are statistically less likely in the data plane, and depending on a data plane will likely give you higher availability than depending on a control plane.[^1] If the two shared one codebase and one deployment, the fragility of the complicated half would leak into the half your users depend on.
+
+**Different scaling.** A data plane scales with traffic. A control plane scales with how often you change things and how many things exist. Tying them together means you pay for one when you need the other.
+
+**Different change rates and risks.** You can ship a new scheduler without touching the thing that serves requests. You can also make the control plane slower and more careful without slowing down every request.
+
+AWS lists performance, scalability and availability among the benefits of treating the planes as distinct components.[^1]
+
+## What this means for your own design
+
+Once you can see the split, a few practical habits follow.
+
+- **Keep the control plane out of the request path.** If every user request has to ask the control plane something, you have made your most fragile component into a hard dependency of your most important one. Push configuration down ahead of time and let the data plane work from its local copy. This is how Envoy behaves with its last known configuration.[^5]
+- **Decide what happens when the control plane is down.** This is a design decision, not an accident. Envoy's docs say that keeping the last config may not be right for every service, which is why TTLs exist.[^5] Pick fail-static, fail-closed or expire-after-N on purpose.
+- **Be honest about what a control plane outage costs.** In general, existing workloads keep running while you lose the ability to create, scale or heal them. That is a real limit during an incident: if you need to launch capacity to recover, the thing you need is exactly the thing that is down. I did not simulate an outage for this guide, so treat that as the general shape rather than a measured result for any particular system.
+- **Do not treat "control plane" as a synonym for "admin UI".** The control plane is a system with its own availability, scaling and security needs. Anyone who can reach it can change what the data plane does.
+- **Watch for the blur.** Some operations are not cleanly one or the other. An autoscaler is control plane logic that reacts to data plane metrics. A feature flag service is a control plane that, if called on every request, becomes part of the data path. The categories are a tool for asking the right question, not a rule that every component must fit.
+
+## A quick test for any component
+
+Ask two questions. First, if this component stopped for ten minutes, would current users notice? If yes, it is on the data plane side or someone has put it in the request path. Second, does it decide what other components should do, rather than doing the user-facing work itself? If yes, it is control plane. A component that answers yes to both is worth a closer look.
+
+## One more term: the management plane
+
+You will sometimes see a third word. RFC 7426 describes an operational (management) plane that handles things like device inventory and configuration of the device itself, separate from the control plane that governs forwarding.[^2] Many cloud and Kubernetes discussions fold this into "control plane," and the line is not applied consistently, so check what a given source means before you rely on it.
+
+## References
+
+[^1]: AWS, [Control planes and data planes](https://docs.aws.amazon.com/whitepapers/latest/aws-fault-isolation-boundaries/control-planes-and-data-planes.html), from the whitepaper "AWS Fault Isolation Boundaries." Origin of the terms, CRUDL definition of the control plane, EC2 launch steps, data plane examples, and the reliability and availability statements.
+[^2]: IETF, [RFC 7426, Software-Defined Networking (SDN): Layers and Architecture Terminology](https://www.rfc-editor.org/rfc/rfc7426.html), Section 2 (terminology). Definitions of control plane and forwarding plane (also called data plane). The management plane description is from the same RFC; I read the definitions section through a fetch summary, not line by line.
+[^3]: Kubernetes, [Kubernetes Components](https://kubernetes.io/docs/concepts/overview/components/). Control plane components and node components. The page does not use the phrase "data plane"; mapping node components to it is my reading.
+[^4]: Envoy, [Dynamic configuration (xDS)](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/operations/dynamic_configuration). xDS as external gRPC or REST configuration APIs for listeners, clusters, routes, endpoints, secrets and more.
+[^5]: Envoy, [xDS REST and gRPC protocol](https://www.envoyproxy.io/docs/envoy/latest/api-docs/xds_protocol). Behavior when the management server connection is lost, and the optional TTL for resources. I read this page through a fetch summary, not line by line.
