@@ -1,0 +1,143 @@
+---
+title: 'Why So Many Projects Are Moving to Rust: Bun, Zed, Android and What Is Actually a Rewrite'
+description: 'A fact-checked look at the move to Rust. Bun did port Zig to Rust, Zed was a fresh start, and Android mostly writes new code. This guide sorts the cases, the numbers and the trade-offs.'
+pubDate: 2026-11-03
+updatedDate: 2026-11-03
+tags: ['rust', 'systems', 'architecture', 'opinion']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+
+"Everyone is rewriting everything in Rust" is a popular claim, and like most popular claims it is half true. Some famous projects really did port working code to Rust. Others get lumped in because they are written in Rust, even though nobody rewrote anything. And the strongest evidence for Rust does not come from rewrites at all.
+
+This guide sorts the well-known cases into what they actually are, explains the technical reason people keep reaching for Rust, and ends with the part the hype skips: what a rewrite costs and when it is a bad idea.
+
+## Two examples from the question, checked
+
+Two names come up in almost every version of this story: Bun and Zed. They are good test cases because they are different kinds of event.
+
+**Bun is a real rewrite.** Bun, the JavaScript runtime, was written in Zig from its first line in April 2021. Its creator Jarred Sumner has published an account of porting it to Rust. According to that post, the original code was 535,496 lines of Zig, the port was merged on May 14, 2026, and Bun v1.3.14 was the last Zig release while v1.4.0 was the first Rust one.[^1] The port was done mostly by Claude agents (about 64 running in parallel, per the same post), and Anthropic had acquired Bun in December 2025.[^1] More on that below, because the way it was done is as interesting as the language.
+
+**Zed is not a rewrite of Zed.** Zed was written in Rust from the start. What happened is older and different. Zed's founders came from Atom, the editor GitHub built on Chromium, which spawned Electron along the way. Zed's own 1.0 announcement says web technology "imposed a ceiling" they could not get past with Atom, and that the team decided to "start over", building the editor "like a video game" around the GPU, with a UI framework (GPUI) written from scratch in Rust.[^2] So Zed is a new product by people who had built the old one, and the language was a founding choice, not a migration.
+
+That difference matters for everything that follows. Starting a project in Rust and porting a working project to Rust are very different bets.
+
+## Four kinds of "moving to Rust"
+
+Once you separate the cases, most of them fall into one of four buckets.
+
+<Mermaid
+  caption="Most 'rewritten in Rust' stories are one of these four. The risk and the evidence differ a lot between them."
+  label="A diagram that splits the phrase moving to Rust into four branches: a full port of a working product, a fresh start in Rust, a new tool that replaces older tools, and new code added beside old code"
+  code={`
+flowchart TD
+  A["Moving to Rust"] --> B["Full port of a working product"]
+  A --> C["Fresh start, Rust from day one"]
+  A --> D["New tool replacing older tools"]
+  A --> E["New code next to old code"]
+  B --> B1["Bun: Zig to Rust"]
+  C --> C1["Zed"]
+  D --> D1["Ruff, uv"]
+  E --> E1["Android, Linux kernel"]
+`}
+/>
+
+**Full port.** The same product, same behavior, new language. Bun is the headline example. Discord did it at smaller scale: it moved its Read States service from Go to Rust after the Go garbage collector caused latency spikes roughly every two minutes while scanning a large cache. After the port, Discord reported no latency spikes and, after tuning, better latency, CPU and memory than the Go version.[^3]
+
+**Fresh start.** Zed, as above.
+
+**New tool that replaces older ones.** Ruff describes itself as "an extremely fast Python linter and code formatter, written in Rust", and claims to be 10 to 100 times faster than existing linters like Flake8 and formatters like Black.[^4] That is a vendor benchmark (linting the CPython codebase), so read it as a claim worth testing on your own repository. The point for this guide is that Ruff did not port Flake8. It is a different program that does the same job. The same pattern applies to uv for Python packaging.
+
+**New code beside old code.** This is where the best evidence lives, and it is the least dramatic. Google's Android team reports that memory safety bugs fell below 20% of Android's total vulnerabilities in 2025 for the first time, and that new Rust code shows roughly a 1000x lower memory safety vulnerability density than Android's C and C++ (about 0.2 per million lines against about 1,000 per million lines historically). Their analysis covers new and actively developed code only. It says nothing about converting legacy C or C++.[^5] The Linux kernel followed a similar path: at the December 2025 Maintainers Summit the "Rust experiment" was declared over and Rust declared here to stay, mostly for new drivers and subsystems, not conversions of existing C.[^6]
+
+## Why Rust, technically
+
+If you are new to this, three terms carry most of the story.
+
+**Memory safety bugs** are mistakes in how a program handles memory. A *use-after-free* means the program keeps using memory after giving it back. A *double free* means giving it back twice. A *leak* means forgetting to give it back at all. In C, C++ and Zig the programmer is responsible for getting this right, and the compiler mostly cannot check it. Mistakes become crashes, or in the worst case security holes.
+
+**Garbage collection** is the other common answer: a runtime periodically finds unused memory and frees it for you. That is safe and convenient, but the collector costs CPU and can pause the program at unpredictable moments. That is the Discord problem.
+
+**Rust's ownership model** is the third answer. Every value has one owner, and when the owner goes out of scope the memory is freed automatically, at a point the compiler already knows. Borrowing rules let the compiler reject use-after-free and double free at compile time. No collector runs, so there are no collection pauses.
+
+Bun's own explanation fits this exactly. Sumner wrote that many of the team's bugs were use-after-free, double-free, or forgotten frees in error paths, which in safe Rust are compiler errors with automatic cleanup through `Drop`. Zig has no destructors, so cleanup is written by hand at each call site with `defer`, and Bun mixes a garbage-collected JavaScript engine with manually managed memory, which he calls an uncommon enough combination that "no language really designs for it."[^1]
+
+The honest summary: Rust moves a class of bugs from "found in production" to "found at compile time". It is not a speed trick, although removing a garbage collector can help latency, as Discord found.
+
+## What the Bun port actually shows
+
+Bun is worth a close look because it is the largest public example and the numbers are published. Every figure below comes from Bun's own post, so treat them as self-reported, not independently measured.[^1]
+
+- **Scale:** +1,009,272 lines landed in the diff, across 1,448 Zig files, in an 11-day run from May 3 to May 14.
+- **Testing:** Bun's test suite is written in TypeScript, so it does not depend on the runtime's implementation language. That is what made a port checkable at all. CI went from 972 failing test files down to 23 two days after the first run, and the post says no tests were skipped or deleted.
+- **Cost:** around $165,000 at API pricing.
+- **Regressions:** the port introduced 19 known regressions, all fixed. v1.4.0 also fixes 128 bugs that reproduce in v1.3.14.
+- **`unsafe`:** about 4% of the Rust code is inside `unsafe` blocks, which are the places where the compiler's memory guarantees are switched off by the programmer.
+
+<Chart
+  type="bar"
+  height={300}
+  format="plain"
+  caption="Memory use reported by Bun for repeated Bun.build() calls, before (v1.3.14, Zig) and after (v1.4.0, Rust). Self-reported by the Bun team; the post does not describe the exact measurement beyond the build counts."
+  label="Bar chart of memory in megabytes for repeated builds. At 500 builds, 1914 for v1.3.14 and 526 for v1.4.0. At 2000 builds, 6745 for v1.3.14 and 609 for v1.4.0"
+  labels={['500 builds', '2,000 builds']}
+  series={[
+    { name: 'v1.3.14 (Zig)', data: [1914, 6745] },
+    { name: 'v1.4.0 (Rust)', data: [526, 609] },
+  ]}
+  yTitle="Memory (MB)"
+/>
+
+The throughput numbers are modest by comparison: Bun reports 2% to 5% faster (for example `Bun.serve` going from 169.6k to 177.7k requests per second), and about 20% smaller binaries.[^1] So the main win here is not speed. It is a memory leak pattern disappearing.
+
+There is also a fair counterpoint. Andrew Kelley, the creator of Zig, published a critical response. As reported by InfoQ, his argument is that a test suite is not enough justification for shipping over a million lines of code nobody reviewed line by line; if the suite is good enough to vouch for the Rust port, he asks, why did it not catch the bugs in the Zig code?[^7] I could only read second-hand coverage of that post, not the post itself, so check it directly before quoting him. The question it raises is real either way: when the code was produced by agents, tests become the only reviewer, and a test suite only knows what someone thought to test.
+
+## What a rewrite costs
+
+The most-cited warning in this area is older than Rust. Joel Spolsky wrote in 2000 that throwing away working code and starting over is a "dangerous folly", because old code "has been tested" and carries years of bug fixes and knowledge, and he called Netscape's multi-year rewrite the single worst strategic mistake a software company can make.[^8] AI-assisted porting changes the labor cost of rewriting. It does not change the question of whether the new code preserves all the behavior the old code had.
+
+Some practical costs that apply even when a port succeeds:
+
+- **Regressions hide in the long tail.** Bun's 19 regressions were found and fixed. The ones nobody knew to test for are, by definition, not in that count.
+- **`unsafe` does not disappear.** Rust's guarantees hold only outside `unsafe`, and a mechanical port tends to carry a lot of it. Bun's own post puts it at roughly 13,000 `unsafe` keywords, and the team says cleanup comes after release.[^1]
+- **Hiring and build times.** Rust is harder to learn than many languages, and compile times are longer. I did not find a good published measurement to cite here, so measure your own project before assuming either way.
+- **Interop is work.** Bun, Discord and Android all live next to other languages. The seams between them are where new bugs tend to form.
+
+## Rust is not the only answer
+
+The most useful counterexample is the TypeScript compiler. In 2025 Microsoft announced a native port of it and chose **Go**, not Rust. Their stated reasons were mostly about the port itself: the new codebase had to stay as compatible as possible with the old one, idiomatic Go closely resembles the existing TypeScript code, and a garbage collector let them avoid managing memory by hand in a compiler that does a lot of graph processing.[^10] They claimed about 10x faster builds, for instance 77.8 seconds down to 7.5 seconds for the VS Code codebase.[^11] They also conceded that Go's in-process JavaScript interop is weaker than some alternatives.
+
+The lesson is that the language follows the constraints. A project porting line by line with a graph-heavy, pointer-rich design may be better served by a garbage-collected language. A project with hard latency needs, or lots of manual memory management where a bug means a security hole, is where Rust's argument is strongest.
+
+## A rough decision guide
+
+| Your situation | What the evidence suggests |
+|---|---|
+| New component in a C or C++ codebase with security exposure | Strongest case. Android's data is about new code. |
+| Working product, recurring memory bugs or GC latency spikes | Plausible. Bun and Discord both had a specific, measured pain. |
+| Working product, no specific pain | Weak case. Spolsky's warning applies. |
+| Slow developer tool in an interpreted language | A new Rust tool may help (Ruff), but it is a replacement, not a port. |
+| Compiler or tool built around graphs and shared pointers | Consider a garbage-collected language. TypeScript chose Go. |
+
+## Takeaways
+
+- "Written in Rust" and "rewritten in Rust" are different claims. Bun is a port, Zed is a fresh start, Ruff replaces other tools, and Android adds new code.
+- The strongest published evidence (Android, the Linux kernel) is about new code, not conversion of old code.
+- Rust's main practical gain is moving memory bugs to compile time. Speed gains in the Bun port were small (2% to 5%); the memory behavior change was large.
+- Rewrites are cheaper to produce than before and no cheaper to verify. Tests decide whether a port is trustworthy.
+- Pick the language that matches the constraint. Microsoft chose Go for the TypeScript compiler for good reasons.
+
+## References
+
+[^1]: Bun, [Bun in Rust](https://bun.com/blog/bun-in-rust). Source for line counts, timeline, test results, regressions, `unsafe` share, memory, binary size and throughput figures, cost, and the explanation of why Rust. All figures are self-reported by the Bun team. The 64-agent and Anthropic acquisition details are from the same post.
+[^2]: Zed, [Zed 1.0](https://zed.dev/blog/zed-1-0), April 29, 2026. Statements about Atom, Electron, the "ceiling", "start over", and GPUI written from scratch in Rust. I read this page through a fetch summary, not line by line.
+[^3]: Discord, [Why Discord is switching from Go to Rust](https://discord.com/blog/why-discord-is-switching-from-go-to-rust). The Read States service, GC-related latency spikes, and the reported results.
+[^4]: Astral, [Ruff on GitHub](https://github.com/astral-sh/ruff). README tagline and the 10 to 100x claim, benchmarked by linting the CPython codebase from scratch. Vendor benchmark, not independently reproduced here.
+[^5]: Google Security Blog, [Rust in Android: move fast and fix things](https://blog.google/security/rust-in-android-move-fast-fix-things/), November 2025. Memory safety share under 20%, the 1000x density estimate, and the scope limit to new code.
+[^6]: Phoronix, [Rust experiment is done, Rust is here to stay](https://www.phoronix.com/news/Rust-To-Stay-Linux-Kernel), and LWN.net coverage of the December 2025 Maintainers Summit. I relied on search summaries of these pages, not the full articles.
+[^7]: InfoQ, [Bun Rewrites 535K Lines of Zig into Rust in Four Months](https://www.infoq.com/news/2026/09/bun-AI-rewrite-zig-rust-4-months/). Summary of Andrew Kelley's response. Kelley's own post is at [andrewkelley.me](https://andrewkelley.me/post/my-thoughts-bun-rust-rewrite.html); I could not load it and did not verify the paraphrase against it. Note InfoQ's headline says four months while Bun's own post describes an 11-day run, so I used Bun's post for the timeline.
+[^8]: Joel Spolsky, [Things You Should Never Do, Part I](https://www.joelonsoftware.com/2000/04/06/things-you-should-never-do-part-i/), April 2000.
+[^10]: Ryan Cavanaugh, [typescript-go discussion #411](https://github.com/microsoft/typescript-go/discussions/411). Reasons for choosing Go. He says many languages would suit a ground-up rewrite; the post does not mention Rust by name.
+[^11]: Microsoft TypeScript team, [native port announcement](https://devblogs.microsoft.com/typescript/typescript-native-port/). Build time figures are the TypeScript team's own measurements.
