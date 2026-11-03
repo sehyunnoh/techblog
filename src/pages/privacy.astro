@@ -1,10 +1,10 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
-import { SITE, SOCIALS } from '../consts';
+import { ADS_ENABLED, SITE, SOCIALS } from '../consts';
 import { withBase } from '../utils/url';
 
 // Bump this whenever the disclosures below change.
-const LAST_UPDATED = new Date('2026-09-10T00:00:00Z');
+const LAST_UPDATED = new Date('2026-11-01T00:00:00Z');
 const updated = new Intl.DateTimeFormat('en-US', {
   year: 'numeric',
   month: 'long',
@@ -24,12 +24,25 @@ const updated = new Intl.DateTimeFormat('en-US', {
 
   <div class="summary">
     <p class="summary__title">The short version</p>
-    <p>
-      This is a static blog. There are no accounts, no cookies, no advertising and no cross-site
-      tracking. Two parties see anything when you load a page: a privacy-focused analytics service
-      that records an anonymous page view, and GitHub, which serves the files and logs your IP for
-      security. Nothing else is fetched from a third party, and that includes fonts.
-    </p>
+    {
+      ADS_ENABLED ? (
+        <p>
+          This is a static blog. There are no accounts and no comments. The site uses a
+          cookieless analytics service, and it shows ads served by Google, which may set cookies
+          or use identifiers on your device. You can decline personalized ads. Details are
+          below.
+        </p>
+      ) : (
+        <p>
+          This is a static blog. There are no accounts, no cookies, no advertising and no
+          cross-site tracking. Two parties see anything when you load a page: a privacy-focused
+          analytics service that records an anonymous page view, and GitHub, which serves the
+          files and logs your IP for security. Nothing else is fetched from a third party, and
+          that includes fonts. I may add advertising later; the Advertising section says what
+          would change.
+        </p>
+      )
+    }
   </div>
 
   <div class="prose policy">
@@ -81,14 +94,56 @@ const updated = new Intl.DateTimeFormat('en-US', {
       system's preference.
     </p>
 
+    <h2>Advertising</h2>
+    {
+      ADS_ENABLED ? (
+        <>
+          <p>
+            This site shows ads served by Google AdSense. Google and its partners may place and
+            read cookies in your browser, or use web beacons, IP addresses and other identifiers,
+            to serve ads and to measure them. Those ads can be based on your visits to this site
+            and to other sites. I do not receive that data, and I cannot see which ads any
+            individual reader was shown.
+          </p>
+          <p>
+            Google explains how it uses information from sites like this one in its{' '}
+            <a href="https://policies.google.com/technologies/partner-sites" rel="noopener">
+              partner sites policy</a>. You can turn off personalized advertising in{' '}
+            <a href="https://adssettings.google.com" rel="noopener">Google's ad settings</a>, or
+            use <a href="https://www.aboutads.info" rel="noopener">aboutads.info</a> to opt out of
+            personalized ads from participating companies.
+          </p>
+          <p>
+            If you visit from the European Economic Area, the United Kingdom or Switzerland, a
+            consent banner asks before personalized ads are shown. If you decline, you see
+            non-personalized ads only.
+          </p>
+        </>
+      ) : (
+        <p>
+          This site does not show ads today and loads no advertising code. I may apply for
+          Google AdSense in the future. If that happens, this page will be updated before any ad
+          appears. It will say that Google and its partners may place cookies or use identifiers
+          to serve and measure ads, link to Google's controls for personalized advertising, and
+          describe the consent choice shown to readers in the European Economic Area, the United
+          Kingdom and Switzerland.
+        </p>
+      )
+    }
+
     <h2>What is not collected</h2>
     <ul>
-      <li>No cookies are set by this site.</li>
-      <li>No advertising, ad networks or advertising identifiers.</li>
-      <li>No cross-site or cross-device tracking, and no fingerprinting.</li>
+      {!ADS_ENABLED && <li>No cookies are set by this site.</li>}
+      {!ADS_ENABLED && <li>No advertising, ad networks or advertising identifiers.</li>}
+      <li>
+        No tracking of my own across other sites or devices, and no fingerprinting.
+        {ADS_ENABLED && ' Advertising is covered in the section above.'}
+      </li>
       <li>No accounts, sign-ups, comments or newsletter, so there is nothing to submit.</li>
       <li>No email addresses or contact details are collected anywhere on this site.</li>
-      <li>Nothing is sold or shared with data brokers.</li>
+      <li>
+        {ADS_ENABLED ? 'I do not sell data and I do not pass it to data brokers.' : 'Nothing is sold or shared with data brokers.'}
+      </li>
     </ul>
 
     <h2>Links to other sites</h2>
@@ -100,8 +155,8 @@ const updated = new Intl.DateTimeFormat('en-US', {
 
     <h2>Your data rights</h2>
     <p>
-      Because nothing collected here identifies you, there is no personal record for me to look up,
-      export or delete. If you have a question about any of this, or think something on this page is
+      Because nothing I collect identifies you, there is no personal record for me to look up,
+      export or delete. {ADS_ENABLED && 'Data that Google collects for ads is governed by its own policies and controls, linked above. '}If you have a question about any of this, or think something on this page is
       inaccurate, the fastest route is to open an issue on the{' '}
       <a href="https://github.com/sehyunnoh/techblog" rel="noopener">site's repository</a> or reach
       me on {SOCIALS.map((s, i) => (
