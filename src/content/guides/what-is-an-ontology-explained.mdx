@@ -1,0 +1,151 @@
+---
+title: 'What Is an Ontology? A Plain-English Guide With a Small Example You Can Run'
+description: 'What an ontology is, what it is made of, how it differs from a taxonomy, a database schema and a knowledge graph, plus a runnable Python example of inference and open-world answers.'
+pubDate: 2026-11-03
+updatedDate: 2026-11-03
+tags: ['data', 'ai', 'architecture', 'tutorial', 'python']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+
+The word shows up in two very different places. In a data-engineering meeting it means a carefully modeled map of what the business talks about. In AI-agent projects it often means a layer meant to keep a language model from guessing what "revenue" means. The two uses are the same idea, and it is a smaller idea than the vocabulary around it suggests.
+
+**An ontology is a written-down, machine-readable agreement about what kinds of things exist in some area, and how those things can relate to each other.** The OWL 2 primer, the W3C's introduction to the standard ontology language, puts it as "a set of precise descriptive statements about some part of the world."[^1] Tom Gruber's 1993 paper, the one usually cited for defining the term in computing, describes an ontology as "a specification of a representational vocabulary for a shared domain of discourse."[^2]
+
+That is abstract, so here is the problem it solves.
+
+## The problem: two systems, one word
+
+Say one system stores a row `(Rex, type, Dog)` and another stores `(Mia, type, Person)`. Now someone asks: show me every mammal. Nothing in either row says "mammal." Each system knows its own words and nothing else, so the question returns an empty list, even though a person would answer "Rex and Mia" without thinking.
+
+The missing piece is not more data. It is a shared statement, written once, that dogs are mammals, cats are mammals, people are mammals, and mammals are animals. If that statement lives in a form software can read, any system can use it, and the question answers itself. That statement is a small ontology.
+
+## What an ontology is made of
+
+The OWL primer breaks the vocabulary down into a few parts: "we denote objects as individuals, categories as classes and relations as properties," and the statements that tie them together are called axioms, "the basic statements that an OWL ontology expresses."[^3]
+
+- **Individuals** are the specific things: Rex, Mia, order number 4410.
+- **Classes** are categories of individuals: Dog, Person, Mammal.
+- **Properties** are relations: `owns`, `worksFor`, `locatedIn`.
+- **Axioms** are the rules about all of the above. "Every Dog is a Mammal" is an axiom. So is "whatever `owns` something is a Person."
+
+<Mermaid
+  caption="A tiny ontology (the class boxes and solid arrows) with three individuals attached to it (the dashed arrows). The same data is used in the runnable example below."
+  label="Diagram: classes Dog, Cat and Person each point up to Mammal, which points up to Animal; individuals Rex, Tom and Mia are linked by dashed arrows to Dog, Cat and Person; Mia owns Rex"
+  code={`
+flowchart BT
+    Dog -->|subclass of| Mammal
+    Cat -->|subclass of| Mammal
+    Person -->|subclass of| Mammal
+    Mammal -->|subclass of| Animal
+    Rex -.->|is a| Dog
+    Tom -.->|is a| Cat
+    Mia -.->|is a| Person
+    Mia -->|owns| Rex
+`}
+/>
+
+The simplest standard way to write such statements is RDF Schema, which "provides a data-modelling vocabulary for RDF data."[^4] It has three workhorses. `subClassOf` states "that all the instances of one class are instances of another." `domain` states "that any resource that has a given property is an instance of one or more classes." `range` states "that the values of a property are instances of one or more classes."[^4] OWL builds on top of that with more expressive axioms, such as declaring that two classes can never overlap.
+
+Facts about individuals are usually stored as **triples**: subject, predicate, object. `(Mia, owns, Rex)` is one triple. A pile of triples is a graph, which is where the term knowledge graph comes from.
+
+## How it differs from the things it gets confused with
+
+The boundaries are fuzzy in practice and people use these words loosely. This is the working distinction I use, not an official one.
+
+| Thing | What it is | What it can do that the others cannot |
+|---|---|---|
+| **Database schema** | Tables, columns, types, constraints for one application | Reject bad data on write, and run fast queries |
+| **Taxonomy / thesaurus** | A tree or network of terms, "broader" and "narrower" | Organize and browse a vocabulary. SKOS, the W3C standard for this, calls these "semi-formal knowledge organization systems."[^5] |
+| **Ontology** | Classes, properties and logical rules with defined meaning | Let software *infer* facts nobody typed in |
+| **Knowledge graph** | The data itself, as linked entities and relations, often described by an ontology | Join facts across sources into one connected view |
+
+The difference that matters is in the third row. A taxonomy tells you Dog sits under Mammal. An ontology says something a program can act on: *every instance of Dog is an instance of Mammal*, so a query for mammals should return dogs. The knowledge graph is the data that gets reasoned over, and the ontology is the set of terms and rules it is reasoned with.
+
+## A runnable example: inference, a mistake, and "unknown"
+
+The script below is about sixty lines of Python with no dependencies.[^6] It implements three rules from the diagram (subclass, domain, range) plus disjointness, then asks questions of the same data twice: once as a plain table, once with the ontology applied.
+
+```python
+facts = {
+    ("Rex", "a", "Dog"), ("Tom", "a", "Cat"), ("Mia", "a", "Person"),
+    ("Mia", "owns", "Rex"),
+    ("Rex", "owns", "Tom"),  # a data-entry mistake: a dog owns a cat
+}
+subclass = {("Dog", "Mammal"), ("Cat", "Mammal"), ("Person", "Mammal"), ("Mammal", "Animal")}
+domain = {"owns": "Person"}   # whoever owns something is a Person
+range_ = {"owns": "Animal"}   # whatever is owned is an Animal
+disjoint = {frozenset(p) for p in [("Person", "Dog"), ("Person", "Cat"), ("Dog", "Cat")]}
+```
+
+`infer()` applies the rules until nothing new appears, and `ask()` answers yes, no or unknown. Running it:
+
+```text
+Mammals in the raw facts:      []
+Mammals after subclass rules:  ['Mia', 'Rex', 'Tom']
+Rex is a Person (never stated): True <- inferred from 'Rex owns Tom'
+Conflicts: [('Rex', ['Dog', 'Person'])]
+
+Is Rex a Cat       table: no   ontology: no
+Is Rex a Reptile   table: no   ontology: unknown
+Is Mia a Dog       table: no   ontology: no
+```
+
+Three things in that output are worth slowing down for.
+
+**First, the mammals appear.** The raw facts contain no mammal at all. Two subclass axioms and one transitive step produce three. Nobody stored those rows; they were derived. This is the whole value proposition in one line, and it is also the cost, because derived facts take compute and storage. In a larger test I ran earlier, expanding a 30,252-triple graph with RDFS rules produced 240,394 triples, 7.9 times as many, and took 42 seconds.[^7]
+
+**Second, the mistake did not get rejected. It got believed.** Because `Rex owns Tom`, and the `owns` property has domain Person, the ontology concluded Rex *is* a Person. That surprises almost everyone who comes from databases. The OWL primer says it directly: "a domain (or range) statement is not a constraint on the knowledge, but allows a reasoner to infer further knowledge."[^8] A reasoner is the program that applies these rules. The primer's own example of the failure mode is a property that makes "everything we give an age for automatically becomes a person."[^8]
+
+The mistake only became *visible* because I also declared Person and Dog disjoint, meaning no individual can be both. With that axiom, the inferred Person and the stated Dog collide, and the script flags it. The primer notes the same dependence: "the disjointness axiom is needed to deduce that Mary is not a man," and omitting such statements loses "many potentially useful consequences."[^9] If you want to *reject* bad data rather than reason about it, there is a separate W3C standard for that, SHACL, "a language for validating RDF graphs against a set of conditions."[^10]
+
+**Third, "unknown" is a real answer.** The table says Rex is not a Reptile because no such row exists. The ontology says unknown, because nothing has ruled it out. This is the open-world assumption: a fact that is absent from an OWL document "may simply be missing (but possibly true)," where, in a database, an absent fact "is usually considered false."[^11] It is the right behavior for knowledge that is never complete, and it is the one most likely to confuse an engineer who expects `NOT EXISTS` to mean what it means in SQL.
+
+## What real ontologies look like
+
+The toy above has six classes. Real ones are much bigger, and they are mostly dull in the best way: agreed vocabulary that many parties reuse.
+
+- **Gene Ontology** describes gene functions for biology. The statistics for its March 2026 release list 38,560 terms, 8,883,119 annotations, 1,703,116 gene products and 5,557 species.[^12]
+- **schema.org** is a public vocabulary organized as a hierarchy of types, each with associated properties. Version 30.1 lists 826 types and 1,540 properties.[^13] It leans toward a vocabulary with a type hierarchy more than a heavy logical ontology, which is a useful reminder that the line between the two is a spectrum.
+- **OWL 2 and RDFS** are not ontologies. They are the *languages* that many ontologies are written in.
+
+## Why it is in the news again
+
+The word is showing up again in AI-agent projects. A model asked "what was last quarter's revenue" has to decide which table, which column, and whose definition of revenue. An ontology is a place to write those decisions down once.
+
+NVIDIA's open-source Auto Ontology project is a current example. Its README describes "a Python framework for building semantic, graph-based reasoning layers over data": it maps where enterprise data lives, what entities and metrics mean and how they relate, and then checks SQL generated by an LLM against those definitions.[^14] The README text I retrieved included no accuracy results of its own, only a pointer to an external text-to-SQL benchmark, so I have no measurement of how much it helps.
+
+I do have one small measurement of the general idea. In an agent-memory experiment, tagging each stored fact with its subject lifted search accuracy from 54.4% to 59.5%, but simply filtering the raw conversation by speaker did the same thing for free.[^15] That is the honest test for any ontology: does it carry information that a cheaper trick would not?
+
+## When you need one, and when you do not
+
+You probably need an ontology, or at least a controlled vocabulary with some rules, when several teams or systems must agree on meaning, when you need facts derived from other facts (the mammals query), or when the same concept keeps getting modeled three different ways. Biology and medicine are the classic cases, I would say, because the vocabulary has to outlive any single database.
+
+You probably do not need one when one application owns its data, a schema and a tag list answer every question, and nobody needs inference. Building an ontology means agreeing on definitions, which is a human and political task before it is a technical one, and it needs maintenance for as long as the domain keeps changing. If you do build one, the practical tools and a measured comparison of the two common storage models are in [RDF vs Property Graphs, Step by Step](/guides/rdf-vs-property-graph-step-by-step).
+
+## Takeaways
+
+- An ontology is a shared, machine-readable statement of classes, properties and rules for some domain. Individuals and facts are the data it describes.
+- Its distinguishing feature is **inference**: it lets software derive facts nobody typed in. A taxonomy or schema does not do that.
+- `domain` and `range` in RDFS and OWL *infer*, they do not *validate*. Wrong data gets believed unless you add disjointness axioms or a validator such as SHACL.
+- Ontologies assume an open world. "Not stated" means unknown, not false, which is the opposite of a SQL table's default.
+- Judge any ontology, including an AI-agent "context layer," by whether it adds information a simpler filter would not.
+
+## References
+
+[^1]: W3C, [OWL 2 Web Ontology Language Primer](https://www.w3.org/TR/owl2-primer/), section 2 ("What is OWL 2?"), for the definition of an ontology as "a set of precise descriptive statements about some part of the world."
+[^2]: Thomas R. Gruber, [A Translation Approach to Portable Ontology Specifications](https://tomgruber.org/writing/ontolingua-kaj-1993/), *Knowledge Acquisition* 5(2), 1993, for the abstract's definition. The author's page notes this is the paper usually cited for defining an ontology as a formal specification of a conceptualization; I did not find that exact wording on the page, so I quote the abstract.
+[^3]: W3C, [OWL 2 Primer](https://www.w3.org/TR/owl2-primer/), section 3 ("Modeling Knowledge: Basic Notions"), for individuals, classes, properties and axioms.
+[^4]: W3C, [RDF Schema 1.1](https://www.w3.org/TR/rdf-schema/), for the purpose statement and the definitions of `rdfs:subClassOf`, `rdfs:domain` and `rdfs:range`.
+[^5]: W3C, [SKOS Simple Knowledge Organization System Primer](https://www.w3.org/TR/skos-primer/), for SKOS as "an RDF vocabulary for representing semi-formal knowledge organization systems (KOSs)" such as thesauri, taxonomies and classification schemes.
+[^6]: Script: [ontology-demo.py](/files/ontology-demo.py), Python 3.12 standard library only, deterministic. The output above is its actual output, run on 2026-11-03.
+[^7]: My earlier measurement in [RDF vs Property Graphs, Step by Step](/guides/rdf-vs-property-graph-step-by-step): an RDFS closure computed with `owlrl` grew a 30,252-triple graph to 240,394 triples and took 42 seconds on one machine.
+[^8]: W3C, [OWL 2 Primer](https://www.w3.org/TR/owl2-primer/), section 4.8, for "a domain (or range) statement is not a constraint on the knowledge, but allows a reasoner to infer further knowledge" and the age example. Section 4.6 covers domain and range of object properties.
+[^9]: W3C, [OWL 2 Primer](https://www.w3.org/TR/owl2-primer/), section 4.3, for class disjointness.
+[^10]: W3C, [Shapes Constraint Language (SHACL)](https://www.w3.org/TR/shacl/), abstract.
+[^11]: W3C, [OWL 2 Primer](https://www.w3.org/TR/owl2-primer/), section 2, for the open-world assumption and the contrast with databases.
+[^12]: Alliance of Genome Resources, [March 2026 GO Release (2026-03-25) Now Available](https://community.alliancegenome.org/t/march-2026-go-release-now-available/8648), for the release statistics. This is the release announcement, not the Gene Ontology's own statistics page, which I could not retrieve.
+[^13]: [schema.org documentation, Schemas](https://schema.org/docs/schemas.html), version 30.1 (2026-09-16), for the type and property counts.
+[^14]: [NVIDIA/auto-ontology](https://github.com/NVIDIA/auto-ontology), README, read 2026-11-03. It is Apache-2.0 licensed and states that it is not accepting external contributions.
+[^15]: My earlier post, [A Free Speaker Filter Matched an LLM-Built Fact Layer for Agent Memory](/posts/agent-memory-subject-scope-beats-fact-layer): 1,536 LoCoMo questions, 54.4% to 59.5% with subject tags, same gain from a speaker filter.
