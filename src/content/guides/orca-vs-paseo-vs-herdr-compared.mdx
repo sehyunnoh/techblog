@@ -1,0 +1,152 @@
+---
+title: 'Orca vs Paseo vs herdr: Three Ways to Run a Fleet of Coding Agents, and How to Choose'
+description: 'Orca is a desktop IDE, Paseo is a daemon with phone and web clients, herdr is a terminal runtime. This guide compares their architecture, remote access, privacy defaults, size and fit.'
+pubDate: 2026-11-04
+updatedDate: 2026-11-04
+tags: ['ai', 'llm', 'architecture', 'security']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+
+Once you use a coding agent such as Claude Code or Codex for a while, you start running several at once. One fixes a bug, another writes tests, a third explores a refactor. Then the problems change. Which terminal was the one waiting for my answer? Where did that branch go? Can I check on this from my phone?
+
+Three open source projects aim at exactly that, and they keep showing up in the same sentence: **Orca**, **Paseo** and **herdr**. They look similar in a feature list. They are not the same kind of thing, and picking between them is mostly about which layer you want the tool to own. This guide sorts that out, with numbers from their repositories and release pages taken on November 4, 2026.
+
+I did not install or run any of the three. Everything below comes from their READMEs, documentation, source code and GitHub release data, and the limits are listed at the end.
+
+## The short version
+
+| | Orca | Paseo | herdr |
+|---|---|---|---|
+| What it is | A desktop IDE for a fleet of agents | A daemon that manages agents, plus desktop, phone, web and CLI clients | A terminal multiplexer and runtime for agents |
+| Built with | Electron, TypeScript | Electron and Expo (React Native), TypeScript | One Rust binary |
+| License | MIT | Apache-2.0 | Apache-2.0 |
+| Where you use it | Desktop app, iOS and Android companion | Desktop, iOS, Android, web, CLI, Docker | Any terminal, over SSH for remote machines |
+| Isolation per agent | Git worktrees | Git worktrees | Terminal panes, with worktree commands in its API |
+| Agents | "Any CLI agent" | 7 named providers | 23 listed agents, plus 5 that report their own state |
+
+If you want one sentence each: Orca is an IDE built around worktrees. Paseo is a control plane for agents that happens to have good clients. herdr is tmux that knows what an agent is.[^1][^2][^3]
+
+## Three layers, not three clones
+
+A few terms first. A **git worktree** is an extra checked-out copy of a repository on its own branch, so several agents can edit in parallel without overwriting each other. A **terminal multiplexer** (tmux is the classic one) splits one terminal into many panes and keeps them alive when you disconnect. A **daemon** is a program that runs in the background and that other programs connect to.
+
+All three tools sit between you and the agent CLIs you already use. They differ in what you look at and what runs in the middle.
+
+<Mermaid
+  caption="What you interact with, what manages the agents, and what actually runs them. All three drive the agent CLIs you already have installed, but the middle layer is different."
+  label="A diagram with three rows. Row one: the Orca desktop app connects to terminals and worktrees, which run agent CLIs. Row two: Paseo clients on desktop, phone, web and command line connect to the Paseo daemon, which runs agent CLIs. Row three: the herdr terminal UI connects to the herdr background server, which runs agent CLIs"
+  code={`
+flowchart LR
+  O1["Orca desktop app"] --> O2["Terminals and worktrees"]
+  P1["Paseo clients: desktop, phone, web, CLI"] --> P2["Paseo daemon on a host"]
+  H1["herdr terminal UI"] --> H2["herdr background server"]
+  O2 --> A["Agent CLIs: Claude Code, Codex, OpenCode and others"]
+  P2 --> A
+  H2 --> A
+`}
+/>
+
+**Orca** puts everything in one window: terminals, a code editor, diffs, a browser, GitHub and Linear. Its headline feature is parallel worktrees: send one prompt to five agents, each in its own worktree, compare results and merge the winner. It also has a mobile companion app and runs agents on a remote machine over SSH.[^1]
+
+**Paseo** separates the part that runs agents from the part you look at. The daemon manages agent processes, and the desktop app, phone app, web app and CLI are all clients of it. The README says agents can create worktrees, launch other agents and talk to them across providers, and it ships skills like `/paseo-handoff` so one agent can hand work to another (for example plan with Claude, implement with Codex). There is also a TypeScript SDK.[^2]
+
+**herdr** stays in the terminal. A background server owns the panes and their processes, and the terminal UI attaches to it. Detach with `ctrl+b q` and the agents keep running. It identifies agents from foreground processes and what they draw on screen, then marks each pane working, blocked, done, idle or unknown. It says directly that it does not wrap or replace your agents; it owns their terminals.[^3][^4]
+
+One more thing agents can do in all three: drive the tool themselves. Orca has a CLI (`orca worktree create` and friends). Paseo has the skills and the SDK. herdr has a local socket API where an agent can spawn panes, prompt another agent, and wait until it is genuinely blocked.[^1][^2][^3]
+
+## What each costs to install
+
+Release assets on GitHub give a fair view of footprint. I took the latest release of each and compared the download for the same platform.
+
+<Chart
+  type="bar"
+  height={320}
+  format="plain"
+  caption="Download size of each tool's latest release on three platforms. Orca and Paseo are Electron apps with an editor, browser and GUI inside. herdr is a single terminal binary, so this compares footprint, not quality. Windows herdr is a zip."
+  label="Grouped bar chart of download size in megabytes. macOS Apple silicon: Orca 264.9, Paseo 177.4, herdr 21.4. Windows: Orca 199.4, Paseo 138.8, herdr 9.5. Linux x86_64: Orca 240.0, Paseo 161.9, herdr 28.8"
+  labels={['macOS (Apple silicon)', 'Windows', 'Linux (x86_64)']}
+  series={[
+    { name: 'Orca 1.4.248', data: [264.9, 199.4, 240.0] },
+    { name: 'Paseo 0.15.0', data: [177.4, 138.8, 161.9] },
+    { name: 'herdr 0.9.5', data: [21.4, 9.5, 28.8] },
+  ]}
+  yTitle="Download size (MB)"
+/>
+
+The gap is mostly the cost of bundling a browser engine. Orca's `package.json` pins Electron 43 and Paseo's desktop package Electron 44, while herdr's README promises "one rust binary, no electron".[^5][^6] What you get for the extra 130 to 245 MB (depending on platform and which of the two Electron apps) is a graphical editor, diffs and an embedded browser. If you live in a terminal already, you get none of that and also none of the weight.
+
+The three also ship at very different speeds. Counting releases published in the 30 days before November 4: Orca 30, Paseo 21, herdr 4.[^7] That includes any pre-releases. Fast releases mean fast fixes and also more churn, and a tool this young will change under you.
+
+## Reaching your agents from somewhere else
+
+All three can control agents that run on a machine other than the one in front of you. How they do it is the biggest practical difference, and the one with security consequences.
+
+**Paseo** documents its design the most thoroughly. Its daemon binds to `127.0.0.1` by default. For phones it offers a relay, which is off until you enable it. Its security page says the relay is designed to be untrusted: traffic is end-to-end encrypted with a Noise handshake keyed to the daemon's key, and the relay sees only IP addresses, timing, message sizes and session IDs. The pairing QR code carries the daemon's public key in the URL fragment, which browsers do not send to a server. The alternative is a direct connection, for example over Tailscale. Two honest caveats from the same page: with no password configured, anything that can reach the daemon socket can control it, and a process running as the same user can read the local credential.[^8][^9]
+
+**Orca** pairs a phone with a one-time code that expires in a few minutes and then issues a device token. The preferred path is Orca Relay, which needs a sign-in to the same Orca account on both devices; LAN and Tailscale also work. The relay's source is in the open repository: phones and desktops never talk directly, each opens an outbound WebSocket and the relay splices frames between them.[^10][^11] The pages I read do not say whether the relay can read the traffic, so I will not claim either way. Not saying it is different from saying it is not encrypted.
+
+**herdr** has no phone app. Remote machines are reached over SSH, and its docs describe combining local and saved SSH machines in one window with independent reconnects. Locally, it exposes a socket (a Unix domain socket, or a named pipe on Windows) speaking newline-delimited JSON. The documented methods include spawning panes, sending keystrokes and text, reading output, creating and removing worktrees, and stopping the server. The docs describe no authentication on that socket, so the protection is who can reach it, which means your user account.[^3][^12]
+
+None of this is unusual for developer tools. It does mean a tool that can type into your agents' terminals deserves the same care as a remote shell.
+
+## What each one phones home
+
+| | Telemetry | Other background network use |
+|---|---|---|
+| Orca | Anonymous usage analytics, with a documented opt-out | Relay and push gateway if you use the mobile app |
+| Paseo | README says none | Relay only if you enable it |
+| herdr | None found | Background version check (on by default) and an agent-detection manifest refresh |
+
+**Orca** collects anonymous product events keyed by a random local ID: app opens, agent starts (the kind of agent, not what it did), coarse error categories and build details. Its docs state that it never sends file contents, prompts, responses or terminal contents. Opt out in Settings, or set `DO_NOT_TRACK=1` or `ORCA_TELEMETRY_DISABLED=1`. I confirmed in the source that `posthog-node` is a dependency and that both environment variables are honored. The docs do not say plainly whether it is on by default; the opt-out wording implies it is.[^13][^14]
+
+**Paseo** says it has no telemetry, tracking or forced log-ins. A search of every `package.json` in the repository found no PostHog, Sentry, Mixpanel or Amplitude packages, which fits the claim. It does not prove it, since code can make network calls without a named analytics library.[^2]
+
+**herdr** has no HTTP client library in its `Cargo.toml`, and GitHub code search for "telemetry" in the repository returned nothing. It does check for new versions in the background. The source sets a 30 minute interval and defaults `version_check` to true, and the agent-detection manifest refresh fetches with `curl`. Both can be turned off with `[update].version_check` and `[update].manifest_check` in the config. I confirmed the default for the version check, not for the manifest check.[^15]
+
+## How to choose
+
+| If you... | Lean toward |
+|---|---|
+| Want one app for editing, reviewing diffs, a browser and GitHub or Linear, and are fine with a large Electron install | Orca |
+| Want to check on and steer agents from a phone, with a documented end-to-end encrypted relay, or run agents on a server and use several clients | Paseo |
+| Already work in tmux or SSH and want agent awareness and persistence without a GUI | herdr |
+| Care most about the smallest footprint | herdr |
+| Want agents to hand work to each other across vendors | Paseo or herdr, depending on whether you want an SDK and skills or a socket API |
+| Need the most polished review flow (annotate a diff line and send it back to the agent) | Orca |
+
+They are not mutually exclusive. herdr runs inside whatever terminal you use, which may include the terminals in the other two.
+
+## Two traps in the names
+
+Searching for these tools is messier than it should be. "Orca" is a crowded name: the Stably IDE here is `stablyai/orca`, a search also turns up an unrelated project at `orca-cli/orca`, and Orca's own README warns that the bare `orca` Homebrew cask is an unrelated Plotly one, so use `brew install --cask stablyai/orca/orca`.[^1] herdr's repository is now at `herdrdev/herdr`. The older path `ogulcancelik/herdr`, which some write-ups still use, redirects there, and plenty of forks and mirrors appear in search results, so check the owner before you clone.
+
+Also, GitHub stars are a popularity signal, not a quality one. On November 4 the counts were roughly 115,000 for Orca (created March 2026), 48,000 for herdr (created March 2026) and 23,000 for Paseo (created October 2025).[^7] I did not look into why Orca's count is so high so soon, and I would not use any of these numbers to choose.
+
+## What I did not check
+
+- I did not install or run any of them, so nothing here says how reliable they are day to day or how well their agent detection works.
+- Feature lists come from each project's own README and docs. Orca's README itself says its list is "perpetually behind".
+- I did not audit any encryption. Paseo's security page describes its design; I did not verify the implementation. For Orca I only report what the pages I read say.
+- Download size is a footprint measure, not a speed or memory one.
+- All figures are from November 4, 2026. These projects release every few days, so check the current docs before relying on a specific claim.
+
+## References
+
+[^1]: Stably, [Orca README](https://github.com/stablyai/orca/blob/main/README.md) and [orca.dev](https://orca.dev). Features, supported platforms, install commands, MIT license, the mobile companion, and the Orca CLI. The relay source is under `cloud/` in the same repository.
+[^2]: Paseo, [README](https://github.com/getpaseo/paseo/blob/main/README.md). Architecture, providers, orchestration, skills, SDK, telemetry statement and Apache-2.0 license (the LICENSE file is Apache-2.0 with a third-party-components note, which is why the GitHub API reports its license as unrecognized).
+[^3]: herdr, [README](https://github.com/herdrdev/herdr/blob/main/README.md). Apache-2.0, install, the server and client model, agent state, remote machines and the "no electron" statement.
+[^4]: herdr docs, [Concepts](https://herdr.dev/docs/concepts/) and [Supported agents](https://herdr.dev/docs/agents/). Workspaces, tabs and panes, the five agent states and detection method, and the agent list. I read these pages through a fetch summary.
+[^5]: Orca `package.json` and Paseo `packages/desktop/package.json` in the repositories, which list the Electron versions. Read from shallow clones on November 4, 2026.
+[^6]: herdr README, the "one rust binary, no electron" line, and its `Cargo.toml`.
+[^7]: Repository metadata and release data from the GitHub API for `stablyai/orca`, `getpaseo/paseo` and `herdrdev/herdr`, taken November 4, 2026. Reproduce with [agent-fleet-tools-facts.sh](/files/agent-fleet-tools-facts.sh), a read-only script that needs the `gh` CLI. Release counts include any pre-releases.
+[^8]: Paseo, [SECURITY.md](https://github.com/getpaseo/paseo/blob/main/SECURITY.md). Daemon binding, relay threat model, Noise handshake, what the relay sees, and the same-user credential caveat.
+[^9]: Paseo docs, [Connectivity](https://paseo.sh/docs/connectivity). Relay disabled until enabled, direct connection over Tailscale, default port 6767.
+[^10]: Orca docs, [Mobile](https://www.onorca.dev/docs/mobile). One-time pairing code, device token, relay and LAN paths. The page does not mention end-to-end encryption.
+[^11]: Orca, [`cloud/README.md`](https://github.com/stablyai/orca/blob/main/cloud/README.md). The relay that splices frames between phone and desktop, and the push gateway.
+[^12]: herdr docs, [Socket API](https://herdr.dev/docs/socket-api/). Transport, methods, and the absence of a described authentication model. The statement that protection is the local account is my inference from that.
+[^13]: Orca docs, [Telemetry](https://www.onorca.dev/docs/telemetry). What is collected, what is excluded, and the three ways to opt out.
+[^14]: Orca source, read from a shallow clone: `posthog-node` in `package.json`, and `src/main/observability/index.ts` honoring `DO_NOT_TRACK` and `ORCA_TELEMETRY_DISABLED`.
+[^15]: herdr source, read from a shallow clone: `src/app/mod.rs` (30 minute check interval), `src/detect/manifest_update.rs` and `src/noninteractive_process.rs` (the `curl` calls), and `src/config/model.rs` (`version_check` defaults to true). The config options are described in the project's CHANGELOG.
