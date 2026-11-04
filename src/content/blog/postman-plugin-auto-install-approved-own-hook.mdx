@@ -1,0 +1,149 @@
+---
+title: 'Postman Approved Its Own Codex Hook. The Data Leak in the Headline Is Not in the Issue.'
+description: 'A source-level check of the Postman agent plugin report: what the installer writes, what the startup hook is and costs, and why the claim that it shares API data is not in the evidence.'
+pubDate: 2026-11-04
+tags: ['security', 'ai', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+
+The Hacker News title that put this story at the top of the front page reads "Postman silently auto-installs AI plugins and attempts to share all API data".[^1] It had 1,296 points when I looked this morning. The first half of that sentence is documented. The second half is not in the issue it links to, and the reporter says so in plain words.
+
+I spent the morning reading the plugin's public source and the issue thread. I did not install Postman, and I did not run anything from the plugin repository. What follows is what the code and the reports support, what they do not, and one real problem that is easy to miss because the louder claim gets all the attention.
+
+## What the issue actually says
+
+GitHub issue 14370 was opened on October 25 under the title "[SEVERE] Desktop auto-installs Codex/Claude plugins; installer attempts to trust its own startup hook".[^2] The reporter, on macOS with Postman desktop 12.33.4, found after opening the app that a Postman plugin had appeared in Codex and Claude Code, along with a Postman CLI in `~/.local/bin`. Postman's own `main.log` shows a line with `"source":"auto-existing-upgrade"` and `claude-code:installed`, `codex:installed`.
+
+Then comes the sentence the headline skips. The reporter writes that the report "does not claim to establish data exfiltration". A second user who saw the same behavior after updating from 12.31.3 to 12.35.1 says: "I do not have evidence that data was uploaded."[^2] I could not find where "attempts to share all API data" comes from. It is the submitter's wording, not the reporter's.
+
+So the verified problem is consent. A desktop app edited the configuration of two other programs, and the user did not ask it to.
+
+## A few terms, since the rest depends on them
+
+A **coding agent** here means Claude Code or Codex, tools that read your files and run commands on your behalf. A **plugin** is a bundle that extends one of them. This one contains three kinds of parts:
+
+- **Skills**: markdown instruction files the agent can load when a task matches the skill's description.
+- **An MCP server connection**: MCP is a protocol that lets an agent call tools on a server. Here the server is remote, at `mcp.postman.com`.
+- **A hook**: a command the agent runs automatically at a defined moment. This plugin uses a `SessionStart` hook, which runs when a session starts, is cleared, or is compacted.
+
+Codex does not run a plugin's hook until you approve it. Approval is stored as a `trusted_hash`, a fingerprint of the hook definition, in `~/.codex/config.toml`. If the hook changes, the fingerprint no longer matches and Codex asks again. That prompt is the control. Hooks are commands, and the plugin's own pull request describes them as able to "run outside the sandbox".[^4]
+
+## What the installer does
+
+The plugin repository is public, and the issue links the exact commit (6c8e452e). I read the installer at that commit. For Claude Code it shells out to Claude's own CLI: it adds Anthropic's official marketplace if missing and installs `postman@claude-plugins-official` at user scope.[^3] That goes through Claude Code's normal plugin machinery.
+
+The Codex path is different. After installing, a function called `approvePostmanHook` talks to Codex's `app-server`, asks for the list of hooks, finds Postman's, and writes its hash into the trust table with a `config/batchWrite` call.[^3]
+
+<Mermaid
+  caption="The Codex path as the source reads. The first arrow is inferred from the reporter's log, since the desktop app is closed source. The last three steps are in the open installer code."
+  label="A sequence diagram with four participants: Postman desktop, the installer, the claude CLI and the Codex app server. The desktop starts the installer. The installer asks the claude CLI to add a marketplace and install the plugin. The installer asks Codex for its hook list, receives Postman's hook as untrusted with a hash, then writes that hash as trusted and Codex reports the hook trusted"
+  code={`
+sequenceDiagram
+  participant D as Postman desktop (closed source)
+  participant I as Installer (open source)
+  participant C as claude CLI
+  participant X as Codex app-server
+  D->>I: run install, source auto-existing-upgrade
+  I->>C: marketplace add or update, then plugin install at user scope
+  I->>X: hooks/list
+  X-->>I: Postman hook, untrusted, with currentHash
+  I->>X: config/batchWrite, hooks.state trusted_hash = currentHash
+  X-->>I: hook now trusted
+`}
+/>
+
+This is the "self-approval" in the issue title, and the source confirms it. It is also documented behavior, not a hidden one. The README says of Codex: "installation also approves Postman's session-start hook... There is no separate hook prompt or dump of its instructions."[^5] The pull request that added it, merged October 21, was titled "auto-approve Postman's Codex hook". Its automated reviewer flagged exactly this: "Automatically granting persistent trust to hooks that can execute outside the sandbox warrants human security review."[^4]
+
+The reason for the change, according to the PR, is mundane. Codex 0.164 ties approval to a hash of the plugin's files, and Postman tracks its `main` branch, so every commit would have forced a fresh approval prompt. The installer now answers that prompt for the user.[^4]
+
+For someone who ran `npx @postman/postman-plugin` on purpose, that may be acceptable, and the installer does show a confirmation prompt by default.[^6] The question in the issue is different: what happens when the installer is started by the desktop app instead? Postman's install docs describe only the manual `npx` route and say nothing about desktop installing it for you.[^6] The desktop side is closed source, so I cannot check whether it skips that confirmation. The reporters say it did.
+
+## What the hook does, measured
+
+An approved hook is only as dangerous as the command it runs. So I looked at the command. In the Codex configuration it points to `hooks/session-start`, a short shell script (and a `.cmd` twin for Windows). Its default branch is a single `cat` of `hooks/session-start-context.md`. Other branches reformat the same text as JSON for Cursor and Copilot.[^3]
+
+I searched both scripts for anything network-shaped (`curl`, `wget`, `http`, `/dev/tcp`, `fetch`) and found no matching lines.[^8] The script, as written, prints a file. I tried to run it in a sandbox to capture the exact bytes, but the harness I work in refused to execute downloaded code, so I stopped there and measured the file directly.
+
+The file is 1,214 bytes, 150 words and 11 lines. It is an instruction block, wrapped in an `<EXTREMELY_IMPORTANT>` tag, that tells the agent to load a Postman skill "before responding to any non-trivial API engineering task". It also says user instructions in `AGENTS.md` or `CLAUDE.md` take precedence.
+
+So the hook is a nudge, delivered as text. It fires on `startup|clear|compact`, which means it is re-injected whenever you clear or compact a session, not just at the start. Using the usual rough ratio of four characters per token, that is on the order of 300 tokens each time. That estimate comes from a rule of thumb, not a tokenizer; I did not have one for either vendor's models.
+
+The plugin carries more than the hook. At that commit it ships 18 skills.
+
+<Chart
+  type="bar"
+  horizontal
+  height={240}
+  format="plain"
+  caption="Three layers of plugin text, in characters or bytes. The hook is always injected. Skill descriptions are what an agent typically lists up front. The full skill bodies load only when a skill is used, so the last bar is an upper bound, not a per-session cost."
+  label="Bar chart: session-start hook 1,214 bytes, 18 skill descriptions 7,481 characters, 18 full SKILL.md files 95,092 bytes"
+  labels={['Session-start hook', '18 skill descriptions', '18 full skill files']}
+  series={[{ name: 'Size', data: [1214, 7481, 95092] }]}
+  yTitle="Bytes or characters"
+/>
+
+I did not capture a real agent prompt, so how each host lists skills is my understanding, not something I measured. The point of the chart is proportion. The hook itself is small. If there is a cost to worry about, it is the 7.5 thousand characters of descriptions plus whatever tool schemas the MCP server advertises, which I could not see because the server asked for authentication first.[^2]
+
+## Where data could actually leave
+
+If the hook is a text file, the remaining question is whether the rest of the plugin moves your API data to Postman. There are three places to look.
+
+The **MCP connection** points at `https://mcp.postman.com/mcp`. In the reporter's Codex log it failed at startup with `Auth required`.[^2] Until you sign in, there is nothing for it to send on your behalf. Once you do and an agent calls one of its tools, data flows by design, the way any hosted API tool works.
+
+The **skills** are instructions, and several of them steer toward uploading things. The `api-engineer` skill says that `postman workspace push` "changes shared state" and that the agent should "obtain user consent before pushing".[^3] Other skills cover publishing mocks and forwarding webhook events through a capture URL. Those are the moments data leaves, and the text asks for consent at the push step. The agent still has to follow it.
+
+The **CLI** is the third piece. The same skill describes `postman init`, which "creates an agent-scoped session that lets you record work without signing in", claimable later with an account.[^3] I could not tell from the text alone what a session like that stores server-side. That is the one item I would want Postman to answer.
+
+| Claim | What I found | Status |
+|---|---|---|
+| Desktop installed plugins into Claude Code and Codex without asking | One reporter's log, a second user with the same result | Reported twice, not reproduced by me |
+| The installer approves its own Codex hook | `approvePostmanHook` in source, README says so | Confirmed in source |
+| The hook sends data somewhere | Scripts print a file, no network text | Not supported |
+| Postman shares all API data | The reporter disclaims it, MCP showed `Auth required` | Not supported by the issue |
+| Postman has not responded | No staff comment on the thread, but a statement to a news site | Partly true |
+
+On that last row: Postman's head of product told RuntimeWire on November 3 that the company bundles its CLI and agent plugins to ease setup, is reviewing the hook approval and session-start behavior, and will make opt-in clearer for existing users.[^7] That is a paraphrase in a news article, not a post on the issue.
+
+## The real issue is who reviews the hook
+
+Here is the part I think matters more than the headline. Codex's trust model assumes a human looked at the hook and said yes. The installer replaces that step with a write to the same trust table. As of the plugin's latest commit on November 3 (the 0.6.0 release), the approval code is byte-identical to the version in the issue.[^3][^5]
+
+That would be a small matter if the hook could never change. But the plugin tracks `main`, and the README says what follows when it does: "If Codex later refreshes the plugin from `main` and its contents change, run the installer again to approve the update."[^5] A desktop app that re-runs the installer on upgrade would do that for you. The reporter's log line name, `auto-existing-upgrade`, suggests that is the intent, though I can only infer it.
+
+This is my reading, not a finding about intent. Today the approved command prints a text file. The mechanism, however, approves "whatever Postman's `main` currently says the hook is". Trust moves from the person who owns the machine to whoever can merge to that branch. For a company app that already runs on your computer with your permissions, that is a smaller jump than it sounds. It is still a jump, made without a prompt.
+
+There is already one change in the repository worth noticing. Between the pinned commit and the latest, the startup text dropped its mention of the `bootstrap` skill because a commit on November 2 replaced it with `workspaces` and `cli-install` skills.[^3] The hook text changes. The trust mechanism stays.
+
+## Limits of this check
+
+I did not install Postman desktop, so I did not reproduce the auto-install, and I cannot say whether the confirmation prompt is skipped. I captured no network traffic, so "no evidence of upload" is the reporters' position and mine only in the narrow sense that the plugin's scripts contain no network calls. I read the pinned commit and the latest main, not every release in between. The repository measurement is from a Windows machine and the reports are from macOS. I read the issue and the pull request through fetch summaries, then confirmed key facts such as the file paths and function names directly in the cloned source. And I have not tested any current Codex build to see how its trust prompt behaves.
+
+## What to check on your own machine
+
+On mine, a search of Claude Code and Codex settings found no mention of Postman, so nothing to remove. On yours, the places the installer writes are specific:
+
+- Claude Code: `claude plugin list --json`, and look for `postman@claude-plugins-official`. The installer uses this same command to detect itself.
+- Codex: in `~/.codex/config.toml`, look for a `[plugins."postman@postman"]` table and a `hooks.state` entry whose key is `postman@postman:hooks/codex-hooks.json:session_start:0:0`.
+- Removal: the installer's docs list a `remove` command and a `--dry-run` flag that previews changes.[^6] One commenter reported that the Help menu item "Uninstall Postman Coding Agent Plugin" did not remove an entry in Copilot's settings, so verify afterward.[^2]
+
+## Takeaways
+
+- The documented problem is consent, not exfiltration. The reporter says so, and the plugin's scripts contain no network calls.
+- The installer does write its own `trusted_hash` into Codex's config, by design and in its README. The open question is whether the desktop app asks first.
+- The session-start hook is 1,214 bytes of instructions re-injected on startup, clear and compact. It is small, and it is not what to worry about.
+- Because the hook tracks `main` and the installer re-approves it, trust in that hook rests on one company's branch, not on a review you did.
+- A hook approval is worth reading once, even when a vendor offers to skip it. It runs as a command.
+
+## References
+
+[^1]: Hacker News, [Postman silently auto-installs AI plugins and attempts to share all API data](https://news.ycombinator.com/item?id=50354960). Title and point count as seen on November 4, 2026.
+[^2]: [postmanlabs/postman-app-support issue 14370](https://github.com/postmanlabs/postman-app-support/issues/14370). Reporter's claims, log excerpts, the disclaimer about exfiltration, follow-up comments (including the second macOS report and the Copilot uninstall note). I read the page through a fetch summary, so quotes should be checked against the thread itself.
+[^3]: [postmanlabs/postman-plugin](https://github.com/postmanlabs/postman-plugin), cloned and read at commit 6c8e452e0f4237f4bcc0901cb1ac442dec707e49 (the one the issue links) and at the latest main, 9d5544f, November 3, 2026. Files: `installer/src/hosts/codex-hooks.ts`, `installer/src/hosts/claude-code.ts`, `hooks/codex-hooks.json`, `hooks/session-start`, `hooks/session-start.cmd`, `hooks/session-start-context.md`, `mcp.codex.json`, `skills/api-engineer/SKILL.md`, `skills/bootstrap/SKILL.md`. I did not execute any of it.
+[^4]: [postmanlabs/postman-plugin pull request 124](https://github.com/postmanlabs/postman-plugin/pull/124), "feat(installer): auto-approve Postman's Codex hook", merged October 21, 2026. The rationale about Codex 0.164 and hash binding, and the automated review quote, come from a fetch summary of the PR page.
+[^5]: [README of postman-plugin](https://github.com/postmanlabs/postman-plugin/blob/main/README.md), the Codex section about hook approval and refreshing from `main`, read from the cloned repository at 9d5544f.
+[^6]: Postman Docs, [Detected agents](https://learning.postman.com/docs/postman-plugin/install/detected-agents). Describes the manual `npx @postman/postman-plugin` installer, its confirmation prompt, `--dry-run` and `remove`. It does not mention desktop auto-install.
+[^7]: RuntimeWire, [Postman's head of product says it will make AI agent plugin opt-in clearer](https://runtimewire.com/article/postmans-head-of-product-says-it-will-make-ai-agent-plugin-o-7933b7), November 3, 2026. The statement is paraphrased by the outlet and was delivered through a PR agency.
+[^8]: [postman-plugin-footprint.py](/files/postman-plugin-footprint.py), a script that only reads files. Run it with `python -I` against an export of the plugin repository. The sizes and the network-text search in this post come from its output on November 4, 2026.
