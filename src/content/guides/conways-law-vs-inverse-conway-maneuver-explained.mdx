@@ -1,0 +1,133 @@
+---
+title: "Conway's Law vs the Inverse Conway Maneuver: Your Org Chart Is Already an Architecture"
+description: "Conway's Law says systems copy the communication structure of the teams that build them. The Inverse Conway Maneuver turns that around. What each claims, the evidence, and where it goes wrong."
+pubDate: 2026-11-04
+updatedDate: 2026-11-04
+tags: ['architecture', 'backend', 'devops']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+
+Most teams have lived through some version of this. A small change, say adding one field to a signup form, needs a ticket to the frontend team, another to the backend team, and a third to the database team. Each ticket waits in a different queue. The change takes three weeks, and nobody is slow. The structure is.
+
+That experience has a name, and so does the proposed fix. **Conway's Law** describes the effect: the software you build ends up shaped like the organization that builds it. The **Inverse Conway Maneuver** is the deliberate use of that effect: decide the architecture you want, then arrange the teams so the architecture follows.
+
+This guide explains both, what evidence exists for the claim, and the ways the fix commonly fails. I did not run any experiment of my own here. Everything comes from the sources listed at the end, and where a source was a summary rather than the original, I say so.
+
+## Conway's Law, as written
+
+Melvin Conway published the idea in 1968, in a magazine called *Datamation*, under the title "How Do Committees Invent?". The paper never uses the name "Conway's law". Fred Brooks cited it in *The Mythical Man-Month* and the name stuck.[^1][^2] The sentence most people quote is the informal version from the paper's author note, as repeated by Martin Fowler:
+
+> Any organization that designs a system (defined broadly) will produce a design whose structure is a copy of the organization's communication structure.[^3]
+
+The paper's own wording is more careful. Organizations "are constrained to produce designs which are copies of the communication structures of these organizations", and it calls the relationship a *homomorphism*, a structure-preserving mapping between two sets of things.[^1] You can read that as: if two parts of the system have to talk to each other, the people building them have to talk to each other, and the reverse is also true. Where people do not talk, you will not find a clean connection.
+
+Conway gives a small, concrete example. A contract research organization had eight people to write a COBOL compiler and an ALGOL compiler. Five were assigned to COBOL and three to ALGOL. The result: the COBOL compiler ran in five phases and the ALGOL compiler in three.[^1] Nobody planned for the phase count to match the headcount. It simply did.
+
+Two things to notice about the claim.
+
+1. **It is about communication, not the org chart.** Reporting lines matter only because they shape who talks to whom, how often, and how easily. Two teams in the same department who never speak will build a boundary between them. Two teams with different managers who pair daily will not.
+2. **Read it as a tendency, not a physical law.** The paper's wording is "constrained to", but in practice it works like the path of least resistance, and software gets built along that path unless somebody spends effort to go elsewhere. That reading is mine, not a claim from the paper.
+
+## Why it happens
+
+It is less mysterious than it sounds. An interface between two components is a decision, and decisions between people cost a meeting, an argument or a handoff. Within one team, a boundary is cheap to change, so it drifts to wherever the code is easiest to write. Between two teams, a boundary is expensive to change, so it freezes into an API, a schema or a contract.
+
+<Mermaid
+  caption="The same feature request in two organizations. When teams are split by technology layer, one change crosses three team boundaries. When one team owns a business capability end to end, the change stays inside it."
+  label="Two diagrams. Top: a feature request goes to a frontend team, then a backend team, then a database team, each with its own queue. Bottom: the same feature request goes to a single checkout team that owns the interface, the service and its data"
+  code={`
+flowchart LR
+  subgraph L["Teams split by technology layer"]
+    direction LR
+    R1["Feature request"] --> F1["Frontend team"] --> B1["Backend team"] --> D1["Database team"]
+  end
+  subgraph C["Teams split by business capability"]
+    direction LR
+    R2["Feature request"] --> T1["Checkout team: UI, service and data"]
+  end
+`}
+/>
+
+So the layered organization produces a layered system: a UI, a server-side layer and a database that are each fine on their own and painful to change together. Fowler's description of microservices makes the same point: when management focuses on the technology layer, you get "UI teams, server-side logic teams, and database teams", and any change then crosses team boundaries.[^3]
+
+## The inverse: choose the shape, then build the team
+
+If the system follows the organization, you can treat the organization as a design tool. This is the **Inverse Conway Maneuver**. ThoughtWorks' Technology Radar entry for it describes it as evolving "your team and organizational structure to promote your desired architecture", so that the technology architecture matches the business architecture.[^4] The Radar listed it in the "Trial" ring, which means worth trying on a project that can handle the risk, not proven everywhere.
+
+The term is usually credited to Jonny LeRoy and Matt Simons, who wrote about it in a 2010 article. I could confirm the attribution from a ThoughtWorks podcast transcript, but not from the article itself, and the Radar entry does not name them, so treat the exact origin as second-hand.[^4][^5]
+
+The steps are short to state:
+
+1. Decide the system boundaries you want. For example, orders, payments, catalog, each with a narrow interface.
+2. Form a team for each boundary, with the skills to build and run that part, not just to write code for it.
+3. Let the teams talk to each other through the intended interface rather than through meetings, so the interface is the thing that gets negotiated.
+
+<Mermaid
+  caption="Conway's Law reads left to right: the organization shapes the system. The Inverse Conway Maneuver starts from the target system and works backward to the teams."
+  label="Two arrows. Conway's Law: organization and communication structure produces system architecture. Inverse Conway Maneuver: desired architecture drives team structure, which then produces the system architecture"
+  code={`
+flowchart LR
+  subgraph A["Conway's Law, observed"]
+    direction LR
+    O1["Org and communication structure"] -->|"shapes"| S1["System architecture"]
+  end
+  subgraph B["Inverse Conway Maneuver, applied"]
+    direction LR
+    S2["Target architecture"] -->|"decides"| O2["Team structure"] -->|"produces"| S3["System architecture"]
+  end
+`}
+/>
+
+Terms worth pinning down here. A **monolith** is one deployable program containing everything. **Microservices** split that into small programs, each owning a slice of the business and its own data. **Coupling** is how much one part depends on another, and **cohesion** is how closely the things inside one part belong together. The maneuver is mostly a way of getting low coupling between parts and high cohesion inside them by making the people boundaries match.
+
+## What the evidence says
+
+Conway's paper was an argument, not a study. Later work tested it.
+
+**Microsoft, Windows Vista.** Nagappan, Murphy and Basili built metrics of organizational complexity and tested whether they predicted which software binaries would have defects. In their words, the organizational metrics were "statistically significant predictors of failure-proneness", and identified failure-prone binaries with higher precision and recall than traditional measures such as code churn, complexity, coverage and dependencies.[^6] Notice what this does and does not show. It supports the idea that organizational structure leaves a mark on quality. It is one company and one product, and it does not tell you which reorganization would help.
+
+**Matched product pairs.** MacCormack, Rusnak and Baldwin compared pairs of software products that do the same job but were built by different kinds of organizations, one loosely coupled (for example an open source community) and one tightly coupled (a single firm). They report support for what they call the *mirroring hypothesis*: in every pair, the product from the loosely coupled organization was significantly more modular, by as much as a factor of eight in how far a change in one component could spread to others.[^7] I read the abstract, not the full paper, so I cannot speak to how they chose the pairs.
+
+Neither study tests the inverse maneuver directly. They support the forward claim, that structure follows organization. The inverse, that you can change the organization and get a better structure, is an inference from it. That is a reasonable inference, but it is worth knowing it is one.
+
+## Where the maneuver goes wrong
+
+This is the part most summaries skip.
+
+**Reorganizing the people does not change the code.** If three layered teams become three capability teams but all of them still share one database and one codebase, the teams will collide in the shared code exactly where the old boundaries used to be. The architecture has to be actively pulled apart. The reorg only removes the thing that was holding it together.
+
+**The boundary you pick may be wrong.** Conway's paper notes that the first design is "almost never the best possible", so the system concept will need to change.[^1] Teams cut to match a boundary that turns out wrong are harder to redraw than a diagram is. Treat the first split as a hypothesis.
+
+**A team can only hold so much.** If you assign a small team ownership of five services, they will either neglect some or become a bottleneck. *Team Topologies* by Matthew Skelton and Manuel Pais is built around this limit. It names four team types (stream-aligned, enabling, complicated subsystem and platform) and three ways teams can interact (collaboration, X-as-a-service and facilitation), so that the load on each team and the communication between teams is a deliberate choice.[^8]
+
+**Fewer boundaries can be the better answer.** Splitting into many teams and services adds network calls, deployment pipelines and coordination. For a small company, one team and one codebase is the shape that matches reality. Applying the maneuver to ten engineers usually creates the problem it was meant to solve.
+
+**It does not cover communication you did not plan.** Informal channels, shared chat rooms and a few people everyone consults will still shape the system. Conway's claim is about the real communication structure, not the one on the slide.
+
+## A practical way to use this
+
+You do not need a reorganization to benefit. Some cheaper steps:
+
+- **Read the system as a map of the org.** Where do changes consistently need several teams? Where are the stubborn interfaces that nobody wants to touch? Those are usually team boundaries, not technical ones.
+- **Check the match before you plan a technical split.** If you are about to break up a monolith, ask whether the teams are already shaped like the proposed pieces. If not, expect the split to drift back.
+- **Move one team first.** Pick a capability, give a single team the skills and ownership to run it, and watch whether its changes stay inside its own boundary. That is a small, reversible test of the idea.
+- **Review the interface, not only the code.** Between teams, the interface is where the structure lives, so a change there deserves the attention a schema migration gets.
+
+## Takeaways
+
+- Conway's Law is an observation: systems tend to copy the communication structure of the teams that build them.[^1]
+- The Inverse Conway Maneuver is a design tactic: pick the architecture you want, then shape the teams to match.[^4]
+- The evidence supports the forward direction in at least two studies. The inverse is a plausible inference, not a proven recipe.[^6][^7]
+- A reorg without a matching change in the code, the data and team load tends to fail. Start with one team and one boundary.
+- Smaller organizations often need fewer boundaries, not more.
+
+[^1]: Melvin E. Conway, ["How Do Committees Invent?"](https://www.melconway.com/Home/Committees_Paper.html), *Datamation*, April 1968. The quotations about communication structures, homomorphism, the COBOL and ALGOL compilers and the first design being "almost never the best possible" are from this paper.
+[^2]: Melvin Conway's site, ["Conway's Law"](https://www.melconway.com/Home/Conways_Law.html). It states that Fred Brooks cited the paper in *The Mythical Man-Month* and called the idea "Conway's Law".
+[^3]: James Lewis and Martin Fowler, ["Microservices"](https://martinfowler.com/articles/microservices.html), section "Organized around Business Capabilities".
+[^4]: ThoughtWorks Technology Radar, ["Inverse Conway Maneuver"](https://www.thoughtworks.com/radar/techniques/inverse-conway-maneuver), listed in the Trial ring. I read the entry through a page summarizer, so the quoted fragment is short.
+[^5]: ThoughtWorks Technology Podcast, ["Reckoning with the force of Conway's Law"](https://www.thoughtworks.com/insights/podcasts/technology-podcasts/reckoning-with-the-force-conways-law). It names Jonny LeRoy and Matt Simons and a 2010 article. I did not find the original article.
+[^6]: Nachiappan Nagappan, Brendan Murphy and Victor Basili, ["The Influence of Organizational Structure on Software Quality: An Empirical Case Study"](https://www.microsoft.com/en-us/research/publication/the-influence-of-organizational-structure-on-software-quality-an-empirical-case-study/), Microsoft Research technical report MSR-TR-2008-11, 2008 (published at ICSE 2008).
+[^7]: Alan MacCormack, John Rusnak and Carliss Baldwin, ["Exploring the duality between product and organizational architectures: A test of the 'mirroring' hypothesis"](https://www.sciencedirect.com/science/article/abs/pii/S0048733312001205), *Research Policy* 41(8), 2012, pp. 1309-1324. Findings quoted from the abstract; I did not read the full text.
+[^8]: Team Topologies, ["Key concepts"](https://teamtopologies.com/key-concepts): the four team types and three interaction modes.
