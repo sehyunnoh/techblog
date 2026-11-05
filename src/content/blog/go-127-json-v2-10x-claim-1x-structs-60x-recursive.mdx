@@ -1,0 +1,162 @@
+---
+title: "Go's json/v2 Claims 10x Faster Unmarshal. I Got 1.1x on Structs and 60x on One Pattern"
+description: "Go 1.27 made encoding/json/v2 stable. I ran it against v1 for behavior and speed: the defaults change 9 things, plain structs gain about 10%, and recursive custom decoders gain 60x."
+pubDate: 2026-11-05
+tags: ['go', 'backend', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+The Go team published "A new Go API for JSON" on November 4, 2026.[^1] Go 1.27 ships `encoding/json/v2` and `encoding/json/jsontext` as stable packages, after about six years of design work. The post's performance paragraph says Marshal is "roughly at parity" with v1, and that Unmarshal is "significantly faster", with benchmarks showing "improvements of up to 10x".
+
+"Up to" is doing a lot of work in that sentence. If your service decodes JSON in a hot path, the useful question is how much you get on your data, and the post gives no numbers beyond the 10x ceiling. So I took Go 1.27.0 on my own machine and measured both things a migration would touch: what changes in behavior when you switch, and what changes in speed.
+
+The short version. Nine default behaviors change, and two of them are not in the announcement. On ordinary structs, Unmarshal was 1.1x faster, not 10x. Decoding into `any` was 2.2x faster. One specific pattern, a custom `UnmarshalJSON` method that calls `json.Unmarshal` on the same type, got 3x, 12x and 60x faster as nesting deepened.
+
+## What v2 is, in two paragraphs
+
+Some terms first. **Marshal** means turning a Go value into JSON text. **Unmarshal** means the reverse. A **struct** is Go's record type, and a **nil** slice or map is one that was never created. An **encoder** or **decoder** is an object that reads or writes JSON piece by piece instead of all at once.
+
+The `encoding/json` package (called v1 here) has been in Go since version 1, and the Go 1 compatibility promise means its behavior cannot change. That includes behavior the Go team now regards as mistakes. v2 is a new package at a new import path, so it can fix them.[^1] v1 is not going away: the post says it remains supported "indefinitely".
+
+## Part 1: What changes when you switch
+
+I wrote one program that feeds the same inputs to both packages and prints what each returns.[^4] The announcement lists six differences in a table and a seventh (trailing data) as a complaint about v1. My run confirmed all seven, found two more, and showed that the compatibility switch really does bring v1 behavior back.
+
+| Input | v1 (`encoding/json`) | v2 (`encoding/json/v2`) | In the post? |
+|---|---|---|---|
+| Decode `"a\xffb"` (invalid UTF-8) | `"a�b"`, silently repaired | error | yes |
+| Encode a string with invalid UTF-8 | repaired to U+FFFD | error | yes |
+| Decode `{"a":1,"a":2}` | last one wins, `a=2` | error | yes |
+| Decode `{"NAME":"x"}` into a field tagged `name` | matches | no match, field stays empty | yes |
+| Encode a nil slice and a nil map | `null` and `null` | `[]` and `{}` | yes |
+| `omitempty` on an empty struct field | writes `"in":{}` | field omitted | yes |
+| Encode a `time.Duration` | `1000000000` | error, no default format | yes |
+| Decode `{"a":1} junk` from a reader | returns `a=1`, no error | error | yes |
+| Encode the string `<a&b>` | `"<a&b>"` | `"<a&b>"` | **no** |
+| Encode a map with 8 keys, 30 times | 1 distinct output (sorted keys) | 7 distinct outputs | **no** |
+
+Two rows are worth a closer look because the post does not mention them.
+
+**Map key order is random in v2 by default.** v1 always writes map keys sorted. v2 does not, and across 30 encodings of the same 8-key map I got 7 different byte strings. Both are valid JSON and any parser reads them the same way. But if you compare output bytes in tests, hash a payload, or use the output as a cache key, v2 breaks you silently. Adding `jsonv2.Deterministic(true)` gives sorted output again.[^2]
+
+**HTML escaping is off.** v1 rewrites `<`, `>` and `&` as `<`, `>` and `&`, a habit from the days when JSON was pasted into web pages. v2 leaves them alone. This is fine for APIs. If you embed JSON in a `<script>` tag, it is a security-relevant change, and `jsontext.EscapeForHTML(true)` restores the old output.
+
+The "trailing junk" row hides one more quirk. Calling `Unmarshal` on a byte slice rejected the junk in both versions. Reading through a stream (`json.NewDecoder(r).Decode` in v1) accepted it. v2's reader function rejects it. That is the "Decoder fails to reject trailing junk" problem the post describes, and I reproduced it.
+
+### The way back
+
+The post says you can keep v1 behavior by passing options, and that is true. `json.DefaultOptionsV1()` bundles 21 switches that include `Deterministic`, `EscapeForHTML`, `AllowInvalidUTF8`, `AllowDuplicateNames`, `FormatNilSliceAsNull` and `MatchCaseInsensitiveNames`.[^5] I passed it to the v2 functions and re-ran the cases. Invalid UTF-8 repaired, case-insensitive match, `null` for nil slices, `1000000000` for the duration, duplicate names accepted, map order stable (1 distinct output). Every v1 row came back.
+
+So the migration is mechanical: switch the import, pass `DefaultOptionsV1()`, then turn options off one at a time as your tests allow.
+
+## Part 2: What the post says about v1 and v2 being the same code
+
+The post says "under the hood, v1 is implemented in terms of v2". I wanted to see that in the source, because it affects what a benchmark of v1 means.
+
+In the Go 1.27.0 source tree, `encoding/json` has two sets of files. `encode.go` and `decode.go` carry the build constraint `//go:build !goexperiment.jsonv2`. `v2_encode.go` carries the opposite, `goexperiment.jsonv2`, and its `Marshal` is a single line: `return jsonv2.Marshal(v, DefaultOptionsV1())`.[^3]
+
+So by default, in a stock Go 1.27.0 toolchain, v1 still runs the **old** implementation. The "v1 on top of v2" version only compiles when you build with `GOEXPERIMENT=jsonv2`. I confirmed that by building my test program both ways. The behavior output was identical, and the speed was too: v1 timings stayed within a few percent in both builds. That is reassuring for the future plan (one code path, two APIs), but today the claim describes an opt-in build, not what most programs run. The announcement does not mention the flag.
+
+## Part 3: Speed
+
+Setup: Go 1.27.0, Windows 11, amd64, Core Ultra 7 258V (8 logical CPUs), Go's `testing.Benchmark` with 5 runs per case and the median reported. I ran the whole suite three times, once more in the same build and once with `GOEXPERIMENT=jsonv2`, and the ratios agreed to within a few percent except where I say otherwise. Payloads are synthetic: a small record of 184 bytes and an array of 1,000 such records, 191,430 bytes. Each record has 8 fields, including a list of 3 strings and a map of 3 entries.
+
+The chart shows v1 time divided by v2 time. Above 1 means v2 is faster.
+
+<Chart
+  type="bar"
+  horizontal
+  height={380}
+  format="plain"
+  caption="v1 time divided by v2 time with default options, first run. 1.0 means equal. Plain structs gain 1.0x to 1.2x. Decoding into any gains 2.2x. The last three bars are the recursive custom decoder at nesting depths 10, 100 and 400."
+  label="Horizontal bar chart of v1 time divided by v2 time. Marshal small struct 1.01, marshal 1000 structs 1.15, marshal map 1.31, unmarshal small struct 1.17, unmarshal 1000 structs 1.13, unmarshal into any 2.22, custom decoder depth 10 2.91, depth 100 12.19, depth 400 60.04"
+  labels={['Marshal, small struct', 'Marshal, 1000 structs', 'Marshal, map[string]any', 'Unmarshal, small struct', 'Unmarshal, 1000 structs', 'Unmarshal, into any', 'Custom decoder, depth 10', 'Custom decoder, depth 100', 'Custom decoder, depth 400']}
+  series={[
+    { name: 'v1 time / v2 time', data: [1.01, 1.15, 1.31, 1.17, 1.13, 2.22, 2.91, 12.19, 60.04] }
+  ]}
+  yTitle="speedup (x)"
+/>
+
+Reading it from the top:
+
+- **Marshal** was never slower than v1 in my cases. It was equal for the small struct, about 1.15x faster for 1,000 structs, and 1.3x faster for a map. Allocations dropped from 6 to 3 for the small struct and from 5,001 to 2,001 for the array. The post says Marshal is sometimes slightly slower and tracks it in issue 81315. I did not find such a case, which tells you only that my payloads did not hit it.
+- **Unmarshal into typed structs** gained 1.07x to 1.17x across the three runs. That is real but modest, and nowhere near 10x. Allocation counts were identical.
+- **Unmarshal into `any`** (the "give me whatever is in there" decode, which produces maps and slices) was 2.2x faster in all three runs, from 6.4 ms to 2.9 ms for the 191 KB array, with allocations down from 43,074 to 32,025.
+
+When I switched v2 to `DefaultOptionsV1()`, every one of those gains disappeared: the ratio fell to 0.9x to 1.07x. I did not dig into which of the 21 options carries the speed, so I can only say the gain belongs to v2's default behavior, not to the new package as such.
+
+### The 60x case
+
+Now the number that does reproduce the "orders of magnitude" claim. The post's Kubernetes example says that switching a recursive `UnmarshalJSON` to the streaming `UnmarshalJSONFrom` improved performance by orders of magnitude. I could not read the linked change, so I built the pattern myself.
+
+A type has an `UnmarshalJSON` method, it contains a pointer to the same type, and the method decodes by calling `json.Unmarshal` on an alias type (a standard trick to avoid infinite recursion). Each nested level then receives the raw bytes of everything inside it and scans them again.
+
+<Mermaid
+  caption="Why the old pattern slows down with depth. Each UnmarshalJSON level receives a byte slice and scans it from the start before handing the inner part to the next level. The streaming version reads the input once."
+  label="Two flows. v1 with a custom UnmarshalJSON: level 1 scans all bytes, level 2 scans almost all bytes again, level 3 scans them again, and so on to level N. v2 with UnmarshalJSONFrom: one decoder passes through the bytes once, handing control to each level in turn"
+  code={`
+flowchart LR
+  subgraph V1["v1: UnmarshalJSON calls json.Unmarshal"]
+    direction LR
+    A1["Level 1 scans N bytes"] --> A2["Level 2 scans about N bytes"] --> A3["Level 3 scans about N bytes"] --> A4["... depth times"]
+  end
+  subgraph V2["v2: UnmarshalJSONFrom shares one decoder"]
+    direction LR
+    B1["One decoder reads the input once"] --> B2["Each level takes its part"]
+  end
+`}
+/>
+
+I measured a chain of nested objects (each has an `N` and a `Next`) at depths 10, 100 and 400.
+
+<Chart
+  type="line"
+  logY
+  height={320}
+  format="plain"
+  caption="Time to decode one nested chain, in microseconds on a log scale, first run. v1 time grows much faster than the depth. v2 grows in line with it. At depth 400 the gap is 60x."
+  label="Line chart on a log scale. v1: depth 10 is 11.0 microseconds, depth 100 is 600.4, depth 400 is 12781.1. v2: depth 10 is 3.8, depth 100 is 49.3, depth 400 is 212.9"
+  labels={['depth 10', 'depth 100', 'depth 400']}
+  series={[
+    { name: 'v1 UnmarshalJSON', data: [11.0, 600.4, 12781.1] },
+    { name: 'v2 UnmarshalJSONFrom', data: [3.8, 49.3, 212.9] }
+  ]}
+  yTitle="microseconds per decode"
+/>
+
+Going from depth 100 to depth 400 (4x deeper), v1 took 21x longer (600 µs to 12.8 ms). v2 took 4.3x longer (49 to 213 µs). That scaling is what you would expect if v1 re-scans the remaining bytes at every level and v2 reads once. I inferred the cause from those numbers and the code structure, not from profiling it.
+
+Do not read "60x" as a general number. It needs a type that nests into itself, a custom `UnmarshalJSON`, and that method calling back into `json.Unmarshal`. At depth 10 the gap is 3x. Most programs have neither the depth nor the pattern. Programs that do, such as ones decoding tree-shaped config or API documents, can have a very real problem that a one-line switch fixes.
+
+## Where this leaves a migration
+
+- **Do not expect a speedup for plain structs.** Budget for around 10%, and measure on your own payloads before promising more.
+- **Do expect behavior changes.** Run your test suite with v2 defaults and look at failures involving nil slices, field name case, duplicate keys and invalid UTF-8 first. These are the ones that reflect bugs in v1 you may have been relying on.
+- **Grep for tests that compare JSON bytes.** The random map key order will break them. This is the one change that does not produce an error, only flaky output.
+- **Look for recursive `UnmarshalJSON` methods** that call `json.Unmarshal` on their own type. Those are the only place I found a big win, and moving them to `UnmarshalJSONFrom` is where it comes from.
+- **Use `DefaultOptionsV1()` as a stepping stone.** It restores every v1 behavior in my tests and costs you the speed gains.
+
+## What I did not test
+
+- One machine, one OS, one Go version (1.27.0). Timing ratios could look different on Linux or on a different CPU.
+- Synthetic payloads. I did not run the `jsonbench` suite the post points to, so I cannot compare my numbers with theirs, and I never reproduced the "up to 10x".
+- No concurrent load, no streaming through `io.Reader`, no very large documents, no payloads dominated by strings or numbers.
+- I did not look at the Kubernetes change the post cites, so the 60x case is my own construction of the pattern, not a reproduction of theirs.
+- I did not trace why decoding into `any` is 2.2x faster, only that the gain goes away with the v1 options.
+
+## Takeaways
+
+- Go 1.27's `encoding/json/v2` changes 9 default behaviors I could reproduce, including two that the announcement does not list: map keys come out in random order, and `<`, `>` and `&` are no longer escaped.
+- Typical struct decoding got about 1.1x faster, and `any` decoding 2.2x. The 10x ceiling in the post did not show up outside one pattern.
+- A recursive custom `UnmarshalJSON` that calls `json.Unmarshal` got 3x, 12x and 60x faster at depths 10, 100 and 400.
+- In a stock Go 1.27.0 build, v1 still runs its old code. "v1 on top of v2" is what you get with `GOEXPERIMENT=jsonv2`, and I saw no difference in behavior or speed between the two.
+- `json.DefaultOptionsV1()` brings v1 behavior back on every case I tried, so you can migrate in small steps.
+
+[^1]: Michael Pratt, Joe Tsai, Daniel Martí and others, ["A new Go API for JSON"](https://go.dev/blog/jsonv2), The Go Blog, November 4, 2026. The behavior table, the "roughly at parity" and "up to 10x" statements, the Kubernetes example and the "implemented in terms of v2" sentence are from this post. I read it through a page summarizer, so the quotes are short.
+[^2]: Go 1.27.0 package documentation for `encoding/json/v2`, read with `go doc encoding/json/v2` on the machine used for the measurements. It documents `omitzero`, `omitempty`, case-sensitive matching and `Deterministic`.
+[^3]: Go 1.27.0 source, `src/encoding/json/`: `encode.go` and `decode.go` (`//go:build !goexperiment.jsonv2`) and `v2_encode.go` (`//go:build goexperiment.jsonv2`, `Marshal` calls `jsonv2.Marshal(v, DefaultOptionsV1())`).
+[^4]: The probe program is [`json-v2-probe.go`](/files/json-v2-probe.go). Run `go run json-v2-probe.go behavior` for the comparison table or `bench` for the timings (several minutes). It reads and writes nothing outside its own output.
+[^5]: Go 1.27.0 package documentation for `encoding/json`, `DefaultOptionsV1`, which lists the 21 options it enables.
