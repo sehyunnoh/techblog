@@ -1,0 +1,128 @@
+---
+title: 'sshole Needs musl, No PAM, and a Shadow Field That Is Exactly an Asterisk'
+description: 'A source-level check of the sshole advisory: which password lengths bypass a non-PAM musl sshd, measured with a crypt() probe, and why the bypass is narrower than the headline.'
+pubDate: 2026-11-06
+tags: ['security', 'systems', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+
+The pitch for "sshole" is blunt: on an Alpine Linux box, a password longer than 256 characters can log you in as an account that was never supposed to accept a password at all.[^1] That is a real bug with a real fix, merged into OpenSSH on November 5.[^2] It is also a bug with three preconditions stacked on top of each other, and most Alpine-based systems on the internet only meet one or two of them.
+
+I read the advisory, cloned both source trees it depends on, and built a small probe against musl's own `crypt()` to see exactly where the line sits. This is what the code supports, what the advisory's own timeline gets slightly wrong, and where the actual exposure is narrower than "any password over 256 characters" suggests.
+
+## Three pieces, briefly
+
+A few terms carry the whole story, so here they are before the code.
+
+**`crypt(3)`** is the decades-old C function Unix systems use to hash a password for storage and to check one at login. You give it a plaintext password and a salt, and it returns a hash string. Two different C libraries can implement it differently, and that difference is the whole bug.
+
+**musl** is a small C library used by Alpine Linux, OpenWrt, and several embedded and container-focused distributions, as an alternative to glibc, the C library most desktop and server Linux distributions use. musl and glibc both ship a `crypt()`, and both are expected to behave the same from the caller's side. They do not.
+
+**PAM** (Pluggable Authentication Modules) is a framework most Linux distributions use to handle logins, letting an administrator swap in two-factor auth, account lockout, or an LDAP check without touching the program doing the authenticating. OpenSSH can either hand password checks to PAM or do the comparison itself with a small, bundled fallback. Alpine's default `openssh-server` package builds the fallback path. A separate `openssh-server-pam` package exists for anyone who wants PAM instead, and that package's build flags are visible in Alpine's own build recipe for the port.[^6]
+
+The shadow password field is the hash stored for an account in `/etc/shadow`. A `*` or `!` there is a sentinel, not a hash, and it means the account has no usable password: it can only log in by key, by PAM, or not at all.
+
+## What musl's `crypt()` actually does past 256 bytes
+
+musl added SHA-256 and SHA-512 crypt in August 2012.[^3] The same week, a separate commit changed what the function returns on failure: instead of `NULL`, which a caller might forget to check, it returns the literal string `"*"`.[^4] The commit message says the plain reason: too many callers skip the null check, so a safe failure value beats a crash.
+
+Those two decisions, made eight days apart and for unrelated reasons, combine in current musl source. `crypt_sha512.c` still carries a comment calling the length limit "not part of the original design, added for DoS protection", and the function that wraps it returns `"*"` whenever the inner computation fails its own self-test or sanity check, independent of what caused the failure:
+
+```c
+#define KEY_MAX 256
+/* ... */
+p = sha512crypt(key, setting, output);
+q = sha512crypt(testkey, testsetting, testbuf);
+if (!p || q != testbuf || memcmp(testbuf, testhash, sizeof testhash))
+    return "*";
+```
+
+I built a probe from that source, re-typing the comparison logic rather than linking against sshd itself, and ran it in an Alpine 3.20 container against musl 1.2.5.[^7] The boundary is exact:
+
+<Chart
+  type="line"
+  caption="crypt() output for a password of N bytes, five hash schemes, measured in an Alpine 3.20 container. DES, MD5 and bcrypt return a real hash at every length tested. SHA-256 and SHA-512 switch to the literal string '*' at 257 bytes."
+  label="Line chart, x axis password length in bytes (8, 72, 255, 256, 257, 300, 1024), y axis whether crypt() returned a real hash (1) or the literal string asterisk (0). DES, MD5 and bcrypt stay at 1 across all lengths. SHA-256 and SHA-512 stay at 1 through 256 bytes then drop to 0 at 257 bytes and remain there"
+  labels={[8, 72, 255, 256, 257, 300, 1024]}
+  series={[
+    { name: 'DES / MD5 / bcrypt', data: [1, 1, 1, 1, 1, 1, 1] },
+    { name: 'SHA-256 / SHA-512', data: [1, 1, 1, 1, 0, 0, 0] },
+  ]}
+  yTitle="Returned a real hash (1) or '*' (0)"
+  xTitle="Password length (bytes)"
+/>
+
+256 bytes still gets a real hash. 257 does not. DES, MD5, and bcrypt (the other hash schemes musl's `crypt()` supports) have no such cap, out to 1,024 bytes, which is as far as I tested. Only the two SHA-crypt schemes have this limit, and the failure value is the same three-character string an account with no password uses.
+
+## Why that string matters to sshd
+
+OpenSSH's fallback password check, `sys_auth_passwd()`, takes the user's typed password, encrypts it with the account's stored salt, and compares the result to the stored hash with `strcmp()`. Before November 5, that was the entire check. It never asked whether the stored field was long enough to be a real hash in the first place.
+
+<Mermaid
+  caption="The comparison sys_auth_passwd() made before the fix, for an account whose shadow field is the sentinel '*'. A password short enough gets a real hash and a mismatch. A password of 257 bytes or more against a SHA-512 salt makes crypt() return the same '*' sentinel, and strcmp() reports a match."
+  label="Flowchart with two branches from a node labeled stored field is asterisk. A short password branch leads to crypt returns a real hash, which does not equal asterisk, so the comparison rejects the login. A long password branch, 257 bytes or more, against a SHA-512 salt, leads to crypt returns the string asterisk, which equals the stored field, so the old code accepted the login. A third node shows the November 5 fix checking the stored field length before any comparison and rejecting both branches when the field is shorter than four characters"
+  code={`
+flowchart TD
+  A["stored shadow field = &quot;*&quot;"] --> B{"password length"}
+  B -->|"short password"| C["crypt() returns a real hash"]
+  C --> D["hash != &quot;*&quot;, strcmp fails"]
+  D --> E["login rejected"]
+  B -->|"257+ bytes, SHA-512 salt"| F["crypt() returns &quot;*&quot;"]
+  F --> G["&quot;*&quot; == &quot;*&quot;, strcmp matches"]
+  G --> H["old code: login accepted"]
+  A --> I["Nov 5 fix: check stored field length first"]
+  I --> J["shorter than 4 chars: reject, skip the compare"]
+`}
+/>
+
+The fix, commit `4353fdc43e`, adds exactly that check: reject up front if the stored hash is under four characters, before `crypt()` is ever called. The commit message is candid about where the authors think the fault lies: "This bypass affects some configurations and runtime configurations. We do not consider the root cause to be within OpenSSH but we are well equipped to avoid it."[^2] musl's maintainers would likely place it the other way, since the `KEY_MAX` comment already frames the cap as a deliberate trade-off, not an oversight. Neither library did anything wrong by its own stated design. The bypass lives in the seam between them.
+
+## Running the full check, not just the hash
+
+My probe's third part re-types `sys_auth_passwd()`'s logic directly, old and new, against every combination of stored field, borrowed salt, and password length that matters. "Borrowed salt" needs one more term: when sshd rejects a login before checking the password (an unknown username, say), it still runs `crypt()` against a fake salt, copied from whichever real account in the password database happens to come first, so that a timing attacker cannot tell a real username from a fake one by how fast the rejection comes back.[^5] That borrowed salt is what gets compared against `"*"` too.
+
+| Stored field | Borrowed salt | 256 bytes | 257 bytes | 1024 bytes |
+|---|---|---|---|---|
+| `*` | SHA-512 (`$6$...`) | reject | **accept (old) / reject (fixed)** | accept (old) / reject (fixed) |
+| `*` | DES (`xx`) | reject | reject | reject |
+| `!`, `x`, `!!`, `*LOCKED*` | either | reject | reject | reject |
+| a real-looking hash | either | reject | reject | reject |
+
+Only one row ever flips. The stored field has to be the exact two-character sentinel `*`, not `!` or `*LOCKED*` or any of the other conventions different tools use for "no password." The borrowed salt has to be SHA-512 or SHA-256, which only happens if some other account on that same system already has a SHA-crypt hash for sshd to borrow a salt style from. And the password has to clear 257 bytes, which is long even by the standard of a password manager's generated strings. Drop any one of the three and the login is rejected on every build I tested, patched or not.
+
+## Where the advisory's own timeline slips
+
+The sshole write-up, by Ozgun Kultekin at Wakefield, references an OpenSSH fix "committed on 30 October 2026" as part of the story.[^1] I checked that commit. It is real, but it fixes a different bug: a timing side-channel in how sshd picks a fake salt for bcrypt-hashed accounts, credited to Anthropic under the identifier `ANT-2026-7T6M8N4X`, with no mention of password length or musl in its message or its diff.[^8] The commit that actually closes the `*`-sentinel bypass landed six days later, on November 5, and is the one with the `MIN_PASSWORD_HASH_LEN` check shown above.[^2] The two are easy to conflate: both touch `pick_salt()` logic in the same file, a week apart, from the same author.
+
+As of this writing, that November 5 commit sits on OpenSSH's master branch with no release tag over it yet in the project's public mirror.[^2] Alpine did not wait for one. Its edge package tracker shows `openssh-server` at `10.6_p2-r0`, built November 5, same day as the fix.[^9] Alpine's build recipe for the port confirms the non-PAM claim directly: the default `openssh` build runs `./configure --without-kerberos5 --without-pam`, and a separate `openssh-server-pam` subpackage is the one that links PAM in.[^6] So "fixed in 10.6p2," the line both the advisory and the proof-of-concept repository use, describes Alpine's own package version, built straight from the fix commit, not a tagged upstream release that exists yet to point to.
+
+## What this does not mean
+
+None of this makes the bug fake. A fallback authentication path that can be satisfied by an unrelated library's error string is a real design gap, and the fix is one line of validation OpenSSH should probably have had already, independent of musl. But the preconditions rule out most of what people picture when they hear "SSH bypass."
+
+glibc is not affected. Its `crypt()` has no 256-byte cap on SHA-crypt and returns `NULL`, not a sentinel string, on failure, so the comparison `encrypted_password != NULL && ...` in the old OpenSSH code already short-circuits before the `strcmp()` ever runs. Most servers on the public internet run glibc. PAM-enabled sshd is not affected either, since the vulnerable code path only runs when PAM is compiled out, and Alpine ships that as the default but not the only option. An account has to carry the bare `*` sentinel and sit on a system that also has at least one SHA-crypt account, which rules out most minimal container images, where sshd commonly is not running at all, and most key-only setups, where the shadow convention is often `!` rather than `*`.
+
+The honest framing is closer to: on musl-based Linux with a non-PAM sshd, password logins enabled, and at least one account whose shadow field is literally `*`, a sufficiently long password can authenticate as that account. That is still worth a few lines in a hardening checklist. It is not "Alpine servers worldwide are wide open," which is closer to how the headline reads.
+
+## Takeaways
+
+- The bypass needs three things at once: musl's `crypt()`, a non-PAM sshd, and a shadow field that is the exact `*` sentinel on a system with at least one SHA-crypt account to borrow a salt from. Any one missing closes it.
+- The boundary is exact and measured: 256-byte passwords get a real hash from musl; 257 bytes and up return the literal string `"*"`, the same value a no-password account stores.
+- The fix, OpenSSH commit `4353fdc43e`, adds a four-character minimum on the stored hash before any comparison runs. It landed November 5, six days after an unrelated bcrypt timing fix the advisory's own timeline cites instead.
+- glibc and PAM-enabled sshd are both unaffected by design, which covers most production Linux. The exposure concentrates on musl-based, non-PAM configurations, which Alpine's default package is, but its PAM variant is not.
+- Checking a security headline against the source it cites is cheap. Here it turned a "256-character bypass" into a three-condition one, which is a very different thing to put in a change ticket.
+
+## References
+
+[^1]: Ozgun Kultekin (Wakefield), [sshole](https://sshhole.com/). Advisory text, affected-configuration list, and the proof-of-concept repository link. Read November 6, 2026.
+[^2]: [openssh/openssh-portable](https://github.com/openssh/openssh-portable), commit [`4353fdc43ef646c43a8dda7025cc1a898caf1482`](https://github.com/openssh/openssh-portable/commit/4353fdc43ef646c43a8dda7025cc1a898caf1482), "avoid password authn bypass", November 5, 2026. Read from a local clone; `git tag --contains` returns no tag over this commit as of November 6, 2026.
+[^3]: [kraj/musl](https://github.com/kraj/musl) (mirror of the musl-libc.org source), commit `88bf5a8a8d7d796f63cca8589f4de67aa8345f1a`, "add sha256/sha512 crypt", August 29, 2012. `KEY_MAX 256` and its DoS-protection comment, read from `src/crypt/crypt_sha512.c` and `crypt_sha256.c` at current master.
+[^4]: [kraj/musl](https://github.com/kraj/musl), commit `b3c4cc121f70faea45389fe7ddc1127ed5cbd8bb`, "make crypt return an unmatchable hash rather than NULL on failure", August 9, 2012.
+[^5]: [openssh/openssh-portable](https://github.com/openssh/openssh-portable), `openbsd-compat/xcrypt.c`, `pick_salt()`. Borrows the salt style from the first account with a usable hash in the password database.
+[^6]: Alpine Linux aports, [`main/openssh/APKBUILD`](https://gitlab.alpinelinux.org/alpine/aports/-/blob/master/main/openssh/APKBUILD), read November 6, 2026. `pkgver=10.6_p2`; the default build runs `_do_configure --without-kerberos5 --without-pam`, with `openssh-server-pam` as a separate subpackage.
+[^7]: [sshole-crypt-probe.c](/files/sshole-crypt-probe.c), a program that re-types the comparison logic of `sys_auth_passwd()` for both OpenSSH versions, built against musl 1.2.5 in an `alpine:3.20` container (`gcc -O1 -lcrypt`). It opens no sockets, starts no sshd, and never uses a real password. The table and chart in this post are its output, run November 6, 2026.
+[^8]: [openssh/openssh-portable](https://github.com/openssh/openssh-portable), commit `84f8f4666b536dcd3959ab27171caecd5e80947b`, "fix fake password salt generation for bcrypt hashes", October 30, 2026. Credited to Anthropic, identifier `ANT-2026-7T6M8N4X`. Unrelated to password length or musl.
+[^9]: Alpine Linux package index, [`openssh-server`, edge branch](https://pkgs.alpinelinux.org/packages?name=openssh-server&branch=edge), version `10.6_p2-r0`, build timestamp 2026-11-05 09:05:19, read November 6, 2026.
