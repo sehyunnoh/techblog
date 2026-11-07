@@ -1,0 +1,60 @@
+group | expected | got  | match | label
+A     | block    | block| yes   | curl -A
+A     | block    | block| yes   | curl combined -sSLA
+A     | block    | block| yes   | curl -H User-Agent
+A     | block    | block| yes   | curl --user-agent
+A     | block    | block| yes   | curl --user-a (prefix)
+A     | block    | block| yes   | wget -U
+A     | block    | block| yes   | wget --user-agent=
+A     | block    | block| yes   | iwr -UserAgent
+A     | block    | block| yes   | irm -Headers hashtable
+A     | block    | block| yes   | python requests
+A     | block    | block| yes   | UA= variable
+A     | block    | block| yes   | upper-case address
+A     | block    | block| yes   | percent-encoded address
+A     | block    | block| yes   | quote inside address
+A     | block    | block| yes   | line continuation in flag
+A     | block    | block| yes   | PowerShell en dash flag
+A     | block    | block| yes   | monitor tool
+B     | pass     | pass | yes   | address in URL
+B     | pass     | pass | yes   | address in body
+B     | pass     | pass | yes   | curl -u basic auth
+B     | pass     | pass | yes   | curl --user basic auth
+B     | pass     | pass | yes   | From: header
+B     | pass     | pass | yes   | computed at run time
+B     | pass     | pass | yes   | variable set elsewhere
+B     | pass     | pass | yes   | file sent by name
+B     | pass     | pass | yes   | script that holds it
+B     | pass     | pass | yes   | double percent-encoding
+B     | pass     | pass | yes   | base64 address
+B     | pass     | pass | yes   | client not named (aria2c -U)
+B     | pass     | pass | yes   | splatted hashtable, User key
+C     | pass     | pass | yes   | UA word built by concatenation
+C     | block    | block| yes   | address built by concatenation
+C     | pass     | pass | yes   | address split in two strings
+C     | pass     | pass | yes   | hex escape for User
+C     | block    | block| yes   | header name via variable
+C     | pass     | pass | yes   | header name split by variable
+C     | pass     | pass | yes   | HTML entity for @
+C     | pass     | pass | yes   | curl config file via -K
+C     | block    | block| yes   | httpie style header
+C     | block    | block| yes   | lynx -useragent
+C     | block    | block| yes   | nc raw request
+C     | pass     | pass | yes   | variable named CURL_UA
+C     | block    | block| yes   | ua word but different tool
+C     | pass     | pass | yes   | node fetch, no UA word
+D     | pass     | pass | yes   | commit message, "user agent" with a space
+D     | fp       | block| yes   | grep a log for user-agent
+D     | fp       | block| yes   | curl -user (really -u ser)
+D     | fp       | block| yes   | mail with "ua:" in subject
+D     | pass     | pass | yes   | send mail, no UA word
+D     | pass     | pass | yes   | git config email
+D     | pass     | pass | yes   | ssh-keygen comment
+
+summary
+A: 17 blocked, 0 passed, 0 differ from README
+B: 0 blocked, 13 passed, 0 differ from README
+C: 6 blocked, 8 passed, 0 differ from README
+D: 3 blocked, 4 passed, 0 differ from README
+
+jo@x.ua: address-only line refused = false

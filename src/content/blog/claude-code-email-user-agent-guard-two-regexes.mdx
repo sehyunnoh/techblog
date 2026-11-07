@@ -1,0 +1,122 @@
+---
+title: "Claude Code's Email Guard Is Two Regexes. Its README Predicted All 30 Test Results."
+description: 'I ran the source of Claude Code''s built-in privacy mod against 51 shell lines with a made-up address. The README was right every time, and the gaps it admits are the real story.'
+pubDate: 2026-11-07
+tags: ['security', 'ai', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+
+On November 5 a GitHub issue titled "Privacy violation in User-Agent header" collected 1,573 points on Hacker News.[^1][^2] The reporter says Claude Code put their email address into the `User-Agent` header of web requests, and that they now get dozens of scam emails a day. Within two hours Anthropic staff pointed to a new built-in "mod" that blocks the behavior, and about half an hour after that its source was merged into the public repository.[^3]
+
+That source is short, which makes it unusually easy to check. So I did: I ran the guard's own code, unmodified, against 51 shell lines containing a made-up address, and compared every verdict with what the mod's README promises. The README held up. What is worth writing about is how small the promise is.
+
+## What the issue claims, and what it does not
+
+The issue body is five sentences. It gives a version (2.1.318, macOS), says the address was sent to "arbitrary 3rd parties" during web searches, and says spam followed. It includes no captured request, no site name, and no way to connect the spam to the header. Nothing in the thread establishes that connection either. One commenter reports a similar surge of odd mail, which is a coincidence worth noting and not evidence of cause.
+
+The explanation from Anthropic staff, as another commenter quoted it, is more specific and more mundane.[^1] Nobody built a feature that shares your address. Some sites ask automated clients to identify themselves with contact details, Wikipedia being the example given.[^6] When a user asks Claude to research something there, the model sometimes writes a `curl` command with the user's address in the `User-Agent` and runs it. The harness had put that address into the model's context in the first place, to identify the user.
+
+Two terms matter for the rest of this post. A **User-Agent** is a header every HTTP client sends to say what software is making the request, for example `curl/8.5.0` or a browser string. A **mod** is Claude Code's name for a plugin that can attach hooks to the harness, and the built-in privacy mod uses a `tool.check` hook, which gets to inspect a tool call before it runs and can refuse it.
+
+## What the guard does
+
+The mod is one registration function and four small files in `hooks/outbound/`, roughly 170 lines in total. It sits in front of three tools only: `Bash`, `PowerShell` and `Monitor`.[^3]
+
+<Mermaid
+  caption="The privacy mod's decision for one shell call. Two string tests decide everything: does the input hold the account's address, and does it name a User-Agent somewhere. There is no parsing of the command in between."
+  label="Flowchart. A shell tool call enters. First check: does the text contain an at sign or the characters percent 4 0. If not, the call passes. If yes, second check: does the text contain the signed-in account's address, in plain, quote-stripped or percent-decoded form. If not, pass. If yes, third check: after removing the address, does the rest of the text contain a User-Agent word or a curl, wget or PowerShell user-agent flag. If yes, the call is refused without a prompt. If no, the call passes."
+  code={`
+flowchart TD
+  A["Bash / PowerShell / Monitor call"] --> B{"text has @ or %40?"}
+  B -->|no| P["passes"]
+  B -->|yes| C{"holds the account address? plain, quotes removed, or percent-decoded"}
+  C -->|no| P
+  C -->|yes| D{"rest of the text names a User-Agent? word match or curl -A, wget -U, -User"}
+  D -->|no| P
+  D -->|yes| R["refused, no prompt"]
+`}
+/>
+
+The User-Agent test is a regular expression for words such as `user-agent`, `user_agent`, `--user-agent` and `-UserAgent`, plus a second set of patterns for flags that mean the same thing on specific clients (`curl -A`, `wget -U`, and `-User` on PowerShell's web commands).[^5] Before matching, the code also builds a second reading of the input with quotes, backslashes and escaped line breaks removed, so that `cu''rl` or `"jo"@x.test` still count.
+
+The README is blunt about the design. The test is "two word matches over the whole input", with "no parser, on purpose". It calls the whole thing "a courtesy, not a boundary", and lists what gets through: an address in a URL, a body or a `From:` header; any web tool call (`WebFetch`, `WebSearch`, MCP tools are not checked); a value computed at run time; a script that holds the address; a client the patterns do not name.[^3]
+
+## Fifty-one lines, one made-up address
+
+I copied the four source files from the repository at a fixed commit, changed only the `.js` import suffixes to `.ts` so Node 24 could load them, and wrote a harness that makes the same decision as `register.ts`.[^3][^4] The address is `test.user@example.test`. No Claude Code process runs, nothing touches the network, and none of the commands is ever executed. The harness only asks the guard whether it would refuse each line.
+
+I split the lines into four groups before running anything, writing down what the README implied for each:
+
+- **A (17 lines):** the plain shapes the mod exists for, such as `curl -A`, `-H "User-Agent: ..."`, `wget -U`, `iwr -UserAgent`, a Python `requests` call, an upper-case address, a percent-encoded one, a line continuation inside the flag, and a PowerShell en dash.
+- **B (13 lines):** shapes the README says go through, such as the address in a URL, a body, `curl -u`, a `From:` header, `$(git config user.email)`, a client the patterns do not name, and a splatted PowerShell hashtable.
+- **C (14 lines):** my own attempts at getting around the two matches, plus some other clients, none of them mentioned in the README.
+- **D (7 lines):** ordinary commands that hold the address, a few of which mention words like `user-agent` for unrelated reasons.
+
+<Chart
+  type="bar"
+  horizontal
+  stacked
+  caption="Verdicts of the guard's own code on 51 shell lines containing a made-up address. Group A (targeted shapes) was refused 17 of 17 and group B (shapes the README lists as passing) went through 13 of 13."
+  label="Horizontal stacked bar chart with four bars. Group A, shapes the mod targets, 17 refused and 0 passed. Group B, shapes the README lists as passing, 0 refused and 13 passed. Group C, my own attempts and other clients, 6 refused and 8 passed. Group D, ordinary commands, 3 refused and 4 passed."
+  labels={['A: targeted shapes (17)', 'B: README says pass (13)', 'C: my own variants (14)', 'D: ordinary commands (7)']}
+  series={[
+    { name: 'Refused', data: [17, 0, 6, 3] },
+    { name: 'Passed', data: [0, 13, 8, 4] },
+  ]}
+  xTitle="Shell lines"
+  format="plain"
+/>
+
+Groups A and B are the ones where the README makes a statement, and all 30 matched. Every targeted shape was refused. Every listed gap was a gap. On my first run two of the 51 verdicts disagreed with my written expectation, and both were my mistake, not the mod's. I had guessed that a variable called `CURL_UA` would be caught, but the pattern `\bua\s*[:=]` needs a word boundary and the underscore in `CURL_UA` is a word character, so it passes. I had also guessed that "user agent" with a space would be caught, and the pattern allows a hyphen, an underscore or nothing between the two words, not a space. I corrected both expectations in the published script and left a comment saying why.
+
+## Where it lets the address through
+
+The more useful result is group C. A guard made of two word matches has an obvious weakness: anything that stops the words from appearing together defeats it. These lines all passed, and in each case the command would still put the address in a User-Agent header if it ran:
+
+| Shape | Why the guard misses it |
+|---|---|
+| `curl -A "bot $(git config user.email)" ...` | The address is computed when the command runs, so the input never contains it. |
+| `python -c "h={'User-'+'Agent': 'bot ...'}"` | The header name is built from two strings, so the word never appears. |
+| `U=User; A=Agent; curl -H "$U-$A: bot ..."` | Same idea, split across shell variables. |
+| `curl -H $'\x55ser-Agent: bot ...'` | A hex escape hides one letter of the header name. |
+| `python -c "e='test.user'+'@example.test'; ..."` | The address is assembled from parts, so the full string is not there. |
+
+None of this is a flaw in the sense of a bug, because the README says up front that it is a courtesy and lists the same families of gap. It does change how to read the reassuring sentence in the thread, "deterministically block this behavior". The mod deterministically blocks one textual shape of that behavior. The question that decides how much protection it gives is how often a model that wants to send the address writes that exact shape, and I cannot answer that from the source. The 17 plain shapes are the likely ones, and they are covered. The rows in the table are what a longer script or a command assembled from variables could produce, and I have no data on how often that happens.
+
+A few of my other passing lines do not actually leak. An HTML entity for the `@` sign, or a double percent-encoding, passes the check but would send text that is not an email address, so I left them out of the table.
+
+## The cost on the other side
+
+The README also admits that a string match refuses things it should not. I tried four such lines and three were refused: a `grep -i user-agent access.log | grep test.user@example.test`, a `curl -user` (which curl reads as `-u ser`), and a `mail -s "ua: weekly report"` to the address. The fourth, a commit message that says "user agent" with a space, went through.
+
+That is a small and reasonable price for a rule this cheap, and the refusal message tells the model how to retry. Still, the README says the refusal raises no prompt and that a saved allow rule does not clear it, so it shows up only in the tool result, and a user who really did ask for the address to be sent gets pushed toward a workaround.
+
+## What I did not check
+
+This post tests a copy of the guard's logic, not a running Claude Code session, and several things follow from that.
+
+- **Whether the hook is active on a given machine.** My install is 2.1.319, which is past the 2.1.317 the staff comment names, but `claude plugin list` on it shows 11 plugins and no built-in privacy entry. That may just be how the command lists built-ins, as one commenter on the issue hit the same thing in `/plugins`, or the mod may be off. I could not tell from here. The README says a server-side switch is read once per session, which I also cannot see.
+- **The tools the guard never sees.** `WebFetch`, `WebSearch` and MCP calls are outside it by design. Whether any of them adds the address to a request is a separate question I did not test, and the issue does not say which path the reporter hit.
+- **The spam.** Nothing here connects a header to an inbox. Addresses reach spammers by many routes, and a request to one site's server is a long way from a mailing list.
+- **The source version.** I read the repository at commit `0ed94698`, and the mod's only commit is `90380efc` from November 6. A later change would not be in my copy.
+- **One address, one machine.** The probe uses a single made-up address on Windows. Addresses with plus tags or other unusual characters were not tried.
+
+## Takeaways
+
+- The headline "Claude Code sends your email to websites" describes a model behavior, not a feature, and the staff explanation is plausible, though the issue itself provides no capture to confirm which path it took.
+- The privacy mod is two string tests on `Bash`, `PowerShell` and `Monitor` input. On 51 lines, the 30 where the README made a claim all came out as stated.
+- It stops the obvious shapes (`curl -A`, `-H "User-Agent: ..."`, `wget -U`, PowerShell flags, encoded and upper-case addresses) and misses anything that hides the header name, builds the address from parts, computes it at run time or moves it into a file.
+- It does not cover web tool calls at all, so it is no answer to a claim about `WebFetch` or `WebSearch`.
+- If you care about the address, the stronger controls are the ones the guard cannot provide: do not hand the model an address it does not need, and read the tool results when a call is refused.
+
+## References
+
+[^1]: anthropics/claude-code, [issue 107757, "Bug Report: Privacy violation in User-Agent header"](https://github.com/anthropics/claude-code/issues/107757), opened November 5, 2026 (version 2.1.318, macOS), 102 comments when read on November 7, 2026. The staff reply is quoted inside a later comment in the thread.
+[^2]: Hacker News, [item 50385272, "Claude Code sends your email address to websites"](https://news.ycombinator.com/item?id=50385272), 1,573 points and 504 comments in the Algolia API on November 7, 2026. A [Tell HN](https://news.ycombinator.com/item?id=50286306) with the same complaint reached 42 points on October 29.
+[^3]: anthropics/claude-code, [`mods/privacy` at commit 0ed94698](https://github.com/anthropics/claude-code/tree/0ed94698aa0aeee471465fc9c867c2e8434c4d68/mods/privacy): `README.md`, `hooks/register.ts` and `hooks/outbound/`. The only commit touching that path is [`90380efc`, "mods: add the privacy mod (#107768)"](https://github.com/anthropics/claude-code/commit/90380efca7f9d73e206fac453f841b6acd664f4d), November 6, 2026.
+[^4]: [privacy-mod-probe.mjs](/files/privacy-mod-probe.mjs) and its [output](/files/privacy-mod-probe-output.txt). It imports the four unmodified `outbound` files (only `.js` import suffixes changed to `.ts`) and runs 51 lines through the same decision as `register.ts`. It starts no Claude Code process, makes no network request, and executes none of the commands. Run with Node 24.14.1 on Windows, November 7, 2026.
+[^5]: curl project, [command-line manual](https://curl.se/docs/manpage.html), for `-A, --user-agent` and `-u, --user`.
+[^6]: Wikimedia Foundation, [User-Agent Policy](https://foundation.wikimedia.org/wiki/Policy:Wikimedia_Foundation_User-Agent_Policy). Asks bots to supply "some way of contacting you, the operator", and accepts an email address, a website or a wiki account.
