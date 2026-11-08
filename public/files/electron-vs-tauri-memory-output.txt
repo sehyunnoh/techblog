@@ -1,0 +1,22 @@
+# Results, Windows 11 10.0.26300, Electron 45.2.3, Tauri 2 (rustc 1.99.1), WebView2 runtime 157.0.4341.42, 2026-11-08
+# 5 runs each, 20 s settle after launch. Electron block first, Tauri block second.
+# The first Tauri batch was discarded: the binary was a console app and spawned conhost.exe. Rebuilt with windows_subsystem=windows and re-run.
+
+app      run processes private_ws_mb working_set_mb private_bytes_mb
+---      --- --------- ------------- -------------- ----------------
+electron   1         4         107.4          347.4            157.1
+electron   2         4         103.3          334.7            153.2
+electron   3         4          99.8          328.6            150.5
+electron   4         4         103.3          331.9              153
+electron   5         4          99.6          328.2              149
+electron: median private working set = 103.3 MB (4 processes)
+
+﻿
+app   run processes private_ws_mb working_set_mb private_bytes_mb
+---   --- --------- ------------- -------------- ----------------
+tauri   1         7         107.5          387.6            166.3
+tauri   2         7           109          389.4            166.8
+tauri   3         7           108          388.2            165.6
+tauri   4         7         105.6          384.4            163.3
+tauri   5         7         108.1          386.4            165.9
+tauri: median private working set = 108 MB (7 processes)

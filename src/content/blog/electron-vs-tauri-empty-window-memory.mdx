@@ -1,0 +1,144 @@
+---
+title: 'Swapping Electron for Tauri Saved No Memory: 103 MB vs 108 MB for an Empty Window'
+description: 'Discord says its Rust client uses 70% less RAM than Electron. I built the same page in bare Electron and Tauri, and the web shell alone costs about 100 MB either way.'
+pubDate: 2026-11-08
+tags: ['benchmark', 'rust', 'frontend', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+
+This week Discord showed an early build of a new Windows client that is not Electron. It is written in Rust on GPUI, the UI framework from the Zed editor, and a Task Manager screenshot reportedly shows it at 290.2 MB with two accounts signed in.[^1] A tech site worked that out to roughly 70% less than the "under 1 GB" a Discord employee once gave for the current app, and the Hacker News thread about it passed 340 points.[^1][^2]
+
+The comparison is soft. The 70% sets a number from one early build against a remembered sentence, not against the Electron app measured the same way. But it raised a question I could actually test on this machine: how much of an Electron app's memory is Electron? If most of it is the shell, then moving to Tauri, which uses the operating system's web view instead of bundling Chromium, should win a lot. So I built the same page twice and measured.
+
+It did not win anything.
+
+## The setup
+
+Both apps load one static HTML file: a dark background and a list of 500 short text rows, built by a ten-line script. There is no framework and no network access. The Electron app is a four-line `main.js` that opens a window on Electron 45.2.3. The Tauri app is a four-line `main.rs` on Tauri 2.12.5, built with `cargo build --release`, which on Windows renders through Microsoft's WebView2 runtime (157.0.4341.42 here).[^3] Every source file is in the linked listing.[^5]
+
+I launched each app, waited 20 seconds, then read memory for the app's whole process tree, five times per app. Everything ran on one Windows 11 machine with the WebView2 runtime already installed.
+
+Three numbers come out of each run, and they matter later:
+
+- **Private working set** is the part of an app's RAM that belongs only to it. It is what Task Manager's Memory column shows.
+- **Working set** also counts pages shared with other processes, such as DLLs mapped into several of them.
+- **Private bytes** is memory the process has committed, whether or not it is resident right now.
+
+<Mermaid
+  caption="What the two empty apps look like in the process list. Tauri does not run a browser inside its own process. It asks WebView2 to start one, and that is the same multi-process Chromium design Electron ships itself."
+  label="Two process trees. Electron: one main process with a GPU process, a utility process and a renderer process under it, four in total. Tauri: the bench-tauri host process with a WebView2 browser process under it, which in turn has a GPU process, two utility processes, a renderer and a crash handler, seven in total."
+  code={`
+flowchart LR
+  subgraph E["Electron 45: 4 processes"]
+    em["main"] --> eg["gpu"]
+    em --> eu["utility"]
+    em --> er["renderer"]
+  end
+  subgraph T["Tauri 2 on WebView2: 7 processes"]
+    th["bench-tauri.exe (host)"] --> tb["WebView2 browser"]
+    tb --> tg["gpu"]
+    tb --> tu1["utility"]
+    tb --> tu2["utility"]
+    tb --> tr["renderer"]
+    tb --> tc["crash handler"]
+  end
+`}
+/>
+
+## The result: a tie, and Tauri slightly behind
+
+The medians of five runs:
+
+<Chart
+  type="bar"
+  caption="Median of five runs, empty page of 500 rows, 20 seconds after launch. Tauri is a few percent higher than Electron on all three memory measures."
+  label="Grouped bar chart in megabytes. Private working set: Electron 103.3, Tauri 108.0. Private bytes: Electron 153.0, Tauri 165.9. Working set: Electron 331.9, Tauri 387.6."
+  labels={['Private working set', 'Private bytes', 'Working set']}
+  series={[
+    { name: 'Electron 45', data: [103.3, 153.0, 331.9] },
+    { name: 'Tauri 2 (WebView2)', data: [108.0, 165.9, 387.6] },
+  ]}
+  yTitle="MB"
+  format="plain"
+/>
+
+On the number Task Manager shows, Tauri used 4.5% more than Electron. On private bytes it was 8.4% more, and on total working set 16.8% more. The runs inside each group stay within about 8 MB of each other, so the gap on private working set is small enough that I would call it a tie. The working-set gap is more consistent, with every Tauri run above every Electron run.
+
+The reason is in the process list. Tauri's Rust host process is tiny, but it does not remove the browser. WebView2 starts its own browser process, a GPU process, a renderer and helpers, and the Microsoft documentation says that is deliberately the same process model as Edge.[^4] You trade Electron's bundled copy of Chromium for the system's copy of Chromium. The copy changes owner and the processes stay.
+
+I also took a per-process snapshot in a single run of each, grouped by role.
+
+<Chart
+  type="bar"
+  stacked
+  caption="Private working set by process role, one run each. Renderer and utility processes cost about the same in both. Tauri pays more for its host and the WebView2 browser process, and less for the GPU process."
+  label="Stacked bar chart in megabytes. Electron: renderer 15.3, GPU 60.4, utility 7.4, main or host 24.7, total 107.8. Tauri: renderer 14.0, GPU 44.9, utility 10.0, host plus browser process plus crash handler 37.3, total 106.2."
+  labels={['Electron 45', 'Tauri 2']}
+  series={[
+    { name: 'Renderer', data: [15.3, 14.0] },
+    { name: 'GPU', data: [60.4, 44.9] },
+    { name: 'Utility', data: [7.4, 10.0] },
+    { name: 'Main, host and helpers', data: [24.7, 37.3] },
+  ]}
+  yTitle="MB"
+  format="plain"
+/>
+
+One caveat about that chart: the Tauri row of this particular run included a stray `conhost.exe` of about 1.1 MB, which I explain below. Its totals still land within 2 MB of the medians above, so I trust the shape, but I would not read anything into a few megabytes.
+
+## Where Tauri does save: disk, not RAM
+
+The honest win is size on disk. The Tauri executable is 5.5 MiB. Electron's `electron.exe` alone is 238.3 MiB, and the Electron distribution folder, with its resources and locales, is 356.8 MiB.
+
+That is not the whole comparison, though. The WebView2 runtime that Tauri leans on is 877.8 MiB on this machine.[^5] The difference is that Windows 11 normally ships with it and WebView2 apps share one copy, so your app does not carry it. If you can count on the runtime being present, your installer is tiny. If you cannot, you either bundle a bootstrapper or accept a download.
+
+Memory is a different story. Shared code pages help a little with the total working set, which is the number that goes up for Tauri here, but they do not shrink the part that belongs to your process group.
+
+## What this does and does not say about Discord
+
+Here is the useful reading, with the inference marked as such.
+
+A bare web shell costs about 100 MB of private working set on Windows, in this test, whether it is Electron or Tauri. Discord's own Electron app was reported at "under 1 GB" by an employee, and 1 to 2 GB on the article author's machines.[^1] If those figures are right, the shell is perhaps a tenth of it. The other 900 MB or more is the application: its JavaScript heap, cached messages and images, decoded media, and whatever the renderer keeps alive. That is my inference, not something I measured on Discord, whose app I did not test.
+
+It follows that moving Discord from Electron to Tauri would not have produced a 70% cut. The reported Rust client avoids that problem differently, since GPUI draws its own UI on the GPU and has no web view at all in the main window.[^1] A 290 MB result from that design could be real. It would come from not having the web engine and from how the app was rewritten, not from the framework swap people usually imagine when they say "kill Electron".
+
+I did not build the GPUI side. That is the missing third bar, and without it this post cannot confirm or refute the 290 MB number.
+
+## The metric changes the answer more than the framework
+
+The most striking thing in my data is not the Tauri result. It is how far one empty Electron app moves depending on which memory column you read:
+
+- private working set: 103.3 MB
+- private bytes: 153.0 MB
+- working set: 331.9 MB
+
+That is a factor of 3.2 between the lowest and highest, for the same window at the same moment. A first smoke run, which I made after only 10 seconds of settling, showed 80.7 MB of private working set, so waiting time also moves it by more than a fifth.
+
+The 70% claim compares a Task Manager value for the Rust app, taken from an early build.[^1] I do not know which column the Electron "under 1 GB" figure used, or when in the session it was read. If one side was a summed working set and the other a private working set, the metric difference alone could account for a chunk of the gap, before any engineering. That is a hypothesis, and the reports give no way to settle it.
+
+## Limits of my test
+
+- **A page that does nothing.** Real apps put weight in the renderer. A chat client with long history, images and a WebSocket will look nothing like 500 text rows. Nothing here says Tauri cannot be lighter than Electron on a heavy app. It only says the shell is not where the saving comes from.
+- **Windows and one WebView2 version.** On macOS and Linux Tauri uses different web views with different process layouts, and those numbers could differ.
+- **One machine, five runs per app, one 20-second snapshot.** The spread inside each group was about 8 MB for private working set. The Tauri medians come from a rebuilt binary, because my first build was a console app that started an extra `conhost.exe`. I discarded those runs and switched the binary to the GUI subsystem before the numbers above.
+- **Default settings on both sides.** Electron has flags, such as turning off GPU acceleration, that change the numbers, and I did not tune either app.
+- **No startup timing.** The "no loading screen" part of the Discord demo is a separate claim, and I did not measure it.
+
+## Takeaways
+
+- Tauri on Windows is not a lighter browser. It borrows the system's Chromium, and in my test an empty page cost 108.0 MB against Electron's 103.3 MB of private working set.
+- Tauri's real advantage here is the install size: a 5.5 MiB executable against a 357 MiB folder, provided the WebView2 runtime is present.
+- When someone reports a memory cut, ask which column and at what moment. For the same empty Electron window I got 103, 153 and 332 MB depending on the column.
+- The Discord figure of 290 MB, if it holds up, is more plausibly an effect of dropping the web engine and rewriting the app than of choosing a lighter wrapper. I have not tested that and the client is not public yet.
+- To compare frameworks honestly, put your own real screen in each one. An empty window is only a floor.
+
+## References
+
+[^1]: Windows Latest, [Every Windows 11 app should kill Electron, and Discord just showed why](https://www.windowslatest.com/2026/11/06/every-windows-11-app-should-kill-electron-and-discord-just-showed-why-no-starting-screen-and-70-less-ram-even-with-two-accounts-signed-in/), November 6, 2026. Source of the Rust and GPUI details, the 290.2 MB figure, the "under 1 GB" employee quote and the author's own 1 to 2 GB observation. The article's 70% is its own calculation, and Discord has not published a like-for-like benchmark.
+[^2]: Hacker News, [discussion of the Windows Latest article](https://news.ycombinator.com/item?id=50403507), 345 points on November 7, 2026.
+[^3]: Tauri, [Architecture](https://v2.tauri.app/concept/architecture/). Tauri apps use the operating system's web view and "do not ship a runtime". The page defers to WRY for which web view is used per platform. The Windows choice of WebView2 is visible in the build, which compiled the `webview2-com` crate.
+[^4]: Microsoft, [Process model for WebView2 apps](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/process-model). The WebView2 Runtime uses the same process model as Microsoft Edge: one browser process, one or more renderer processes, and helpers such as the GPU process.
+[^5]: [electron-vs-tauri-memory.ps1](/files/electron-vs-tauri-memory.ps1), its [output](/files/electron-vs-tauri-memory-output.txt) and the [app sources](/files/electron-vs-tauri-apps.txt). Measured on November 8, 2026, Windows 11 (10.0.26300), Electron 45.2.3, Tauri 2.12.5 built with rustc 1.99.1, WebView2 Runtime 157.0.4341.42, Node 24.14.1. The per-role snapshot and the on-disk sizes were taken separately from the five-run medians, with a small inline PowerShell script that is not included.

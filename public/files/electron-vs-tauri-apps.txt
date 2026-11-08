@@ -1,0 +1,38 @@
+===== index.html (identical in both apps)
+<!doctype html><meta charset="utf-8"><title>bench</title>
+<style>body{font:14px system-ui;margin:0;background:#313338;color:#dbdee1}li{padding:4px 12px;list-style:none}</style>
+<ul id="l"></ul>
+<script>
+const l=document.getElementById('l');
+for(let i=0;i<500;i++){const e=document.createElement('li');e.textContent='user'+(i%17)+': message number '+i+' lorem ipsum dolor sit amet';l.appendChild(e);}
+</script>
+
+===== electron/main.js
+const {app,BrowserWindow}=require('electron');
+app.whenReady().then(()=>{const w=new BrowserWindow({width:900,height:700});w.loadFile('index.html');});
+app.on('window-all-closed',()=>app.quit());
+
+===== tauri/src/main.rs
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+fn main(){ tauri::Builder::default().run(tauri::generate_context!()).expect("run"); }
+
+===== tauri/Cargo.toml
+[package]
+name = "bench-tauri"
+version = "0.1.0"
+edition = "2021"
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+[dependencies]
+tauri = { version = "2", features = [] }
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+
+===== tauri/tauri.conf.json
+{"productName":"bench-tauri","version":"0.1.0","identifier":"dev.lleg.bench",
+"build":{"frontendDist":"./ui"},
+"app":{"windows":[{"title":"bench","width":900,"height":700}],"security":{"csp":null}},
+"bundle":{"active":false,"icon":["icons/icon.ico"]}}
