@@ -15,7 +15,7 @@ npm run preview   # serve the built dist/ locally
 npm run check     # astro check (type-checks .astro/.mdx against src/content.config.ts)
 ```
 
-There is no lint script and no test runner in this repo. Before publishing a post, run `npm run check` and `npm run build`, then actually load the page in a browser in both light and dark theme, not just once either has passed — several past defects (a chart plugin bleeding across chart types, a clipped chart label, Mermaid anchors shifting after client-side render, doubled smart quotes) only showed up visually and passed both `check` and `build` cleanly.
+There is no lint script and no test runner in this repo. Before publishing a post, run `npm run check` and `npm run build`, then actually load the page in a browser (the Claude in Chrome extension, `mcp__claude-in-chrome__*`) in both light and dark theme, not just once either has passed — several past defects (a chart plugin bleeding across chart types, a clipped chart label, Mermaid anchors shifting after client-side render, doubled smart quotes) only showed up visually and passed both `check` and `build` cleanly.
 
 ## Content architecture
 
