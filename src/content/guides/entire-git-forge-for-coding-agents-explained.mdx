@@ -1,0 +1,92 @@
+---
+title: 'Entire Explained: A Git Forge and CLI That Record Why a Coding Agent Wrote Your Code'
+description: 'Entire pairs a Git forge with an open source CLI that stores agent sessions as checkpoints next to your commits. What it does, how the storage works, and the privacy catch.'
+pubDate: 2026-11-08
+updatedDate: 2026-11-08
+tags: ['ai', 'devops', 'tutorial']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+
+"Git for coding agents" is how this product gets described in conversation, but Entire does not call itself that. Its homepage says "The Git forge for agent-human collaboration."[^1] A forge is a hosting and collaboration site, the category GitHub and GitLab belong to. So the pitch is closer to "a GitHub rebuilt around the assumption that agents write much of the code."
+
+That sentence covers two different things, and mixing them up is the main source of confusion. There is a hosted platform at entire.com, and there is an open source command line tool, `entire`, that you can use inside an ordinary Git repository without moving anything.[^2] This guide is mostly about the second one, because it is the part you can try in five minutes and the part whose behavior is documented in detail.
+
+One caveat up front. Most of the numbers on the homepage are the vendor's own, and I have not reproduced any of them. I flag which claims are which below.
+
+## The problem it targets
+
+When an agent writes a change and you commit it, Git keeps the diff and your commit message. The prompts, the dead ends, the tool calls and the reasoning that produced the diff are gone once the terminal closes. Reviewing the code six weeks later, you can see what changed but not what the agent was asked to do.
+
+Entire's answer is to save that context as a first-class object tied to the commit. Its docs define a checkpoint as "the code change paired with the prompts, responses, and tool calls behind it."[^3] The launch post adds token usage and line-level attribution of agent edits versus developer edits to the list.[^4]
+
+## How the CLI captures a session
+
+Capture has two halves. Agent hooks collect the session context while the agent works, and Git hooks link that context to a commit when you make one.[^5] You turn it on per repository:
+
+```
+entire enable --agent claude-code
+entire status
+```
+
+The agent name above is an example. `entire agent list` shows what your version supports, and the README names Claude Code, Codex, Cursor, Copilot CLI, OpenCode, Antigravity, Factory AI Droid and Pi among others.[^2][^5]
+
+Then you work normally. When you run `git commit` and Entire sees recent agent activity, it asks whether to link the commit. Answering yes creates the checkpoint and adds an `Entire-Checkpoint` trailer to the commit message. Answering "always" saves that choice, and you can also set `"commit_linking": "always"` in `.entire/settings.json` for a whole team.[^5]
+
+<Mermaid
+  caption="Two kinds of storage. Raw snapshots stay local until a commit turns them into a redacted, permanent checkpoint that rides along with git push."
+  label="Flow diagram. The agent works and hooks save raw snapshots to local shadow branches. When the developer commits, a checkpoint is written with redaction and a trailer links the commit to it. A git push sends the redacted checkpoint to the remote. The shadow branches never leave the machine."
+  code={`
+flowchart TD
+  A["Agent works in your repo"] -->|agent hooks| S["Shadow branch<br/>raw snapshots, stays local"]
+  A --> C["You run git commit"]
+  C -->|git hook| K["Redacted checkpoint written<br/>commit gets an Entire-Checkpoint trailer"]
+  K -->|git push| R[("Your remote")]
+`}
+/>
+
+## Where the data actually lives
+
+This is the part worth understanding, because it decides who can read what.
+
+Before a commit, Entire keeps temporary data on local "shadow branches" named `entire/<commit>-<worktree>`. These hold raw working-tree snapshots, and the security docs say they stay local and are not pushed.[^6] That is also where rewind points come from, which is how the launch post can say you get them without temporary commits showing up in `git log` or in pull requests.[^4]
+
+After a commit, the checkpoint is written into your repository as ordinary Git objects. For repositories enabled with CLI 0.10.0 or later the default location is `refs/entire/checkpoints/<shard>/<id>`. Older repositories, or ones using `--checkpoint-backend branch`, use a branch called `entire/checkpoints/v1`.[^6] Your working branches get no extra commits.
+
+The trailer is what links the two sides. Because it is an ID and not a commit hash, the launch post says the link can survive rebase, amend, squash and cherry-pick.[^4] I did not test that claim.
+
+## The privacy catch
+
+Session transcripts are pushed to your Git remote along with your code. The README's warning is blunt: if that repository is public, anyone can read them.[^2] The security docs say the same thing and add that anyone with read access to the repository can read its checkpoints.[^6]
+
+Entire redacts secrets before writing, but the docs call it a safety net and not a guarantee. Detection is best effort, short or predictable secrets can get through, filenames and binary data are not scanned, and externalized image assets are not scanned at all.[^6] Deleting one checkpoint with `entire checkpoint delete` does not help much either, since other checkpoints from the same session still contain the full transcript.[^6]
+
+Two documented ways to reduce exposure:
+
+- Send transcripts to a separate private repository with `entire configure --local --checkpoint-remote`.[^2]
+- Turn off pushing sessions entirely with `--skip-push-sessions`.[^2]
+
+If you keep a public repository and use coding agents, decide this before running `entire enable`, not after the first push.
+
+## The hosted side
+
+The platform adds features on top of the CLI. The homepage lists distributed Git hosting, "Trails" as a replacement for the pull request, search across code, commits and sessions, and a shared memory built from repos and sessions.[^1]
+
+The page also carries performance claims. It reports 418 pushes per second for Entire against 4.7 for GitHub, summarized as "up to 89x faster", and says agentic search answered 81 of 90 history questions against 70 without it.[^1] Those are the vendor's measurements. The benchmark code is published as `forgemark`, which means you can check the method, but I have not rerun it.[^1]
+
+## Should you try it?
+
+It makes sense if you review agent-written code often and keep losing the reason behind a change, or if a team wants to see how others prompt. The CLI is MIT licensed and adds data to Git rather than replacing anything, which makes the trial cheap.[^2]
+
+It makes less sense on a public repository you cannot afford to leak from, or if you only run one-off agent sessions you never revisit. And the 89x push figure matters only if push throughput is your actual bottleneck, which for most teams it is not.
+
+The docs I read did not cover the commands for browsing and rewinding checkpoints in detail, so check the CLI reference[^7] against your installed version before relying on specific command names.
+
+[^1]: Entire, [homepage](https://entire.com/). Source of the forge description, Trails, search, memory, the push-rate and search figures, and the `forgemark` repository. Vendor claims, not independently reproduced.
+[^2]: [entireio/cli README on GitHub](https://github.com/entireio/cli). MIT license, supported agents, install and quickstart commands, and the public-repository warning with its two mitigations.
+[^3]: Entire docs, [CLI overview](https://docs.entire.com/cli/overview). The definition of a checkpoint.
+[^4]: Rizèl Scarlett, [The Entire CLI: how it works and where it's headed](https://entire.com/blog/the-entire-cli-how-it-works-and-where-its-headed), published March 25, 2026. Checkpoint contents, trailer survival claim, temporary versus permanent storage.
+[^5]: Entire docs, [Capture checkpoints](https://docs.entire.com/guides/checkpoints/capture-checkpoints.md). Agent hooks plus Git hooks, `entire enable`, the link prompt and `commit_linking`.
+[^6]: Entire docs, [Security and privacy](https://docs.entire.com/security.md). Ref and branch names, shadow branches, redaction layers and limits, what leaves the machine.
+[^7]: Entire docs, [CLI reference](https://docs.entire.com/cli-reference).
