@@ -1,0 +1,104 @@
+---
+title: 'Conductor vs Orchestrator in AI Coding: What the Terms Mean and What to Actually Study'
+description: 'Conductor is not a standard AI term. In one widely shared essay it means working with a single agent, and orchestrator means running many. This guide explains both and what to learn.'
+pubDate: 2026-11-08
+updatedDate: 2026-11-08
+tags: ['ai', 'llm', 'architecture', 'tutorial']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+
+If a colleague suggests studying "the conductor part" of AI, they are probably borrowing a metaphor, not naming a standard technique. There is no specification called Conductor and no exam for it. But the metaphor points at something real and fairly practical: how your job changes when you stop writing every line and start directing AI agents.
+
+One caveat before the details. As far as I can tell, the version of this that most people mean comes from a single essay, and the rest of this guide leans on it. It is one author's framing, a popular one, and not an industry definition.
+
+## The short version
+
+- **Conductor** means working closely with one AI agent at a time, in a live back-and-forth. You trigger each step and look at the result right away.
+- **Orchestrator** means setting goals for several agents that run in parallel in the background, then reviewing what they hand back, usually as pull requests.
+- The difference is not the model. It is how many agents you run, how much each one is allowed to do on its own, and when you check the work.
+- The word **Conductor** is also the name of a product, which causes most of the confusion. More on that below.
+
+## Where the terms come from
+
+Addy Osmani published "The future of agentic coding: conductors to orchestrators" on January 2, 2026, and O'Reilly Radar republished it.[^1][^2] The essay describes two modes of working with coding agents and argues that engineers will move between them.
+
+His definition of the first mode is "working closely with a single AI agent on a specific task, much like a conductor guiding a soloist through a performance." The second is "an Orchestrator oversees the entire symphony of multiple AI agents working in parallel on different parts of a project."[^1]
+
+Notice the slight inversion if you know music. A real conductor leads a whole orchestra. In this essay the "conductor" has a soloist and the "orchestrator" has the symphony. It is easy to get this backwards, so if your colleague uses the words, check which one they mean by asking how many agents are involved, not by trusting the word.
+
+<Mermaid
+  caption="The same human with the two modes. In conductor mode you stay inside a tight loop with one agent. In orchestrator mode you write the task, step away, and come back to review."
+  label="Two flow diagrams. Conductor mode: the human gives an instruction to one agent, the agent acts, the human reviews at once, and the loop repeats. Orchestrator mode: the human splits work into tasks, three agents run in parallel in the background, each opens a pull request, and the human reviews and merges them."
+  code={`
+flowchart LR
+  subgraph C["Conductor: one agent, live"]
+    c1["You give an instruction"] --> c2["Agent acts"]
+    c2 --> c3["You review right away"]
+    c3 --> c1
+  end
+  subgraph O["Orchestrator: many agents, background"]
+    o1["You split the work<br/>and write the tasks"] --> a1["Agent A"]
+    o1 --> a2["Agent B"]
+    o1 --> a3["Agent C"]
+    a1 --> r["Pull requests"]
+    a2 --> r
+    a3 --> r
+    r --> o2["You review and merge"]
+  end
+`}
+/>
+
+## The same feature, both ways
+
+Osmani's own example is a feature that touches the frontend, the backend and the tests.[^1]
+
+As a conductor, you work through it in order: backend first, then frontend, then tests, staying in the session the whole time. As an orchestrator, you give the backend to one agent, the frontend to a second and the tests to a third, each with its own prompt or issue. They run at the same time, and you come back to roughly three pull requests to review and integrate. If the tests no longer match after the other two land, you ask the third agent to adjust.
+
+The tools he lists follow the same split. Claude Code, Gemini CLI and Cursor's chat are conductor-style. GitHub's Copilot coding agent, Google's Jules, OpenAI's Codex cloud agent and Cursor's background agents are orchestrator-style, since you hand them a task and they open a pull request later.[^1]
+
+## Three things called "conductor" or "orchestrator"
+
+The words show up at different levels, and mixing them up is the main source of muddled conversations.
+
+1. **A way of working (Osmani's sense).** Your role as a human. This is probably what your colleague means.
+2. **A software pattern.** "Orchestrator-worker" is a design where a lead agent plans and hands pieces to subagents that run in parallel. Anthropic described it in its multi-agent research system: a lead agent "coordinates the process while delegating to specialized subagents."[^3] Here the orchestrator is a program, not you.
+3. **A product named Conductor.** A Mac app from Melty Labs that runs several Claude Code sessions at once, each in its own git worktree, with a place to review diffs and open pull requests.[^4] Osmani's essay itself lists it among the orchestrator-style tools, so the app named Conductor is a tool for orchestrator mode. That is the opposite of what the word suggests.
+
+For a comparison of tools in the third group, see the [Orca vs Paseo vs herdr guide](/guides/orca-vs-paseo-vs-herdr-compared/).
+
+## When more agents is the wrong answer
+
+Orchestrating looks free and is not. Anthropic reports that agents use about four times the tokens of a chat, and multi-agent systems about fifteen times. Its multi-agent setup beat a single agent by 90.2% on an internal research evaluation, but the same post says tasks that need all agents to share one context, or that have many dependencies between agents, are a poor fit, and that most coding tasks have fewer parallelizable pieces than research.[^3]
+
+I measured a smaller version of this cost on this blog: a subagent burns 34,172 tokens before it reads a file, and splitting one job across five came out at 4.85 times the tokens for a 1.79 times speedup.[^5] Those numbers are for one setup, so do not carry them over as a rule. The shape is the point. Parallel agents buy time and spend tokens, and the trade is only good when the pieces are truly independent.
+
+So the sensible default is not "always orchestrate". Use conductor mode for a tangled change in one area of the code, where you need to see each step. Use orchestrator mode when you can write down three separate tasks that will not collide.
+
+## What to actually study
+
+Osmani's list of the skills this shift needs is a reasonable study plan, and each item maps to something you can practice this week.[^1]
+
+- **Writing specs and acceptance tests.** Output quality depends on how clearly the task and the success condition are written. Practice turning a vague ticket into a task an agent cannot misread.
+- **Isolating work.** Agents touching the same files need separate workspaces, clear task boundaries and a plan for merging. Git worktrees are the usual mechanism.
+- **Reviewing at volume.** The review loop is the bottleneck. He warns that it "is going to need work if all this code is not to be slop."
+- **Context and handoffs.** Agents need shared knowledge of the repository, the build and the conventions, or they become silos.
+- **Debugging a stalled agent.** Know how to use checkpoints and rollbacks, watch cost, and drop back into conductor mode to fix a problem by hand.
+- **Staying accountable.** The human still owns licensing, security and the result. His rule is to trust but verify.
+
+If you want a first exercise for a study group, take one small feature, do it once as a conductor, then split it into three issues and do it again as an orchestrator. Compare the time, the tokens and how long the review took. That comparison teaches more than any reading.
+
+## What to be careful about
+
+- **The terms are one author's framing.** I found no formal definition and no standards body behind them. Treat them as a vocabulary for a conversation, and expect other people to use "orchestrator" for the software pattern instead.
+- **The essay is a forecast.** Osmani says he expects the modes to coexist and writes that he wants to stress that not all or most code will be agent-driven within a year or two.[^1] Read the rest of it with that in mind.
+- **My comparison of tools is only as good as the essay's list.** It was written on January 2, 2026, and products in this area change fast. Check the current features before choosing one.
+
+## References
+
+[^1]: Addy Osmani, [The future of agentic coding: conductors to orchestrators](https://addyosmani.com/blog/future-agentic-coding/), January 2, 2026. Source of both definitions, the quotes, the frontend, backend and tests example, the tool lists and the skills list.
+[^2]: O'Reilly Radar, [Conductors to Orchestrators: The Future of Agentic Coding](https://www.oreilly.com/radar/conductors-to-orchestrators-the-future-of-agentic-coding/), a republication of the same essay.
+[^3]: Anthropic Engineering, [How we built our multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system), June 13, 2025. The orchestrator-worker description, the 4x and 15x token figures, the 90.2% result and the stated limits.
+[^4]: Conductor (Melty Labs), [Run Claude Code with git worktrees](https://www.conductor.build/docs/guides/git-worktrees/run-claude-code-with-git-worktrees). Vendor documentation, so the framing is the vendor's.
+[^5]: This blog, [Your Subagent Costs 34,000 Tokens Before It Reads a File](/posts/subagent-costs-34000-tokens), September 19, 2026.
