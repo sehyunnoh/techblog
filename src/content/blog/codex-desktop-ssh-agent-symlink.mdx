@@ -1,0 +1,165 @@
+---
+title: "HN Cited a Closed PR as Proof Codex Forwards Your SSH Agent. The Feature Is Real Anyway"
+description: "A 211-point HN post says Codex Desktop forwards your SSH agent, citing a pull request that never merged. I traced the claim and rebuilt the mechanism on Linux to see where it breaks."
+pubDate: 2026-11-10
+tags: ['ai', 'security', 'devops', 'deep-dive']
+draft: false
+---
+
+import Figure from '../../components/Figure.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+On November 9 a Hacker News post titled "ChatGPT Desktop forwards your SSH agent to remote machines" collected 211 points.[^1] Its text was two sentences and a link. The agent on the remote machine "can authenticate using your local SSH credentials", the author wrote, "which means it can push to your private repos on GitHub". The link, labeled "Proof", pointed at a review comment on openai/codex pull request #28131.
+
+I opened it expecting a merged feature. It is a pull request that was closed unmerged on June 29 by a bot, after two weeks without activity.[^2] So the cited proof does not prove what the post says. What surprised me is that the claim turned out to be mostly right anyway, through a different door, and that the real mechanism has a flaw nobody on that thread mentioned.
+
+## A short vocabulary lesson
+
+If you already use `ssh -A`, skip this part.
+
+An **SSH agent** is a small background program that holds your private keys and signs login challenges on request. Programs talk to it through a **Unix socket**, a special file whose path sits in the environment variable `SSH_AUTH_SOCK`. **Agent forwarding** extends that socket across an SSH connection: when you log into a server with `ForwardAgent yes` in your `~/.ssh/config`, sshd creates a new socket on the server (something like `/tmp/ssh-AbC123/agent.4711`) and relays every request back to the agent on your laptop. The private key never leaves your machine, but anything on the server that can reach that socket can ask your agent to sign things while the connection lasts. The OpenSSH manual says as much: agent forwarding "should be enabled with caution", because users who can bypass file permissions on the remote host can reach your local agent through it.[^3]
+
+Two properties of that forwarded socket matter for everything below. It is created per connection, with a fresh random path. And it disappears when the connection ends.
+
+## What the cited comment actually says
+
+The pull request, titled "Refresh SSH agent for app-server proxy", was opened on June 13.[^2] Its body describes a specific bug. Codex's remote mode starts a long-lived `codex app-server` on the remote machine, and your desktop app attaches to it through a short-lived `codex app-server proxy` process, one per SSH connection. The app-server inherits `SSH_AUTH_SOCK` from whatever SSH session launched it. Later that session ends, its socket is deleted, and the app-server keeps pointing at a path that no longer exists. Every `git push` over SSH that Codex runs after that fails.
+
+That is the bug the PR was written to fix, and it matches an older issue, #22567, whose reporter traced a deleted `SSH_AUTH_SOCK` in the app-server's `/proc/<pid>/environ` while a live forwarded socket sat unused next to it.[^4]
+
+The pull request's fix was an opt-in `--forward-ssh-agent` flag on the proxy. On each connection the proxy would point a stable symlink, `forwarded-ssh-agent.sock`, at the connection's current socket. The app-server would be launched once with `SSH_AUTH_SOCK` set to the symlink path, and a symlink, unlike a socket path inherited from a dead session, can be repointed later.
+
+The "Proof" link goes to a reply from the PR's author, after an automated reviewer had raised two concerns:
+
+> Codex app will launch the app server with the following so we should be good
+> `SSH_AUTH_SOCK=~/.codex/app-server-control/forwarded-ssh-agent.sock nohup codex app-server --listen unix://`
+
+That is a statement from the person who wrote the PR about what the closed-source desktop app does. It is a reasonable thing to believe, but it is not code anyone can read, and it sits under a PR that never merged. As evidence for the HN title it is thin. I would not have cited it, and the link does not let you check anything.
+
+<Mermaid
+  caption="Without a link, the app-server keeps the socket path of the session that launched it, and that path dies with the session."
+  label="Flowchart. SSH session A launches the app-server with SSH_AUTH_SOCK set to session A's own socket. When session A ends the socket is deleted, and the app-server's path dangles."
+  code={`
+flowchart LR
+  S1["SSH session A<br/>socket /tmp/ssh-A/agent"] -->|"launches"| AS1["app-server<br/>SSH_AUTH_SOCK=/tmp/ssh-A/agent"]
+  S1 -.->|"session ends,<br/>socket deleted"| X["path now dangling"]
+  AS1 --> X
+`}
+/>
+
+<Mermaid
+  caption="With a stable link, the app-server's path never changes. Each new connection repoints the link instead."
+  label="Flowchart. The app-server holds the stable path forwarded-ssh-agent.sock. Each new proxy connection repoints that symlink at its own live agent socket."
+  code={`
+flowchart LR
+  AS2["app-server<br/>SSH_AUTH_SOCK=forwarded-ssh-agent.sock"] --> L["forwarded-ssh-agent.sock<br/>(symlink)"]
+  L --> LIVE["agent socket of the<br/>current connection"]
+  P["each new proxy connection"] -->|"repoints the link"| L
+`}
+/>
+
+## It is not only a proposal
+
+Searching the repository for related reports turned up two issues that quote the desktop app's own generated commands, and they agree with the PR author's description.
+
+Issue #52026, opened October 8, points out a typo in the bootstrap command Codex Desktop generates for SSH remotes: the final launch line uses `${CODEX_HOME:-$HOME/.code}/app-server-control/forwarded-ssh-agent.sock`, with `.code` where every other line says `.codex`.[^5] The reporter notes the typo is usually masked because `CODEX_HOME` is exported earlier in the script. A would-be contributor then checked the public repository, found no such generator in it, and concluded the code lives in the private desktop codebase. That detail tells us the thing is shipped in the desktop app, and that nobody outside the company can read it.
+
+Issue #59694, opened November 5, goes further and quotes the logic itself:[^6]
+
+```sh
+if [ -S "${SSH_AUTH_SOCK:-}" ]; then
+  ln -sfn -- "$SSH_AUTH_SOCK" \
+    "${CODEX_HOME:-$HOME/.codex}/app-server-control/forwarded-ssh-agent.sock"
+elif [ ! -S "${CODEX_HOME:-$HOME/.codex}/app-server-control/forwarded-ssh-agent.sock" ]; then
+  rm -f -- "${CODEX_HOME:-$HOME/.codex}/app-server-control/forwarded-ssh-agent.sock"
+fi
+```
+
+The reporter says they read this from the installed Windows package, version 26.1023.6123.0, and found the same logic by static inspection in 26.1027.3384.0. I did not install the desktop app, so I have not seen this code myself. Two independent issue reports quoting the same path name is decent support, not proof, and I will mark the difference where it matters below.
+
+So the corrected claim is this: the Codex desktop app, when it connects to a remote host over SSH, relays whatever agent socket that SSH connection has into a stable link that a shared, long-lived server uses. The HN title is right. The evidence attached to it was wrong.
+
+One qualification the HN framing leaves out. This does not conjure an agent out of nowhere. The snippet reads `$SSH_AUTH_SOCK` as seen by the connection, and that variable only holds a forwarded agent if your SSH configuration asked for one. The reporter of #22567 had `ForwardAgent yes` for that host.[^4] Without it, the first branch of the snippet does not fire. I could not check whether the app ever forces the option on, and nothing I found says it does.
+
+## Rebuilding it on Linux
+
+The shipped logic is short enough to test directly. I copied the `if` block above into a script (variables inlined, path shortened), started real `ssh-agent` processes under WSL 2 with OpenSSH 9.6p1, and modeled the long-lived app-server as a process that keeps whatever `SSH_AUTH_SOCK` it started with. "Connecting" means running the snippet with that connection's socket, and "disconnecting" means killing the agent and deleting its socket, which is what sshd does at the end of a session. The check in every case is `ssh-add -l` with a 3-second timeout.[^7]
+
+This models the logic from the issue, not the desktop app. The real thing has timing, process management and a proxy I did not run. What it does is isolate one question: given that snippet, what happens in each sequence of connections?
+
+| Scenario | Result |
+|---|---|
+| E0: app-server holds session A's own socket path; A ends, B connects | **Fails**: `No such file or directory` |
+| E1: app-server holds the link; A ends, B connects and refreshes the link | Works |
+| E2a: B connects while A is still working | Works, but the link now points at B's agent |
+| E2b: B disconnects while A is still connected | **Fails**: link dangles at B's deleted socket |
+| E3: B's socket exists but never answers | **Hangs**: no reply within 3 s |
+| E4a: a client with no agent connects while A is alive | Works, link is left alone |
+| E4b: A ends, then a client with no agent connects | Link is removed |
+
+E0 and E1 reproduce the original bug and show the link fixes it. That is the real value of the design, and it is why a sequence of reconnects from a single laptop should work. If you use one machine, the first of the two reports above is probably the only problem you will ever hit, and the link solves it.
+
+The interesting rows are E2 and E3.
+
+## Last writer wins
+
+The snippet has one rule: whoever connected most recently owns the link. That is fine with a single client. With two, it gets strange, and the trouble starts at an ordinary event, not at an attack.
+
+In E2, client A is mid-task, with a Git operation running through the shared app-server. Client B (your other laptop, say) connects to the same account and the same Codex home. The snippet repoints the link at B's socket, and A's session never ended. Nothing breaks yet, because B's agent is alive. But A's `git push` is now being signed by whatever B's agent holds.
+
+Then B goes to sleep or disconnects. B's socket is deleted, the link points at nothing, and nothing in the snippet repoints it at A, because A connected earlier and has no reason to run the snippet again. In my run, the very next probe failed with `No such file or directory`, while A's own agent, tested directly, was fine the whole time. The link only recovered when A happened to reconnect and run the snippet again.
+
+<Mermaid
+  caption="Sequence from experiment E2. Client A's agent stays healthy throughout; what changes is which socket the shared link points at."
+  label="Sequence diagram. Client A connects and the link points at A's socket. Client B connects and the link is repointed at B's socket. B disconnects and B's socket is deleted. The link now dangles and a Git push through the app-server fails, although A's own agent is healthy."
+  code={`
+sequenceDiagram
+  participant A as Client A (laptop 1)
+  participant B as Client B (laptop 2)
+  participant L as forwarded-ssh-agent.sock
+  participant S as app-server
+  A->>L: connect, link -> A's socket
+  S->>L: git push (signed by A's agent)
+  B->>L: connect, link -> B's socket
+  S->>L: git push (now signed by B's agent)
+  B--xL: disconnect, B's socket deleted
+  S->>L: git push (link dangles, FAIL)
+  Note over A: A never disconnected,<br/>A's agent is still healthy
+`}
+/>
+
+The automated reviewer on the closed PR had flagged a related case in June: the PR's own variant of the logic would let a second connection without an agent delete a link that was still serving another session.[^2] The desktop snippet handles that particular case better (my E4a shows the link survives a client with no agent while another is alive), but the same family of problem, one client's lifecycle breaking another's, remains for the case where both have agents.
+
+## A socket that exists is not a socket that works
+
+Experiment E3 is the one that matches issue #59694. The snippet's only liveness test is `[ -S path ]`, "is this a socket file". It cannot tell a live agent from a socket whose other end is stuck.
+
+To produce that state I started an agent, then froze it with `SIGSTOP`. The socket file stays, `[ -S ]` says true, the snippet repoints the link, and `ssh-add -l` through the link waits until my 3-second timeout fires. Meanwhile client A's agent, tested directly, answered immediately.
+
+The #59694 reporter saw the same shape on real hardware: a macOS laptop's forwarded socket existed but never answered, the link had been repointed to it, and `git ls-remote` through the shared path timed out while the Windows PC's own socket authenticated fine. The reporter says plainly that why the Mac's socket stayed silent is unknown, and that a minimal reproduction with controlled agents has not been run.[^6] My freeze is a stand-in for that, not a diagnosis. SIGSTOP is a crude way to make a socket go quiet; the real cause could be anything from a sleeping laptop to a stuck connection. What the experiment does show is that the snippet cannot tell the difference, whatever the cause.
+
+## What I did not check
+
+- I did not run the desktop app. Everything about its behavior comes from the PR thread and from two issues that quote its generated commands. If those quotes are wrong or out of date, my experiments model the wrong snippet.
+- I do not know what fixed #22567. It was closed as completed on July 30, with no linked merge that I could find. The stable link is my best guess for the fix, not a fact I confirmed.
+- I did not measure how often the two-client case happens. It needs two machines connecting to one account and one Codex home, which is a real setup (the #59694 reporter has it) but probably a minority one.
+- Both of my agents held the same key, so "works" in E2 does not show which agent signed. I used `readlink` to show where the link pointed. If your two laptops carry different keys, the effect is more visible: a push can succeed or fail depending on which laptop connected last.
+- On real Windows or macOS clients the socket behavior may differ. I ran everything inside Linux.
+
+## What to take from it
+
+- The HN headline holds up, but the linked proof does not. The cited PR was never merged, and the quoted statement about the desktop app is a claim, not code. The better evidence is the pair of issues that paste the generated commands.
+- Agent forwarding is the user's `ForwardAgent` setting at work, and Codex relays what it gets. If you do not want a remote Codex session near your keys, turn forwarding off for that host, or use a dedicated host entry with its own limited key.
+- A shared stable link fixes the dead-socket problem for one client and creates a last-writer-wins problem for two. If you connect two machines to the same remote account, expect git authentication to fail or be signed by the wrong machine when one of them leaves.
+- `[ -S file ]` checks that a file is a socket, not that anything answers on it. Any script that picks an agent socket should test it with `ssh-add -l` and a timeout.
+- The desktop code is closed source, so the next fix will arrive without a diff to read. Until then, `readlink` on the link tells you whose agent you are using.
+
+The script is [here](/files/codex-ssh-agent-link-demo.sh) and its output from my run is [here](/files/codex-ssh-agent-link-demo-output.txt). It needs a Linux shell with OpenSSH and `timeout`, and it creates everything in a temporary directory that it deletes at the end.
+
+[^1]: [ChatGPT Desktop forwards your SSH agent to remote machines](https://news.ycombinator.com/item?id=50422628), Hacker News, November 9, 2026, 211 points at the time I read it. The post links to a review comment on openai/codex#28131 as "Proof".
+[^2]: [openai/codex#28131, "Refresh SSH agent for app-server proxy"](https://github.com/openai/codex/pull/28131). Opened June 13, 2026, closed June 29 by an automated no-activity notice, never merged. Contains the author's reply about how the Codex app launches the app-server and two automated review comments, retrieved November 10, 2026.
+[^3]: `ssh_config(5)`, `ForwardAgent`, and `ssh-agent(1)`, as shipped in OpenSSH 9.6p1 (Ubuntu 24.04), checked in the manual pages on the machine used for the test.
+[^4]: [openai/codex#22567](https://github.com/openai/codex/issues/22567), "Codex App Remote SSH does not honor ForwardAgent from ~/.ssh/config, breaking docker buildx --ssh". Opened May 13, 2026, closed as completed July 30. The diagnosis of the stale `SSH_AUTH_SOCK` in the app-server's environment is from a comment on this issue.
+[^5]: [openai/codex#52026](https://github.com/openai/codex/issues/52026), "Desktop SSH bootstrap uses ~/.code typo for forwarded SSH agent fallback", opened October 8, 2026, still open when I read it.
+[^6]: [openai/codex#59694](https://github.com/openai/codex/issues/59694), "Remote SSH: one desktop client overwrites the shared SSH agent used by other clients", opened November 5, 2026. Source of the quoted snippet, app versions 26.1023.6123.0 and 26.1027.3384.0, and the observed hang. The reporter states a controlled reproduction has not been run.
+[^7]: Test script and output: `codex-ssh-agent-link-demo.sh` and `codex-ssh-agent-link-demo-output.txt`, run under WSL 2 (kernel 6.18.54.1) with OpenSSH 9.6p1. The `if` block is copied from issue #59694 with paths shortened.

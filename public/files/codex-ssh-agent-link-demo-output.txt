@@ -1,0 +1,28 @@
+== E0: before the link. app-server keeps the socket path of the session that started it
+  app-server, session A alive: OK    ((ED25519))
+  app-server, after A ended and B connected (frozen path): FAIL  (rc=2, Error connecting to agent: No such file or directory)
+  a fresh shell in session B (for contrast): OK    ((ED25519))
+
+== E1: with the link. app-server launched with SSH_AUTH_SOCK=$LINK
+  session A connected: OK    ((ED25519))
+  A gone, B connected (link refreshed): OK    ((ED25519))
+
+== E2: two clients at once. B connects while A is still working
+  only A connected: OK    ((ED25519))
+  link -> sshd-A.sock
+  link -> sshd-B.sock  (A's session never ended)
+  A's work after B connected (goes through B's agent): OK    ((ED25519))
+  B disconnects, A still connected: FAIL  (rc=2, Error connecting to agent: No such file or directory)
+  ...until A happens to reconnect: OK    ((ED25519))
+  (A's own agent was healthy the whole time:)
+  A's agent, direct: OK    ((ED25519))
+
+== E3: B's forwarded socket exists but never answers (issue #59694's symptom)
+  [ -S B ] = true  (the only liveness check in refresh)
+  link -> sshd-B.sock
+  app-server via link: HANG  (no answer within 3 s)
+  A's agent, direct: OK    ((ED25519))
+
+== E4: a client without any agent connects
+  link survives a no-agent client while A is alive: OK    ((ED25519))
+  after A ends and a no-agent client connects: link exists? no
