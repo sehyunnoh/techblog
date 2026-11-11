@@ -1,0 +1,143 @@
+index entries (stdlib or toolchain): 227; in both modules: 0; withdrawn: 0; counted: 227
+entries published in a later year than their ID year (retroactive adds): 23
+
+entries by published year:
+  2021: 3
+  2022: 75
+  2023: 30
+  2024: 15
+  2025: 27
+  2026: 77
+
+entries by half-year (2023 onward):
+  2023H1: 16
+  2023H2: 14
+  2024H1: 10
+  2024H2: 5
+  2025H1: 11
+  2025H2: 16
+  2026H1: 38
+  2026H2: 39
+
+entries by month (2025-07 onward):
+  2025-07: 1
+  2025-08: 1
+  2025-09: 2
+  2025-10: 10
+  2025-12: 2
+  2026-01: 5
+  2026-02: 3
+  2026-03: 5
+  2026-04: 10
+  2026-05: 12
+  2026-06: 3
+  2026-07: 3
+  2026-08: 8
+  2026-10: 16
+  2026-11: 12
+
+largest same-day batches:
+  2026-10-08: 15
+  2026-11-11: 12
+  2026-05-07: 11
+  2022-02-17: 10
+  2025-10-29: 10
+  2026-04-07: 10
+  2026-08-13: 8
+  2022-07-20: 7
+
+most affected packages (all years):
+  cmd/go: 36
+  net/http: 34
+  crypto/x509: 21
+  crypto/tls: 15
+  html/template: 14
+  golang.org/x/net/http2: 13
+  net/textproto: 7
+  archive/zip: 6
+  syscall: 6
+  net/url: 6
+  os: 6
+  net/http/internal/http2: 6
+
+most affected packages, entries published in 2026:
+  cmd/go: 19
+  net/http: 12
+  crypto/x509: 7
+  html/template: 7
+  crypto/tls: 6
+  golang.org/x/net/http2: 6
+  net/http/internal/http2: 6
+  cmd/compile: 5
+  os: 4
+  net/url: 3
+  net: 3
+  cmd/link: 3
+
+entries with no credit line, by year: {'2021': 2, '2022': 8, '2023': 5, '2024': 2, '2025': 4, '2026': 23}
+top credits 2025: [('Jakub Ciolek', 5), ('Juho Forsén of Mattermost', 4), ('Philippe Antoine (Catena cyber)', 3), ('Kyle Seely', 1), ('Jeppe Bonde Weikop', 1), ('Krzysztof Skrzętnicki (@Tener) of Teleport', 1), ('Junyoung Park and Dong-uk Kim of KAIST Hacking Lab', 1), ('Takeshi Kaneko (GMO Cybersecurity by Ierae, Inc.)', 1), ('Spike Curtis from Coder', 1), ('National Cyber Security Centre Finland', 1)]
+top credits 2026: [('RyotaK (https://ryotak.net) of GMO Flatt Security Inc.', 6), ('Jakub Ciolek (https://ciolek.dev)', 5), ('Jakub Ciolek', 4), ('Jakub Ciolek - https://ciolek.dev/', 4), ('Mundur (https://github.com/M0nd0R)', 4), ('Coia Prant (github.com/rbqvq)', 3), ('Uuganbayar Lkhamsuren (https://github.com/uug4na)', 2), ('Jakub Ciolek - https://ciolek.dev', 2), ('Ali Sherif (https://www.linkedin.com/in/ali-sherif-13812b276/)', 2), ('Harshit Gupta (Mr HAX)', 2)]
+
+entries whose credits/summary/details/references match an AI-related pattern: 0
+
+entries by highest fixed version (2026-era versions):
+  1.25.1: 1
+  1.25.2: 9
+  1.25.3: 1
+  1.25.5: 2
+  1.25.6: 5
+  1.25.7: 1
+  1.26.0-rc.3: 1
+  1.26.1: 5
+  1.26.2: 10
+  1.26.3: 11
+  1.26.4: 3
+  1.27.0-rc.2: 2
+  1.27.0-rc.3: 10
+  1.27.2: 15
+  1.27.3: 1
+  1.27.4: 12
+
+2024: 15 entries, 14 distinct credited names; top reporters by entries: [('bartek nowotarski', 2), ('juho nurminen', 2), ('john howard', 1), ('slonser', 1), ('ryotak', 1)]
+
+2025: 27 entries, 14 distinct credited names; top reporters by entries: [('jakub ciolek', 5), ('juho forsén', 4), ('philippe antoine', 3), ('kyle seely', 1), ('jeppe bonde weikop', 1)]
+
+2026: 77 entries, 30 distinct credited names; top reporters by entries: [('jakub ciolek', 15), ('ryotak', 6), ('mundur', 5), ('coia prant', 3), ('ali sherif', 3)]
+
+2026 entries with no credit line:
+   GO-2026-4603 2026-03-06 URLs in meta content attribute actions are not escaped in html/template
+   GO-2026-4865 2026-04-07 JsBraceDepth Context Tracking Bugs (XSS) in html/template
+   GO-2026-4971 2026-05-07 Panic in Dial and LookupPort when handling NUL byte on Windows in net
+   GO-2026-4976 2026-05-07 ReverseProxy forwards queries with more than urlmaxqueryparams parameters in net
+   GO-2026-4977 2026-05-07 Quadratic string concatenation in consumePhrase in net/mail
+   GO-2026-5039 2026-06-02 Arbitrary inputs are included in errors without any escaping in net/textproto
+   GO-2026-6088 2026-08-13 Add recursion depth guard during decode in encoding/xml
+   GO-2026-6089 2026-08-13 Apply ReadHeaderTimeout when doing unencrypted HTTP/2 check in net/http
+   GO-2026-6218 2026-08-13 Avoid quadratic complexity in resolvePath in net/url
+   GO-2026-6599 2026-10-08 Reset context tracking on consecutive template expressions in html/template
+   GO-2026-6600 2026-10-08 Recognize yield as regexp preceder keyword in html/template
+   GO-2026-6601 2026-10-08 Checksum bypass for golang.org/fips140 in cmd/go
+   GO-2026-6602 2026-10-08 Checksum database bypass for golang.org/toolchain in cmd/go
+   GO-2026-6607 2026-10-08 Reject malformed ECH outer extension references in crypto/tls
+   GO-2026-6809 2026-10-21 Distrust compromised intermediate certificates in crypto/x509
+   GO-2026-6848 2026-11-11 Unexpected code execution via escaped quotes in //go:cgo_ldflag in cmd/go and cm
+   GO-2026-6849 2026-11-11 Linker flag injection via cgo_import_dynamic and PE DLL names in cmd/cgo, cmd/co
+   GO-2026-6852 2026-11-11 Flag sanitization bypass via "#cgo pkg-config:" directives in cmd/go
+   GO-2026-6853 2026-11-11 Arbitrary code execution via crafted .syso files and cgo linker input files in c
+   GO-2026-6854 2026-11-11 Linker script injection via split -Wl, flags and Darwin or symbol linker flags i
+   GO-2026-6856 2026-11-11 Unexpected code execution and arbitrary file write via Clang -gen-* and GCC -gna
+   GO-2026-6857 2026-11-11 Arbitrary command execution via GCC spec files in cgo linker search directories 
+   GO-2026-6858 2026-11-11 Unexpected code execution via --sysroot, -target, -isysroot, -Wl,-syslibroot, an
+
+2023: 30 entries on 14 publication days, median batch 2, max batch 5
+
+2024: 15 entries on 7 publication days, median batch 2, max batch 5
+
+2025: 27 entries on 11 publication days, median batch 1, max batch 10
+
+2026: 77 entries on 14 publication days, median batch 5, max batch 15
+
+2026-11-11 batch: 12 entries, of which 11 are cgo/linker-flag issues: ['GO-2026-6848', 'GO-2026-6849', 'GO-2026-6850', 'GO-2026-6851', 'GO-2026-6852', 'GO-2026-6853', 'GO-2026-6854', 'GO-2026-6855', 'GO-2026-6856', 'GO-2026-6857', 'GO-2026-6858']
+2026 entries touching cmd/go, cmd/cgo, cmd/compile or cmd/link: 24
+
+cross-check: 446 CVE ids in cves.yaml, 230 Go CVE ids, intersection []
