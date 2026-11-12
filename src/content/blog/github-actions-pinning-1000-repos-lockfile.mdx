@@ -1,0 +1,149 @@
+---
+title: "65,071 Actions Lines in 1,000 Repos: 57% Are SHA-Pinned, and 5 Repos Use the New Lockfile"
+description: "I classified every uses: line in the workflows of the 1,000 most-starred GitHub repos. Most pin by SHA already, the new lockfile has five adopters, and SHA pins still leak through nested actions."
+pubDate: 2026-11-12
+tags: ['devops', 'security', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Figure from '../../components/Figure.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+On November 11, Hugo van Kemenade posted "Lock Your GitHub Actions", which reached 255 points on Hacker News.[^1] The post says GitHub's new workflow lockfiles replace the older advice to pin every action to a full commit SHA. The comment thread then did what threads do: some people asked what a lockfile adds over SHA pinning, others said it only moves the SHAs into another file, and a few said to stop using Actions at all.
+
+Those are questions about how people actually write workflows, and that is checkable. I downloaded the workflow files of the 1,000 most-starred repositories on GitHub and classified every `uses:` line. Then I looked at whether SHA pinning really leaves a hole, which is the argument for the lockfile in the first place.
+
+## Background in four sentences
+
+A GitHub Actions workflow reuses other people's code with a line like `uses: actions/checkout@v4`. The part after `@` is a Git ref. If it is a tag or a branch, whoever controls that repository can move it to different code at any time, and your next run executes the new code. If it is a full 40-character commit SHA, it cannot move. In March 2025 an attacker retagged every version of `tj-actions/changed-files` to point at a malicious commit, and the action printed secrets from workflow memory into build logs.[^2]
+
+SHA pinning is the standard fix. GitHub's new lockfile, generally available since October 28, is the other fix: you keep readable tags in the workflow, and a generated `.github/workflows/actions.lock` records the commits that those tags must resolve to, transitive dependencies included.[^3]
+
+## What I measured
+
+I took the top 1,000 non-archived repositories with more than 1,000 stars from the GitHub search API (sorted by stars), read the file tree of each default branch, and downloaded every top-level `.yml`/`.yaml` in `.github/workflows/`. 816 of the 1,000 have at least one workflow. That gives 65,071 `uses:` lines.
+
+I sorted each line into one of these groups:
+
+- **sha**: a 40-character hex SHA
+- **semver**: a full version tag such as `v4.1.2`
+- **float**: a short tag such as `v4` or `v4.1`, the style that is meant to move
+- **branch**: anything else, such as `@main` or `@stable`
+- local (`./...`) and `docker://` lines, which I set aside (8,805 lines)
+
+Everything below is from a snapshot taken on November 12, 2026, and the scripts are linked at the end.
+
+## Most of the biggest repos already pin
+
+Of the 56,266 external references, 57.5% are pinned to a SHA. Another 37.3% use a floating short tag, 3.0% a full version tag and 2.2% a branch. So roughly 42% of the lines would run different code tomorrow if the owner of the action moved a tag.
+
+I had expected the first-party actions (`actions/*` and `github/*`) to be pinned less than third-party ones, on the theory that people trust GitHub's own code more. The opposite is slightly true for SHAs, and there is a clear difference in branches.
+
+<Chart
+  type="bar"
+  format="percent"
+  caption="Share of external uses: lines by ref style, first-party (actions/*, github/*) against everything else. 41,238 first-party lines and 15,028 third-party lines."
+  label="Grouped bar chart. First-party: SHA 56.5 percent, floating tag 41.4, full version tag 2.0, branch 0.1. Third-party: SHA 60.2, floating tag 26.3, full version tag 5.7, branch 7.8."
+  labels={['SHA', 'Floating tag (v4)', 'Full tag (v4.1.2)', 'Branch']}
+  series={[
+    { name: 'First-party', data: [56.5, 41.4, 2.0, 0.1] },
+    { name: 'Third-party', data: [60.2, 26.3, 5.7, 7.8] },
+  ]}
+  yTitle="share of lines"
+/>
+
+Third-party actions are pinned a little more often (60.2% against 56.5%) and are far more likely to sit on a branch (7.8% against 0.1%). A branch is not always carelessness. `dtolnay/rust-toolchain` is documented as `@stable` or `@nightly`, which are branch names, and it alone accounts for 255 of the 1,214 branch lines. That is the author's intended interface, and it is the kind of reference a lockfile helps with because it lets you keep the readable name and still freeze the commit.
+
+## Per repository the picture is much less tidy
+
+Lines are dominated by a few very large repositories, so I also looked per repository. Of the 814 repositories that use at least one external action:
+
+- 242 (29.7%) pin everything to SHAs
+- 206 (25.3%) mix SHAs with tags or branches
+- 366 (45.0%) pin nothing
+
+If I only look at the 701 repositories that use at least one third-party action, the split is 260 all-SHA (37.1%), 146 mixed (20.8%) and 295 with no SHA at all (42.1%). Nearly 4 in 10 of the most visible projects on GitHub run unpinned third-party code in CI. The line-level 57% is high because the repositories that pin tend to have long workflows, and they pin every line.
+
+<Chart
+  type="bar"
+  format="plain"
+  caption="Repositories by pinning posture, among the 701 that use at least one third-party action. Mixed means at least one SHA and at least one tag or branch."
+  label="Bar chart of 701 repositories: all SHA 260, mixed 146, no SHA at all 295."
+  labels={['All SHA', 'Mixed', 'No SHA']}
+  series={[{ name: 'Repositories', data: [260, 146, 295] }]}
+  yTitle="repositories"
+/>
+
+## Lockfile adoption: five repos in 15 days
+
+I looked for `.github/workflows/actions.lock` in each default branch. Five repositories have one: `open-webui/open-webui`, `coollabsio/coolify`, `huginn/huginn`, `PostHog/posthog` and `casey/just`. That is 5 of 816, or 0.6%.
+
+Two caveats keep that from reading as "nobody cares". The feature was in public preview before October 28, so the 15 days since GA understate how long people have had it. And my method sees only repositories where the file has already been committed on the default branch. An organization that turned on the "Require lockfile" policy but has not merged the files yet would not show up.
+
+The files themselves are a useful look at the format. Four of the five are `version: 'v0.0.3'`, while `casey/just` still carries `v0.0.2`. That fits the post's own comment that the extension needs updating, and it is a reminder that the format is young. In PostHog's case the lockfile covers 64 of its 146 workflow files, which shows the gradual onboarding GitHub's documentation describes: you opt workflows in one at a time.[^4]
+
+And the file answers one of the HN questions directly. In `casey/just`'s lockfile, the entry for `actions-rust-lang/setup-rust-toolchain@v1.17.0` records its own commit and a nested `uses:` list with `swatinem/rust-cache` pinned to a SHA. So transitive dependencies are recorded, which is the main thing a plain SHA pin cannot do.
+
+## Does SHA pinning actually leak?
+
+That is the claim behind the lockfile: pinning the action you call does not pin what it calls. An action can be a composite action, which is a bundle of steps written in YAML that can itself contain `uses:` lines. I tested how common the leak is.
+
+I took the 150 most-used action names in the sample, fetched each one's `action.yml` at the ref most repositories use, and read its `runs.using` field and nested `uses:` lines. One of the 150 was a reusable workflow rather than an action, so I dropped it, leaving 149. All of those could be fetched.
+
+- 94 run on `node24`, 8 on `node20`, 4 on older Node versions, 2 are Docker actions.
+- **41 are composite actions, and 27 of those call other actions.**
+- Those 27 contain 46 nested references: 34 SHA (74%), 6 floating tags, 2 branches, 2 full version tags and 2 `docker://` images.
+
+So most action authors pin their own dependencies, which is good news. But six composite actions still contain at least one mutable nested ref. Four of those six I only found because the top-level ref most people use is itself a branch or a floating tag (`@main`, `@v2`), where the leak is not a surprise. Two are more interesting, because the callers do pin them:
+
+- `cashapp/activate-hermit`, used by 2 repositories in my sample, always at a SHA. Inside, it calls `actions/cache` at a floating tag.
+- `servo/ci-runners/actions/checkout`, used by 1 repository, always at a SHA. Inside, it calls `actions/checkout` at a floating tag.
+
+<Mermaid
+  caption="What a SHA pin on the outer action covers in the cashapp/activate-hermit case. The inner actions/cache reference is a floating tag that the caller's SHA does not freeze."
+  label="Flowchart. A workflow in the caller's repository calls activate-hermit at a fixed SHA, which is frozen. Activate-hermit calls actions/cache at a floating v-tag, which can move. A lockfile entry records the resolved commit of the inner reference as well."
+  code={`
+flowchart LR
+  W["caller workflow"] -->|"@SHA, frozen"| H["cashapp/activate-hermit"]
+  H -->|"@floating tag, can move"| C["actions/cache"]
+  L["actions.lock"] -.->|"records the commit of both"| C
+  L -.-> H
+`}
+/>
+
+Here is where the HN argument is half right. SHA pinning is not useless, and in this sample 74% of nested references are SHA-pinned by their authors. But it leaves the trust in the inner action to its maintainer, and a lockfile is the one option here that freezes the whole chain from the caller's side, without depending on every author pinning correctly.
+
+## Where the lockfile does not help
+
+Two limits, both from GitHub's own documentation:
+
+- **Reusable workflows are not covered.** A calling repository's lockfile does not cover a workflow it calls in another repository, and the called repository must be onboarded in its own right.[^4] That matters because reusable workflows are the sloppiest group I measured. Among 399 calls, 248 (62%) are on a branch, only 136 (34%) are on a SHA, and 15 use a tag.
+- **It does not check whether the code is safe.** GitHub's announcement says lockfiles do not determine whether a dependency is safe.[^3] A lockfile freezes whatever you locked, including a compromised commit, if you lock it after the compromise.
+
+The same documentation page says that composite actions and `docker://` images are not mentioned, so I would not assume coverage for them without testing. I did not test it.
+
+## What I did not check
+
+- **The sample is the top of the star ranking.** It includes lists, tutorials and mirrors with few or no workflows (184 of the 1,000 have none), and large open source projects with dedicated security staff. Small repositories likely pin less. I did not measure them.
+- **Default branch only, top-level workflow files only.** Fifteen repository trees were truncated by the API because they were too large, so I may have missed workflow files in those.
+- **Lines, not runs.** A workflow line that never executes counts the same as one that runs on every push.
+- **Floating tags are not all equally risky.** I classed `v4` as mutable because that is how the tag is defined. GitHub has been adding immutable releases, and I did not check which of these actions publish them.
+- **Nested actions were read at one ref per action,** the most common one. The inner contents change between versions.
+- **Two `docker://` references inside composite actions** were not resolved, so I do not know whether they use a digest.
+- **I did not install or run the lockfile tooling,** so what I say about its behavior comes from the lockfiles found in the wild and GitHub's documentation.
+
+## Takeaways
+
+- Among the 1,000 most-starred repos, 57.5% of external action references are SHA-pinned, 42% are mutable, and only 30% of repositories pin everything.
+- Third-party actions are pinned slightly more than GitHub's own, but are much more likely to sit on a branch (7.8%), partly because some actions document branch names as the interface.
+- Five repositories have adopted `actions.lock` 15 days after general availability. Its format is already on its third version string.
+- SHA pinning does leave gaps through composite actions: of 41 composite actions in the top 150, 27 call other actions and 6 include a mutable nested ref, including two that callers pin by SHA.
+- If you maintain a project, the cheapest first step is still SHA pinning plus a linter such as zizmor. Add the lockfile if you want readable tags without losing the freeze, and keep reusable workflow calls pinned by hand.
+
+The scripts are [the collector](/files/actions-pinning-collect.py) and [the analyzer](/files/actions-pinning-analyze.py), both standard library plus the `gh` CLI for the search and tree calls, and the output from my run is [here](/files/actions-pinning-output.txt). A run on 1,000 repositories takes about 10 minutes.
+
+[^1]: Hugo van Kemenade, [Lock Your GitHub Actions](https://hugovk.dev/blog/2026/lock-github-actions/), November 11, 2026, and the [Hacker News discussion](https://news.ycombinator.com/item?id=50459485) (255 points when I read it).
+[^2]: Legit Security, [GitHub Actions supply chain attack: tj-actions/changed-files](https://www.legitsecurity.com/blog/github-actions-tj-actions-changed-files-attack). The article dates the compromise to March 12 to 15, 2025 and says all versions of the action were retagged to a malicious commit.
+[^3]: GitHub changelog, [GitHub Actions workflow lockfiles are generally available](https://github.blog/changelog/2026-10-28-github-actions-workflow-lockfiles-are-generally-available/), October 28, 2026.
+[^4]: GitHub Docs, [Enforcing workflow lockfiles](https://docs.github.com/en/actions/how-tos/administer/enforce-workflow-lockfiles). Source for the reusable-workflow limit, gradual onboarding and the Require lockfile policy. Retrieved November 12, 2026.

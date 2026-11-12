@@ -1,0 +1,85 @@
+repos searched 1000, with workflow files 816, with actions.lock 5, truncated trees 15
+uses lines 65071
+
+== all external uses by ref kind ==
+sha       32358  57.5%
+float     21012  37.3%
+semver     1682   3.0%
+branch     1214   2.2%
+
+== first-party (actions/*, github/*) vs third-party ==
+first 41238 {'sha': '56.5%', 'float': '41.4%', 'semver': '2.0%', 'branch': '0.1%'}
+third 15028 {'sha': '60.2%', 'float': '26.3%', 'branch': '7.8%', 'semver': '5.7%'}
+
+== reusable workflow calls ==
+399 {'sha': 136, 'branch': 248, 'semver': 11, 'float': 4}
+
+== per repo: how many repos use external actions, and pinning posture ==
+repos with external uses 814 {'no sha': 366, 'all sha': 242, 'mixed': 206}
+repos with third-party uses 701 {'all sha': 260, 'no sha': 295, 'mixed': 146}
+repos with a branch ref (@main/@master etc): 178
+
+== lockfile repos ==
+open-webui/open-webui 158455 workflow files 7
+coollabsio/coolify 65982 workflow files 12
+huginn/huginn 50510 workflow files 5
+PostHog/posthog 40756 workflow files 146
+casey/just 36682 workflow files 2
+
+== top 25 distinct actions (ignoring ref) ==
+actions/checkout                                   17171 lines  796 repos  {'float': 7877, 'sha': 8894, 'semver': 373, 'branch': 27}
+actions/upload-artifact                             5730 lines  498 repos  {'sha': 3421, 'float': 2237, 'semver': 60, 'branch': 12}
+actions/setup-node                                  3911 lines  400 repos  {'sha': 2127, 'float': 1651, 'semver': 131, 'branch': 2}
+actions/download-artifact                           3337 lines  369 repos  {'sha': 2077, 'float': 1221, 'semver': 39}
+actions/github-script                               3282 lines  284 repos  {'sha': 2619, 'float': 641, 'semver': 22}
+actions/setup-python                                1937 lines  283 repos  {'float': 1038, 'sha': 882, 'semver': 17}
+actions/cache                                       1236 lines  255 repos  {'sha': 529, 'semver': 18, 'float': 689}
+pnpm/action-setup                                    915 lines  106 repos  {'sha': 427, 'float': 362, 'semver': 126}
+docker/login-action                                  869 lines  223 repos  {'sha': 471, 'float': 333, 'semver': 65}
+actions/cache/restore                                746 lines  127 repos  {'sha': 495, 'float': 219, 'semver': 32}
+actions/setup-go                                     689 lines  112 repos  {'sha': 248, 'float': 420, 'semver': 21}
+astral-sh/setup-uv                                   638 lines  101 repos  {'sha': 313, 'float': 238, 'semver': 87}
+actions/create-github-app-token                      634 lines   98 repos  {'sha': 461, 'semver': 37, 'float': 136}
+docker/setup-buildx-action                           598 lines  204 repos  {'sha': 339, 'float': 233, 'semver': 17, 'branch': 9}
+dtolnay/rust-toolchain                               521 lines   70 repos  {'branch': 255, 'sha': 237, 'semver': 16, 'float': 13}
+actions/cache/save                                   490 lines  120 repos  {'sha': 345, 'float': 136, 'semver': 9}
+docker/build-push-action                             488 lines  186 repos  {'sha': 258, 'float': 221, 'semver': 9}
+oven-sh/setup-bun                                    396 lines   62 repos  {'sha': 266, 'float': 129, 'semver': 1}
+Swatinem/rust-cache                                  362 lines   57 repos  {'sha': 194, 'float': 161, 'semver': 7}
+actions/setup-java                                   327 lines   85 repos  {'sha': 117, 'float': 200, 'semver': 10}
+step-security/harden-runner                          306 lines   17 repos  {'sha': 276, 'float': 19, 'semver': 11}
+github/gh-aw-actions/setup                           298 lines   12 repos  {'sha': 298}
+codecov/codecov-action                               237 lines   90 repos  {'sha': 159, 'float': 78}
+softprops/action-gh-release                          236 lines  110 repos  {'sha': 108, 'float': 121, 'semver': 7}
+docker/metadata-action                               234 lines  111 repos  {'float': 102, 'sha': 127, 'semver': 5}
+
+== transitive: do the 150 most-used actions reference other actions with mutable refs? ==
+fetched 149/149; runtimes {'node24': 94, 'node20': 8, 'composite': 41, 'node16': 2, 'node12': 2, 'docker': 2}
+composite 41; composite with nested external uses 27; nested ref kinds {'sha': 34, 'docker': 2, 'float': 6, 'branch': 2, 'semver': 2}
+  codecov/codecov-action @ 303a32d7a59b ['actions/github-script:sha']
+  pypa/gh-action-pypi-publish @ release/v1 ['actions/setup-python:sha']
+  actions/upload-pages-artifact @ fc324d354710 ['actions/upload-artifact:sha']
+  actions/attest-build-provenance @ 4d101475d8b2 ['actions/attest:sha']
+  rtCamp/action-slack-notify @ 06cc13f74fa8 ['LoveToKnow/slackify-markdown-action:sha', 'LoveToKnow/slackify-markdown-action:sha', 'LoveToKnow/slackify-markdown-action:sha', 'LoveToKnow/slackify-markdown-action:sha', 'docker://ghcr.io/rtcamp/action-slack-notify:docker', 'docker://ghcr.io/rtcamp/action-slack-notify:docker']
+  anthropics/claude-code-action @ v1 ['oven-sh/setup-bun:sha']
+  grafana/shared-workflows/actions/create-github-app-token @ 46f48da11e78 ['actions/github-script:sha', 'actions/github-script:sha']
+  immich-app/devtools/actions/create-workflow-token @ 2760f037fd37 ['actions/create-github-app-token:sha']
+  subosito/flutter-action @ v2 ['actions/cache:float', 'actions/cache:float']
+  aquasecurity/trivy-action @ ed142fd0673e ['aquasecurity/setup-trivy:sha', 'actions/cache:sha']
+  protocolbuffers/protobuf-ci/checkout @ v7 ['actions/checkout:sha', 'nick-fields/retry:sha']
+  zizmorcore/zizmor-action @ 53290badfa36 ['github/codeql-action/upload-sarif:sha']
+  cashapp/activate-hermit @ cea9af791320 ['actions/cache:float']
+  actions-rust-lang/setup-rust-toolchain @ a188e68d0fd2 ['Swatinem/rust-cache:sha']
+  immich-app/devtools/actions/use-mise @ caac7f7e4298 ['jdx/mise-action:sha']
+  openai/codex-action @ c05cfd74ad95 ['actions/setup-node:sha']
+  CodSpeedHQ/action @ af75f77f17a0 ['actions/cache:sha', 'actions/github-script:sha']
+  awalsh128/cache-apt-pkgs-action @ 553a35bb8ebd ['actions/cache/restore:sha', 'actions/upload-artifact:sha', 'actions/cache/save:sha']
+  pytorch/pytorch/.github/actions/checkout-pytorch @ main ['pytorch/test-infra/.github/actions/checkout:branch', 'pytorch/test-infra/.github/actions/checkout:branch']
+  grafana/shared-workflows/actions/get-vault-secrets @ f1614b210386 ['actions/github-script:sha', 'hashicorp/vault-action:sha']
+  duckdb/duckdb-ci/.github/actions/checkout @ main ['namespacelabs/nscloud-checkout-action:float', 'actions/checkout:float']
+  servo/ci-runners/actions/checkout @ b42c96524cdd ['actions/checkout:float']
+  ultralytics/actions/setup-uv @ main ['astral-sh/setup-uv:semver', 'astral-sh/setup-uv:semver']
+  astral-sh/github-actions/rust-workspace-cache @ 3c9fe5db47e1 ['Swatinem/rust-cache:sha']
+  astral-sh/github-actions/release-smoke-test @ 76d2758fc5c4 ['docker/setup-qemu-action:sha']
+  backstage/actions/yarn-install @ a9e1b58ad52a ['actions/cache:sha', 'actions/cache:sha']
+  angular/dev-infra/github-actions/npm/checkout-and-setup-node @ 3c8fd25a3724 ['actions/checkout:sha', 'pnpm/action-setup:sha', 'actions/setup-node:sha']
