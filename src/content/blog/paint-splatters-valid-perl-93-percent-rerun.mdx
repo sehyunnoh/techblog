@@ -1,0 +1,148 @@
+---
+title: "93% of Paint Splatters Are Valid Perl, but Only After 12 OCR Tries. A Default Run Gives 0"
+description: "I reran the SIGBOVIK paper's 12 Tesseract settings on its 100 images: 89 pass. One default run passes none, and 61 of the 93 published programs are three characters or fewer."
+pubDate: 2026-11-13
+tags: ['benchmark', 'deep-dive']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Figure from '../../components/Figure.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+"93% of paint splatters are valid Perl programs" came back to the Hacker News front page this week, 572 points and a "(2019)" in the title.[^1] It is a joke paper from the SIGBOVIK conference, and it has been submitted to HN at least six times since 2019.[^2] The thread does what threads about this paper always do: people marvel at how forgiving Perl is, and a few ask whether the number means anything.
+
+The paper is more candid about its method than most of the people repeating its title. It says outright that each image got twelve attempts and that one success was enough.[^3] What the title cannot carry is how much that matters, and what kind of "program" comes out the other end. The author published the full image set and the gallery of strings, so I reran the experiment and counted.
+
+## What the paper actually did
+
+The pipeline has four steps. A person downloaded 100 images from Pinterest (search query "paint splatter wallpaper") and removed any with watermarks. Each image went through OCR, which is software that turns a picture of text into characters. Whatever characters came out were handed to the `perl` executable to see whether it would accept them as a program. Only non-empty programs counted.[^3]
+
+The OCR engine was Tesseract 4.0.0-beta.1, and here is the part that shapes the result. Tesseract has three engines (an older "legacy" one, a newer neural-network one called LSTM, and a mode that combines them) and 14 page segmentation modes, which tell it what the picture is supposed to contain: a column of text, one line, one word, one word arranged in a circle.[^4] The author did not pick one. For every image he ran 3 engines times 4 modes (4, 7, 8 and 9), and the image counted as valid Perl if any of those 12 readings was accepted. The paper calls this "profoundly unethical" and notes there are no separate training and test sets, which is a fair description.[^3]
+
+<Mermaid
+  caption="The paper's pipeline as I read it. The 93% is the share of images where at least one of 12 OCR readings was a non-empty string that perl accepted. The dashed path is what I added as a control: one default run."
+  label="Flowchart. One splatter image goes into three Tesseract engines, each run with four page segmentation modes, giving up to twelve text strings. Perl checks each string. If any non-empty string is accepted, the image counts as valid Perl. If none is, it counts as a counterexample. A dashed control path runs a single default Tesseract call on the same image and checks that one string."
+  code={`
+flowchart LR
+  I["one splatter image"] --> L["legacy engine, modes 4 7 8 9"]
+  I --> N["LSTM engine, modes 4 7 8 9"]
+  I --> B["both engines, modes 4 7 8 9"]
+  L --> T["up to 12 strings"]
+  N --> T
+  B --> T
+  T --> P{"perl accepts any non-empty string?"}
+  P -->|yes| S["counted as valid Perl"]
+  P -->|no| F["counterexample"]
+  I -.-> D["control: one default tesseract run"]
+  D -.-> Q{"perl accepts it?"}
+`}
+/>
+
+## What I reran
+
+The author's page has a tarball of the 100 images and a gallery with the string he kept for each one (7 are marked "Not valid" and have no text).[^2] His scripts are not published. I rebuilt the pipeline from the paper's description: the same 12 combinations, a whitelist of ASCII characters 32 to 126 for the engines that honor one, dictionary features switched off, and `perl -c` (compile only, do not run) as the validity test. An empty or whitespace-only reading never counts.
+
+Two things differ from 2019, and I cannot remove them. I used Tesseract 5.3.4 where the paper used 4.0.0-beta.1, with the `eng.traineddata` from the official `tessdata` repository at tag 4.1.0, because the Ubuntu package ships an LSTM-only file with no legacy engine.[^5] And the checking Perl is 5.38.2 in WSL, where the paper used 5.26.1. The whole run is about 1,300 Tesseract calls and takes under a minute.
+
+<Chart
+  type="bar"
+  format="plain"
+  caption="Images (out of 100) that give a non-empty, perl-valid string under each single setting. The paper's best single setting was LSTM with mode 9 at 55; mine is 60."
+  label="Grouped bar chart of images out of 100 with a valid reading, by page segmentation mode. Legacy engine: mode 4 one, mode 7 thirteen, mode 8 twenty-six, mode 9 thirty-three. LSTM engine: mode 4 one, mode 7 eighteen, mode 8 forty-six, mode 9 sixty. Both engines combined: mode 4 two, mode 7 twelve, mode 8 twenty-four, mode 9 twenty."
+  labels={['mode 4 (column)', 'mode 7 (line)', 'mode 8 (word)', 'mode 9 (word in circle)']}
+  series={[
+    { name: 'Legacy', data: [1, 13, 26, 33] },
+    { name: 'LSTM', data: [1, 18, 46, 60] },
+    { name: 'Legacy + LSTM', data: [2, 12, 24, 20] },
+  ]}
+  yTitle="images with a valid reading (of 100)"
+/>
+
+The reproduction is closer than I expected. The pure LSTM engine, taking the best of its four modes, covers exactly 74 images, the same as the paper. The other two engines are off by a few (legacy 55 against the paper's 62, combined 45 against 40), and the union over all 12 settings is **89 images against the paper's 93**. I have no explanation for the four-image gap; the version differences above are the obvious suspects. Reading my strings against the gallery, 34 of the 93 published strings appear verbatim among my 12 outputs for the same image, which says the setup is similar and not identical.
+
+## One default run finds nothing
+
+The control is what you would do without knowing any of this: run `tesseract image stdout` and feed the result to Perl. On the same 100 images that produced a non-empty string for 2 of them, and neither one was valid. The score is 0 of 100.
+
+The chart above explains why. The modes that work are the ones that tell Tesseract the picture holds a single word or a single line. The default mode, 3, goes looking for paragraphs, finds none in a paint splatter, and almost always returns nothing. Mode 4 (a column of text) is almost as barren, with 1 or 2 valid images per engine. So the 93% depends on telling the OCR engine to produce a short answer and then letting it try again under different assumptions.
+
+That second part is visible if you count, per image, how many of the 12 settings produced a valid string.
+
+<Chart
+  type="bar"
+  format="plain"
+  caption="Images by the number of the 12 settings that gave a valid reading. 11 images never pass, 19 pass under exactly one setting, and only 5 pass under six or more."
+  label="Bar chart of images grouped by how many of twelve OCR settings gave a valid Perl reading. Zero settings: 11 images. One: 19. Two: 23. Three: 22. Four: 12. Five: 8. Six or seven: 4. Eight or more: 1."
+  labels={['0', '1', '2', '3', '4', '5', '6-7', '8+']}
+  series={[{ name: 'Images', data: [11, 19, 23, 22, 12, 8, 4, 1] }]}
+  xTitle="settings (of 12) that gave a valid reading"
+  yTitle="images"
+/>
+
+Of my 89 passing images, 42 pass under only one or two of the twelve settings. Remove the right one or two settings and they fall out. That is what "best of 12" looks like in data: the headline is real, and it is a statement about the search as much as about the paint.
+
+## The programs are tiny
+
+The paper says the valid programs are "uninteresting" and mostly "don't actually seem to do anything when executed." The gallery agrees. Of the 93 published strings:
+
+| Property | Count of 93 |
+|---|---|
+| 3 characters or fewer | 61 |
+| 5 characters or fewer | 72 |
+| 10 characters or more | 7 |
+| Plain integers (`35`, `-3`, `225252`) | 18 |
+| Letters only (`pg`, `Nok`, `figigigg`) | 53 |
+| Everything else (punctuation, or letters mixed with digits) | 22 |
+
+The median length is 2 characters and the longest is 22. I ran all 93; every one exits cleanly and prints nothing. My own OCR readings look the same: across all valid readings the median is again 2 characters and none spans more than one line.
+
+Why is a string like `figigigg` valid Perl at all? Because without `use strict`, Perl treats an unquoted word it does not recognize as a string. These are called barewords, and the paper explains the feature correctly.[^3] Turn on `use strict`, which most real Perl files do in their first line, and the bareword becomes a compile-time error.[^6] I checked the 93 published strings with `perl -c -Mstrict`: **21 pass**. They are the 18 integers plus `-*?`, `;` and `:`. The other 72 fail with errors like `Bareword "pg" not allowed while "strict subs" in use`.
+
+That is not a flaw in the paper, which never claims strict mode. It does change what "valid Perl" means, though, and the strict figure is the one closer to what a person means by a Perl program.
+
+## How much of this is just short strings?
+
+A last yardstick. If most of the valid readings are one to three characters, validity may be mostly a function of length and not of paint. I generated random strings and checked them with `perl -c`. For each of the 93 published lengths, I made 10 random strings, drawn from the 60 distinct characters that appear in the published sources: 62.4% of those 930 strings are valid Perl. Drawn from all 95 printable ASCII characters instead, 45.4% are. By length, with 200 strings per point:
+
+<Chart
+  type="line"
+  format="percent"
+  caption="Share of random strings that perl -c accepts, by length, 200 strings per point. The solid line draws characters from the set seen in the published sources, the dashed line from all printable ASCII. The lengths on the x axis are evenly spaced, not to scale."
+  label="Line chart of the percent of random strings that compile as Perl by string length. Characters from the observed set: length 1, 83 percent; 2, 71.5; 3, 62; 4, 60.5; 6, 45.5; 10, 36.5; 20, 22.5; 38, 12.5. Printable ASCII: length 1, 63; 2, 54; 3, 47.5; 4, 34.5; 6, 28; 10, 16; 20, 7.5; 38, 4.5."
+  labels={['1', '2', '3', '4', '6', '10', '20', '38']}
+  series={[
+    { name: 'Characters seen in the gallery', data: [83, 71.5, 62, 60.5, 45.5, 36.5, 22.5, 12.5] },
+    { name: 'All printable ASCII', data: [63, 54, 47.5, 34.5, 28, 16, 7.5, 4.5], dashed: true },
+  ]}
+  xTitle="string length"
+  yTitle="valid Perl"
+/>
+
+A random two-character string from the gallery's alphabet is valid about 7 times in 10. I would not read this as "the paper's result is random". OCR output is not random characters, and I did not model the twelve tries as independent draws, because they are not. The takeaway is narrower. When the output is one or two characters, Perl accepts most of it before any paint is involved. Past about ten characters the odds fall to a third or less, so a long valid reading would be the surprising result, and the gallery has only 7 of those.
+
+## What I did not check
+
+- **Version drift.** Tesseract 5.3.4 against 4.0.0-beta.1 and Perl 5.38.2 against 5.26.1. The gap between 89 and 93 sits inside that uncertainty, and I did not try to close it.
+- **Image preprocessing.** The paper does not say whether the images were resized, thresholded or cropped before OCR. I fed the files in as they are.
+- **The seven counterexamples.** The gallery shows no text for them, so I cannot compare them. Two of those seven images give a valid reading in my runs, which only means my settings produce different strings than his.
+- **Compile, not run.** Validity of OCR readings is `perl -c`. I ran only the 93 published strings, not all 256 valid readings of mine.
+- **The gallery's strings are curated.** The author says that when several settings gave valid Perl, he kept the one that seemed most "interesting."[^2] That is part of why only 34 of 93 match my outputs verbatim.
+- **Tesseract flags.** The whitelist is passed only to the legacy and combined engines, following the paper's note that the LSTM engine did not honor one in 4.0. Whether 5.3.4 would honor it for LSTM I did not test.
+
+## Takeaways
+
+- The 93% is a best-of-12 figure. The paper says so; the title does not.
+- Rerunning the same grid gives 89 of 100, and the pure LSTM engine matches the paper's 74 exactly. A single default Tesseract run gives 0.
+- Most of the programs are one to three characters, and nothing in the set prints anything. Under `use strict`, 21 of the 93 pass.
+- For short strings, validity is mostly a property of Perl's grammar. A random two-character string from the same alphabet passes about 70% of the time.
+- If you quote a number like this, quote the search procedure with it. "93% under the best of 12 settings" and "0% under defaults" describe the same experiment.
+
+The scripts are [the Perl-side check](/files/paint-splatter-perl-check.py) (standard library and `perl`) and [the OCR rerun](/files/paint-splatter-ocr-check.py) (standard library, `tesseract` and `perl`), with the output of my runs in [the Perl check](/files/paint-splatter-perl-check-output.txt) and [the OCR rerun](/files/paint-splatter-ocr-check-output.txt). The image set and gallery come from the author's page.
+
+[^1]: [93% of paint splatters are valid Perl programs (2019)](https://news.ycombinator.com/item?id=50459745), Hacker News, submitted November 11, 2026 (572 points when I read it).
+[^2]: Colin McMillen, [93% of Paint Splatters are Valid Perl Programs](https://www.mcmillen.dev/sigbovik/), with the [gallery of strings](https://www.mcmillen.dev/sigbovik/splatters.html) and the [image tarball](https://www.mcmillen.dev/sigbovik/splatters.tar.gz). The page states that the source code is not available. The earlier submission count comes from searching the title on [HN Algolia](https://hn.algolia.com/?query=paint%20splatters%20valid%20perl&type=story), which lists six submissions between April 2019 and November 2026.
+[^3]: Colin McMillen and "Tim Toady", [93% of Paint Splatters are Valid Perl Programs](https://www.mcmillen.dev/sigbovik/2019.pdf), SIGBOVIK 2019. Experimental Setup (Tesseract 4.0.0-beta.1, perl 5.26.1, 3 engines times modes 4, 7, 8 and 9, ASCII whitelist), Results (93 of 100, best single setting 55%, LSTM 74%, legacy 62%, combined 40%, non-empty only) and Discussion (barewords, programs that do nothing).
+[^4]: Tesseract documentation, [Improving the quality of the output](https://tesseract-ocr.github.io/tessdoc/ImproveQuality.html), for the list of page segmentation modes (3 is the default; 8 is "a single word"; 9 is "a single word in a circle"). I confirmed the same list with `tesseract --help-psm` on 5.3.4.
+[^5]: [tesseract-ocr/tessdata](https://github.com/tesseract-ocr/tessdata), file `eng.traineddata` at tag 4.1.0 (23,466,654 bytes, SHA-256 `daa0c97d...`). The Ubuntu 24.04 `tesseract-ocr-eng` package contains only the LSTM model, so Tesseract exits with "legacy engine requested, but components are not present" for `--oem 0`.
+[^6]: Perl documentation, [strict](https://perldoc.perl.org/strict). `use strict 'subs'` generates a compile-time error for a bareword identifier that is not a subroutine.

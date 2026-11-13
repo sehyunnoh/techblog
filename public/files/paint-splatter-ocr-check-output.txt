@@ -1,0 +1,27 @@
+tesseract: tesseract 5.3.4
+perl: v5.38.2
+images=100  author-valid=93  author-'Not valid'=7
+
+[1] plain `tesseract image stdout` (default settings): non-empty 2, valid 0 of 100
+
+[2] paper grid, valid non-empty readings per combination (of 100)
+engine        psm4 psm7 psm8 psm9   union
+legacy           1   13   26   33     55
+LSTM             1   18   46   60     74
+legacy+LSTM      2   12   24   20     45
+any of the 12 combinations: 89/100   (paper: 93/100; best single 55; LSTM union 74, legacy 62, both 40)
+
+[3] in how many of the 12 combinations is each image valid? (histogram of images)
+{0: 11, 1: 19, 2: 23, 3: 22, 4: 12, 5: 8, 6: 1, 7: 3, 8: 0, 9: 0, 10: 1, 11: 0, 12: 0}
+valid in exactly 1 combination: 19;  in 1-2: 42;  in >=6: 5
+
+[4] sanity check against the author's published strings
+author's string appears verbatim among our 12 outputs: 34/93
+author-'Not valid' images that ARE valid for us in >=1 combination: 2 / 7
+author-valid images that are valid for us in NO combination: 6
+
+[5] what our valid readings look like (all combinations pooled)
+n=256 median length 2.0 max 21 multi-line 0
+kinds: {'number': 23, 'letters only': 152}
+first 12 readings under LSTM psm 8: ['%', 'E', 'a', 'pd', '4', 'hd', '»', 'Noe', '_ a', '-', 'or', 'k']
+first 12 readings under legacy psm 8: ['57m', ';?%%hd', '.:;f2%gj/Mgg&.', 'iigigiigg', 'Ewilflfigiiiljlc~j', 'gifiif%iif', "';:i:}i;ji:\\;ji;i-Ii'ij%.\\;:$?~;r\\l~", 'K;', 'fig;;%iiiligfwii2;', 'EH,S;,&', '5&5"', 'i;iig%;zsfx;']
