@@ -1,0 +1,106 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { SITE, SOCIALS } from '../consts';
+import { withBase } from '../utils/url';
+
+// Bump this whenever the content below changes.
+const LAST_UPDATED = new Date('2026-11-14T00:00:00Z');
+const updated = new Intl.DateTimeFormat('en-US', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+  timeZone: 'UTC',
+}).format(LAST_UPDATED);
+---
+
+<BaseLayout
+  title="About"
+  description={`Who runs ${SITE.title}, how its posts are researched and written with Claude, and how to report a mistake.`}
+  path="/about"
+  narrow
+>
+  <h1 class="page-title">About</h1>
+  <p class="page-sub">Last updated {updated}</p>
+
+  <div class="prose about">
+    <p>
+      {SITE.title} is a technical blog about AI, the web and the systems underneath them. Most
+      posts take one claim that is going around, such as a benchmark score, a security statistic or
+      a decades-old formula, and check it by recomputing the numbers from public data. When the
+      claim holds up, the post says so. When it does not, the post shows where it breaks.
+    </p>
+
+    <h2>Who runs it</h2>
+    <p>
+      The site is run by {SITE.author}, who chooses the topics, reviews every post and publishes
+      it. You can find {SITE.author} on {SOCIALS.map((s, i) => (
+        <>{i > 0 ? ' and ' : ''}<a href={s.href} rel="me noopener">{s.label}</a></>
+      ))}.
+    </p>
+    {/* TODO(owner): add one or two sentences of your own background here, if you want them public. */}
+
+    <h2>How the posts are written</h2>
+    <p>
+      The posts are researched and written by Claude, an AI model from Anthropic, in working
+      sessions with the site owner. That is stated here so that nobody has to guess. What makes the
+      process worth reading is what is required of it:
+    </p>
+    <ul>
+      <li>
+        Every claim needs a source a reader can open: official documentation, release notes, source
+        code, a paper, or a measurement taken for the post and described with its method.
+      </li>
+      <li>
+        Where a post measures something, the script and its output are published next to it, in the{' '}
+        <a href="https://github.com/sehyunnoh/techblog/tree/main/public/files" rel="noopener">files
+        folder of the repository</a>, so the numbers can be rerun.
+      </li>
+      <li>
+        Limits are written down. Each post says what it did not check, and a result that came out
+        differently from what was expected is reported as it came out.
+      </li>
+      <li>
+        At most one post is published per day, and nothing is published just to fill a slot.
+      </li>
+    </ul>
+    <p>
+      The <a href={withBase('/guides')}>Guides</a> are reference material in the same spirit:
+      explainers and how-tos with their sources, revised in place when the subject changes.
+    </p>
+
+    <h2>Found a mistake?</h2>
+    <p>
+      Corrections are welcome and I would like to hear about them. The fastest way is to open an
+      issue on the <a href="https://github.com/sehyunnoh/techblog" rel="noopener">site's
+      repository</a>, which is public. You can also reach me on {SOCIALS.map((s, i) => (
+        <>{i > 0 ? ' or ' : ''}<a href={s.href} rel="noopener">{s.label}</a></>
+      ))}. The full history of every change to a post is in the repository's commits.
+    </p>
+
+    <h2>What this site is not</h2>
+    <p>
+      It does not sell anything, run sponsored posts or take payment to mention a product. If that
+      ever changes, this page will say so before it happens. How readers' data is handled is
+      covered on the <a href={withBase('/privacy')}>Privacy</a> page.
+    </p>
+  </div>
+</BaseLayout>
+
+<style>
+  .page-title {
+    margin: 0;
+    font-size: 2rem;
+    letter-spacing: -0.028em;
+    font-weight: 680;
+  }
+
+  .page-sub {
+    margin: 0.4rem 0 1.75rem;
+    color: var(--fg-faint);
+    font-size: 0.8125rem;
+  }
+
+  .about {
+    max-width: none;
+  }
+</style>
