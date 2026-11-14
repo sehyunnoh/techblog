@@ -1,0 +1,14 @@
+git 2.55.0.windows.4; system core.autocrlf='true'
+--- no .gitattributes
+core.autocrlf=true                           index=i/lf worktree=w/crlf
+core.autocrlf=input                          index=i/lf worktree=w/lf
+core.autocrlf=false                          index=i/lf worktree=w/lf
+--- .gitattributes: * text=auto eol=lf
+core.autocrlf=true                           index=i/lf worktree=w/lf
+core.autocrlf=input                          index=i/lf worktree=w/lf
+core.autocrlf=false                          index=i/lf worktree=w/lf
+--- .gitattributes: * text=auto eol=crlf
+warning: in the working copy of '.gitattributes', LF will be replaced by CRLF the next time Git touches it
+core.autocrlf=true                           index=i/lf worktree=w/crlf
+core.autocrlf=input                          index=i/lf worktree=w/crlf
+core.autocrlf=false                          index=i/lf worktree=w/crlf

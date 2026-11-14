@@ -1,0 +1,144 @@
+---
+title: 'LF vs CRLF Explained: What Git Does to Line Endings and the One File That Fixes It'
+description: 'LF is Unix and macOS, CRLF is Windows, and Git can silently convert between them. This guide covers why, how to see what you have, and a .gitattributes line that settles it for a repo.'
+pubDate: 2026-11-14
+updatedDate: 2026-11-14
+tags: ['devops', 'tutorial']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+
+Every time you press Enter in a text file, an invisible character goes in. Which character depends on the operating system, and when two systems share a file, the mismatch shows up as strange warnings, scripts that refuse to run, and diffs where every line changed. This guide is the version of the explanation I wanted each time I had to look it up again.
+
+## The short version
+
+- **LF** (line feed, `\n`, byte `0x0A`) ends a line on Linux, macOS and other Unix-like systems.
+- **CRLF** (carriage return plus line feed, `\r\n`, bytes `0x0D 0x0A`) ends a line on Windows. A lone **CR** (`\r`) was classic Mac OS and is not used by anything you will meet today.[^1]
+- Inside a Git repository, the convention is to store **LF**. Whether your working copy shows LF or CRLF is a separate question, decided by Git settings on your machine.
+- The setting that removes the guessing is a file called `.gitattributes` at the repo root, with one line: `* text=auto eol=lf`. Details and a measured table are below.
+
+## Why there are two
+
+Printing terminals (teletypes) needed two separate mechanical actions to start a new line: move the print head back to the left margin, then advance the paper. Early systems encoded that as two characters, CR and LF. Unix later decided one character was enough, and kept LF. Windows kept the pair.[^1]
+
+Networks stayed with the pair for a while. IETF protocols typically use CRLF, and HTTP, SMTP, FTP and IRC require it at the protocol level, though tolerant programs are advised to accept a lone LF.[^1] That is a different layer from your source files, but it is why you will see `\r\n` mentioned in places that have nothing to do with Git.
+
+## What it looks like when it goes wrong
+
+Three symptoms cover most cases. I reproduced the first two on Windows with WSL (Ubuntu) and Git for Windows 2.55.
+
+**A shell script that exists but will not run.** A script saved with CRLF has a hidden `\r` at the end of its first line, so the shebang names an interpreter called `/bin/bash\r`, which does not exist:
+
+```text
+$ ./c.sh
+bash: line 1: ./c.sh: cannot execute: required file not found
+exit=127
+$ bash c.sh | od -c | head -2
+0000000   h   i  \r  \n
+```
+
+The `od -c` output is the tell: `\r` followed by `\n`. Other systems often word it as `bad interpreter: No such file or directory`; the cause is the same. I did not test every shell and OS combination, so treat the exact wording as version dependent.
+
+**A Git warning about conversion.** This one is not an error:
+
+```text
+warning: in the working copy of 'a.sh', LF will be replaced by CRLF the next time Git touches it
+```
+
+It means Git is configured to write CRLF into your working copy, while the repository stores LF. Nothing is wrong yet, but you are in the situation the rest of this guide is about.
+
+**A file that mixes both.** Git's own documentation warns that a file containing a mixture of LF and CRLF before a commit cannot be recreated exactly by line-ending conversion.[^2] Mixed files are what you get when two people with different settings edit the same file.
+
+## How Git decides
+
+Git has three places where a line ending can live: your working copy, the index (what gets committed), and your configuration. The conversion happens at the boundary between the first two.[^3]
+
+<Mermaid
+  caption="Where Git converts. With text conversion on, the repository side stays LF. What your working copy gets on checkout depends on the eol attribute, then core.autocrlf and core.eol."
+  label="Flow diagram. The working copy on the left, the repository on the right. On commit, line endings are normalized to LF. On checkout, line endings may be converted back to CRLF depending on the eol attribute, the config and the platform."
+  code={`
+flowchart LR
+  W["working copy: LF or CRLF"] -->|"git add: normalize to LF"| R["repository: LF"]
+  R -->|"git checkout: LF, or CRLF if eol says so"| W
+`}
+/>
+
+Two switches control this, and they are not equal.
+
+**The attribute in `.gitattributes`** travels with the repo. `text` marks a path as text so that line endings are normalized to LF in the index. `text=auto` lets Git decide whether each file is text or binary. `eol=lf` or `eol=crlf` picks the ending in the working copy on checkout.[^3] If you leave a file's attributes unspecified, Git falls back to the configuration below.
+
+**The configuration** lives on one machine. `core.autocrlf=true` converts to LF on commit and to CRLF on checkout. `core.autocrlf=input` converts to LF on commit and does nothing on checkout. `false` does nothing either way. Another setting, `core.eol`, picks the working copy ending for text files, with `native` (the platform's own) as the default, and Git ignores it when `core.autocrlf` is `true` or `input`.[^4]
+
+The GitHub documentation suggests `true` on Windows and `input` on macOS and Linux.[^5] That advice is fine for one machine. Its weakness is that it depends on every contributor having done the same thing.
+
+## What actually happens: a measured table
+
+I wrote a small script that commits one LF file, then checks it out under each `core.autocrlf` value, with and without a `.gitattributes` rule, and reports what lands in the working copy.[^6] The machine's system-level Git config has `core.autocrlf=true`, which is the Git for Windows default on this box.
+
+| `.gitattributes` | `core.autocrlf=true` | `=input` | `=false` |
+|---|---|---|---|
+| none | CRLF | LF | LF |
+| `* text=auto eol=lf` | LF | LF | LF |
+| `* text=auto eol=crlf` | CRLF | CRLF | CRLF |
+
+The pattern is what the documentation says in words: an explicit `eol` wins, and the config only matters where the attribute is silent.[^3] The index stayed LF in all nine runs.
+
+The table is the whole argument for `.gitattributes`. With no file, the result changes with each person's machine. With the file, it changes with the repo, which is where you want the decision to live.
+
+## The setup I would use
+
+For a repository where everyone works with LF, including Windows users:
+
+```text
+# .gitattributes at the repo root
+* text=auto eol=lf
+```
+
+Then, once, tell Git to re-apply the rule to files already committed:
+
+```text
+git add --renormalize .
+git commit -m "Normalize line endings"
+```
+
+GitHub's documentation gives this command for updating all files on the branch after a change to the settings.[^5] Expect a commit that touches every file that had CRLF in the repository, and tell your teammates before you merge it, because it will conflict with their open work on those files.
+
+If some files must be CRLF for a Windows tool, add a more specific line for just those paths, for example `*.ps1 text eol=crlf`. I did not test any particular tool's reaction to LF, so check what yours actually needs before adding exceptions.
+
+Binary files are the other thing to keep out of conversion. `text=auto` makes Git decide whether a file is text, and a file it considers binary is left alone.[^3] If you have files it guesses wrong, mark them explicitly with `-text`, which turns conversion off for that path.
+
+## Your editor
+
+Git settings decide what is committed. Your editor decides what you type.
+
+- **VS Code** has a `files.eol` setting for the default ending of new files. Its default is `auto`, meaning the operating system's ending; the other values are `\n` and `\r\n`.[^7] Put `"files.eol": "\n"` in the workspace's `.vscode/settings.json` to get LF for new files in that project. As far as I could verify, this affects new files, not files you open that already have CRLF.
+- **EditorConfig** is read by many editors. Its `end_of_line` property takes `lf`, `cr` or `crlf`.[^8] The project's own advice is to leave a property blank if your project does not standardize it, so only set it if you also settled the question in `.gitattributes`. The two should agree.
+
+## Checking what you have
+
+```text
+git ls-files --eol           # per file: i/ is the index, w/ is the working copy
+git ls-files --eol path/to/file
+file script.sh               # reports "with CRLF line terminators" when present
+od -c script.sh | head       # shows \r \n literally
+```
+
+In the `git ls-files --eol` output, `i/lf w/crlf` is the pair that produces the "LF will be replaced by CRLF" warning. To remove CRs from a single file quickly, `sed -i 's/\r$//' file` works on GNU sed, and the `dos2unix` tool does the same where it is installed. I would rather fix the repo rule than clean files one at a time, but it is handy for one script you are about to run.
+
+## Where I am not sure
+
+- **Other Git front ends.** I tested the command line only. GUI clients that run their own conversion might not behave the same.
+- **Old repositories.** `* text=auto eol=lf` normalizes text files, so a repo that already stores CRLF in the index will show a large one-time diff when you renormalize. That is expected, and I have not measured how large for any real project.
+- **Shell wording.** The "cannot execute: required file not found" message is from the bash and distribution I used. Other systems word it differently.
+
+## References
+
+[^1]: Wikipedia, [Newline](https://en.wikipedia.org/wiki/Newline). The table of which systems use LF, CR+LF and CR, the teletype history (citing Qualline, *Vi Improved - Vim*, 2001) and the notes on HTTP, SMTP, FTP and IRC. Wikipedia, so check primary sources before relying on any single detail.
+[^2]: Git documentation, `core.safecrlf` in [git-config](https://git-scm.com/docs/git-config), text read from the source file [Documentation/config/core.adoc](https://github.com/git/git/blob/master/Documentation/config/core.adoc): "A file that contains a mixture of LF and CRLF before the commit cannot be recreated by Git."
+[^3]: Git documentation, [gitattributes](https://git-scm.com/docs/gitattributes), sections `text` (set, unset, `auto`, unspecified) and `eol`. The statement that config variables apply only where the attribute is unspecified is the manual's wording for "unspecified"; "explicit attribute wins" is my reading of it, confirmed by the table above.
+[^4]: Git documentation, `core.autocrlf` and `core.eol` in the same [core.adoc](https://github.com/git/git/blob/master/Documentation/config/core.adoc). The `core.autocrlf` entry says `true` is the same as `text=auto` on all files plus `core.eol=crlf`, and that `input` means no output conversion. The `core.eol` entry says it is ignored when `core.autocrlf` is `true` or `input`.
+[^5]: GitHub Docs, [Configuring Git to handle line endings](https://docs.github.com/en/get-started/git-basics/configuring-git-to-handle-line-endings). Recommended `core.autocrlf` values per OS, the `* text=auto` example and `git add --renormalize .`.
+[^6]: This blog, [`line-endings-demo.sh`](/files/line-endings-demo.sh) and its [output](/files/line-endings-demo-output.txt). Git 2.55.0 for Windows, system `core.autocrlf=true`, bash from Git for Windows. The WSL shebang test used Ubuntu under WSL; it is shown in the text but is not in the script.
+[^7]: Visual Studio Code source, [`files.contribution.ts`](https://github.com/microsoft/vscode/blob/main/src/vs/workbench/contrib/files/browser/files.contribution.ts), the `files.eol` definition: values `\n`, `\r\n`, `auto`; default `auto`; description "The default end of line character." Read on November 14, 2026.
+[^8]: EditorConfig, [editorconfig.org](https://editorconfig.org/), supported properties list (`end_of_line`) and the note about leaving non-standardized properties blank.
