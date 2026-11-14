@@ -1,0 +1,130 @@
+---
+title: "The 1960 Doomsday Formula Missed Today's Population by 5.8x. It Was Within 2% Until 1950"
+description: "The 1960 Science paper that put doomsday on Friday, 13 November 2026 fit data well until 1950. I recomputed it against OWID: it overshoots 5.8x by 2023, and its date moves 30 years by fit method."
+pubDate: 2026-11-14
+tags: ['data', 'deep-dive']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Figure from '../../components/Figure.astro';
+
+Yesterday was supposed to be the end of the world. Not by anyone's current forecast, but by a 1960 paper in *Science* titled "Doomsday: Friday, 13 November, A.D. 2026," which resurfaced on Hacker News this week with 474 points.[^1] The title is a real prediction, made with a real equation, and the date it names has now passed. That makes it a rare thing: a long-range extrapolation you can grade.
+
+I read the paper itself, took its equation exactly as printed, and ran it against modern population data. The short version is that the formula tracked the data well for the 250 years before it was written, then broke about 40 years after publication, and the break is bigger than the "it was a joke" summaries suggest. The longer version has one result that surprised me: the date in the title is much softer than the title makes it sound.
+
+## What the paper claims
+
+The authors are Heinz von Foerster, Patricia Mora and Lawrence Amiot. Their idea is that when people cooperate, each added person makes the others more productive, so growth feeds on itself faster than exponential growth does. A plain exponential, like compound interest, grows by the same percentage every year. Their curve grows by a percentage that itself keeps rising, and mathematically that kind of curve reaches infinity at a finite date.
+
+They fitted it to 24 published estimates of world population, from the year 1 to 1958, using least squares. The result, as printed in the paper:[^2]
+
+- Equation 11: `N = 1.79 × 10¹¹ / (2026.87 − t)^0.99`, where N is world population and t is the calendar year.
+- The singularity date is 2026.87 plus or minus 5.50 years. That decimal is the "Friday, 13 November": 0.87 of the way through the year.
+- Root mean square deviation on their data: about 7 percent.
+- Equation 13: the time for the population to double is 0.445 times the years remaining until doomsday. So doubling should get faster and faster.
+
+Note what the paper does and does not say. The title is a date, but the body states the uncertainty as plus or minus 5.5 years, and calls Equation 11 an "adequate empirical formula" for the recorded data. The tone is also not entirely serious: run backwards, the same equation puts the first human ("Adam") about 200 billion years ago, which the authors point out is older than any estimate of the universe. The tabloid reading ("scientists predicted the world ends today") needed the title and nothing else.
+
+## What I recomputed
+
+I took Equation 11 as printed and compared it to the annual world population series from Our World in Data (OWID), which covers year 1 to 2023 (250 rows; I did not audit its upstream sources).[^3] I could not use the authors' own 24 estimates. They appear only as numbered dots on the paper's Figure 1, with the numbers pointing to 1930s to 1950s reference books and almanacs, and there is no table. I did not read values off the plot, because a number I traced by eye is not something I can call data.
+
+Everything below is one Python file with no dependencies, and the CSV it reads is in the same folder.[^4]
+
+## Where it holds, and where it stops holding
+
+Ratio of formula to actual population, from the script output:
+
+| Year | Actual (billion) | Formula (billion) | Formula / actual |
+|---|---|---|---|
+| 1000 | 0.32 | 0.19 | 0.58 |
+| 1700 | 0.60 | 0.58 | 0.97 |
+| 1900 | 1.63 | 1.48 | 0.91 |
+| 1950 | 2.49 | 2.43 | 0.98 |
+| 1960 | 3.02 | 2.79 | 0.93 |
+| 1990 | 5.33 | 5.03 | 0.94 |
+| 2000 | 6.17 | 6.88 | 1.12 |
+| 2010 | 7.02 | 10.91 | 1.55 |
+| 2020 | 7.89 | 26.56 | 3.37 |
+| 2023 | 8.09 | 46.88 | 5.79 |
+
+<Chart
+  type="line"
+  format="plain"
+  caption="World population (billions) by decade: OWID series against the paper's Equation 11. The two lines stay close until about 1990, then the formula leaves. Decades are evenly spaced on the x axis."
+  label="Line chart of world population in billions by decade from 1900 to 2020. The OWID series rises smoothly from 1.63 to 7.89. The 1960 formula follows it closely, slightly below, until 1990 at 5.03 against 5.33, then rises faster: 6.88 in 2000, 10.91 in 2010 and 26.56 in 2020."
+  labels={[1900, 1910, 1920, 1930, 1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020]}
+  series={[
+    { name: 'OWID actual', data: [1.63, 1.77, 1.9, 2.07, 2.29, 2.49, 3.02, 3.69, 4.45, 5.33, 6.17, 7.02, 7.89] },
+    { name: 'Equation 11 (1960)', data: [1.48, 1.61, 1.76, 1.93, 2.15, 2.43, 2.79, 3.28, 3.97, 5.03, 6.88, 10.91, 26.56] },
+  ]}
+  yTitle="billions of people"
+/>
+
+Three things stand out.
+
+First, the fit is good in the middle and poor at the far past. Between 1700 and 1990 the formula is within about 15 percent, and within 2 percent in 1950. Before 1500 it is off by 28 percent or more, which fits the authors' own caution about extrapolating backward. The paper's 7 percent RMS is for its 24 points. On my 185 OWID points between years 1 and 1958 the same equation gives 17.5 percent, but that number is not comparable: my points are dense after 1700 and sparse before, theirs were picked differently.
+
+Second, the formula exceeds the actual population by more than 10 percent starting in 2000, by more than 50 percent in 2010, and by more than 100 percent in 2015. In other words the 1960 curve was a decent forecast for about four decades.
+
+Third, and this is the part I did not expect: the equation reaches today's population long before today. Solving Equation 11 for N = 8.1 billion gives the year 2004. By the formula's own arithmetic, the world should have been this crowded 20 years ago.
+
+## Why it broke: doubling time went the wrong way
+
+The equation's defining feature is that growth accelerates without bound. Equation 13 turns that into a testable statement about doubling time. The prediction is that it shrinks in proportion to the time remaining.
+
+<Chart
+  type="bar"
+  format="plain"
+  caption="Years for world population to double, measured over three windows in the OWID series, against what Equation 13 says at the start of each window. Reality drifted in the opposite direction."
+  label="Grouped bar chart of doubling time in years for three periods. 1900 to 1960: actual 67.4, paper 56.5. 1960 to 2000: actual 38.7, paper 29.8. 1970 to 2023: actual 46.9, paper 25.3."
+  labels={['1900 to 1960', '1960 to 2000', '1970 to 2023']}
+  series={[
+    { name: 'Actual (OWID)', data: [67.4, 38.7, 46.9] },
+    { name: 'Equation 13', data: [56.5, 29.8, 25.3] },
+  ]}
+  yTitle="doubling time (years)"
+/>
+
+The actual doubling time did shorten, from about 67 years in the early 1900s to about 39 years over 1960 to 2000. Then it reversed. Measured from 1970, the world is on track to double in about 47 years, not the 25 the formula wanted. The annual growth rate in 2023 was 0.88 percent in OWID's series. Equation 12 would have it at 26 percent per year, which is what "a few years before infinity" means in practice.
+
+I want to be careful about causes here, because the data I have shows the break but not the reason. The demographic transition (families having fewer children as incomes and education rise) is the standard explanation, and the HN thread leans on it, with commenters pointing at fertility rates near 1 in South Korea.[^1] That is a commenter's claim and I did not test it. What I can say from the numbers is only that the assumption inside the model, that each person raises everyone's growth rate, stopped being a good description around 1970.
+
+## The date is softer than the title
+
+The most useful result for me was a sensitivity check on how the date was obtained. The paper fits three constants (K, U and k) at once. I refit the same equation form to OWID data up to 1957, which is the paper's range minus 1958 (the paper's reference note 9 says that year was not used).[^2] I tried two common readings of "least squares", on all points and on a sample thinned to about 24 points:
+
+| Fit (data up to 1957) | Singularity year U |
+|---|---|
+| Log of population, all 184 OWID points | 2000.1 |
+| Log of population, about 24 thinned points (7 different thinnings) | 1996.4 to 2002.5 |
+| Raw population, all 184 points | 2015.0 |
+| Raw population, 23 thinned points | 2021.5 |
+| The paper (its own 24 estimates) | 2026.87 ± 5.50 |
+
+
+The answer ranges from about 1996 to 2021, depending on the method and the sample, against the paper's 2026.87. The linear fit on 24 points (2021.5) falls just inside the paper's own stated range (2021.4 to 2032.4), but I would not call that a reproduction. The data differ from the authors' and I do not know which error measure they minimized.
+
+What it does show is that a date quoted to two decimals comes from a three-parameter fit that moves by decades when you change reasonable details. The paper's own plus or minus 5.5 years already admitted some of that. My refits admit more.
+
+## What this does not show
+
+- **I could not reproduce the authors' fit.** The 24 estimates are not tabulated in the paper, and I did not trace them from the figure. My refits use OWID, so they say something about the equation's form, not about the original numbers.
+- **OWID is a reconstruction.** Estimates before about 1950 are modeled, not counted, and I did not audit how.
+- **Two fit methods, one data source.** The spread of U across methods is a floor on the uncertainty, not a full error bar.
+- **Fitting a curve is not a causal model.** The equation matching 1700 to 1990 does not mean its mechanism was right. A different growth curve could fit those points equally well.
+- **This tests the arithmetic, not the headline.** The paper's later sections discuss control of population growth, and I did not evaluate any of that.
+
+## Takeaways
+
+- Equation 11 was a good fit for 1700 to 1990 and then overshot: 1.12x in 2000, 3.4x in 2020, 5.8x in 2023.
+- The formula's own arithmetic reaches today's 8.1 billion in 2004.
+- The break shows up in doubling time. The formula said it would keep shrinking. Measured over 1970 to 2023 it lengthened to about 47 years.
+- The singularity date depends on the fit: 1996 to 2021 across my refits, against the paper's 2026.87.
+- A curve that fits a century of data tells you about the century, not about the end of it.
+
+[^1]: [Doomsday: Friday, 13 November, A.D. 2026 (1960)](https://news.ycombinator.com/item?id=50482379), Hacker News, 474 points and 327 comments when I read it on November 14, 2026.
+[^2]: H. von Foerster, P. M. Mora and L. W. Amiot, "Doomsday: Friday, 13 November, A.D. 2026," *Science* 132 (3436), 1291-1295, 4 November 1960, [doi:10.1126/science.132.3436.1291](https://www.science.org/doi/10.1126/science.132.3436.1291). I read the text from a [university-hosted copy of the PDF](https://mozart.bioinfo.rpi.edu/bystrc/courses/biol4961/Doomsday.pdf), including Equations 10 to 13, the 7 percent RMS statement, the 24-estimate description and reference note 9.
+[^3]: Our World in Data, [world population series](https://ourworldindata.org/grapher/population), downloaded as CSV on November 14, 2026 (261 rows including prehistory; 250 from year 1 to 2023). Copy used here: `owid-world-population.csv`.
+[^4]: [`doomsday-recompute.py`](/files/doomsday-recompute.py), the data [`owid-world-population.csv`](/files/owid-world-population.csv) and the [script output](/files/doomsday-recompute-output.txt). Standard library only; refit grids for U run in 0.1-year steps (log fit) and 0.5-year steps (linear fit).
