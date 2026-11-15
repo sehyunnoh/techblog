@@ -1,0 +1,108 @@
+---
+title: 'What Is an OG Image? How Link Preview Cards Work'
+description: 'An OG image is the picture a chat app or social site shows when you paste a link. This guide covers the tag that sets it, the size to use, and why a preview can stay wrong after you fix it.'
+pubDate: 2026-11-15
+updatedDate: 2026-11-15
+tags: ['web', 'tutorial']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+
+Paste a link into a chat or a social post and, on many services, it turns into a card: a picture, a title, a line of description. That picture is the OG image. Nobody uploads it at the moment of sharing. It comes from a few lines in the page's own HTML, and the service fetches it on its own.
+
+This guide explains where those lines go, what size the image should be, and the one behavior that surprises people: fixing the image does not always fix the card.
+
+## The short version
+
+- "OG" stands for **Open Graph**, a protocol that was originally created at Facebook.[^1]
+- A page opts in with `<meta property="og:...">` tags in its `<head>`. The one that sets the picture is `og:image`, and its value is the URL of an image file.[^1]
+- The protocol lists four required properties for every page: `og:title`, `og:type`, `og:image` and `og:url`.[^1]
+- A common safe size is **1200 x 630 pixels**, roughly a 1.91:1 rectangle. Facebook's own documentation recommends at least that for sharp display on high resolution screens.[^2]
+- Services cache what they fetch, so a corrected image can take a deliberate refresh to show up.[^2]
+
+## How a card gets made
+
+The page never hands the image to anyone. A service's crawler (a program that visits URLs on its own) downloads your HTML, reads the meta tags, then downloads the image they point to.
+
+<Mermaid
+  caption="What happens after someone pastes a link. The crawler reads the HTML first and only then asks for the image, and it keeps the result."
+  label="Sequence diagram. A person pastes a link. The service's crawler requests the page, reads the og meta tags, requests the image URL, stores both, and shows a card."
+  code={`
+sequenceDiagram
+  participant U as Person
+  participant S as Chat or social service
+  participant P as Your page
+  participant I as Image URL
+  U->>S: pastes link
+  S->>P: GET page HTML
+  P-->>S: HTML with og:title, og:image, ...
+  S->>I: GET image from og:image
+  I-->>S: PNG or JPEG
+  S-->>S: cache title, description, image
+  S-->>U: card with picture
+`}
+/>
+
+Two consequences follow from that order. The image has to be reachable by a stranger's server, so a file behind a login or on a local address gives an empty card. And because the crawler stores its copy, what readers see is a snapshot, not a live view of your page.
+
+## What this blog sends
+
+Here is the relevant part of the `<head>` on one of this blog's posts, copied from the live page on November 15, 2026:
+
+```html
+<meta property="og:type" content="article">
+<meta property="og:title" content="Only 18% of Rust's 178 Open Unsoundness Bugs Are in the Standard Library">
+<meta property="og:url" content="https://lleg.dev/posts/rust-178-open-unsound-issues-only-18-percent-std/">
+<meta property="og:image" content="https://lleg.dev/og/rust-178-open-unsound-issues-only-18-percent-std.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Only 18% of Rust's 178 Open Unsoundness Bugs Are in the Standard Library">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://lleg.dev/og/rust-178-open-unsound-issues-only-18-percent-std.png">
+```
+
+All four required properties are there, plus width, height and alt text. The spec says a page that specifies `og:image` should also specify `og:image:alt`, a description of what the picture shows.[^1] The `twitter:*` lines are a separate, X-specific set of tags. I could not read X's documentation (the page returned HTTP 402 when I tried), so I am not making any claim about how X treats `og:*` tags when `twitter:*` ones are missing.
+
+I downloaded that image and checked it: a PNG, 1200 x 630 pixels, 34,336 bytes. Facebook's documented ceiling is 8 MB, so the file is small by a wide margin.[^2][^3]
+
+## Where the image comes from
+
+You can use any image you like: a screenshot, a logo, a photo. Many sites make the same blank card for every page, which works but wastes the one place readers see your title in a feed.
+
+This blog generates one per post at build time instead. The title, date, reading time and tags go into a layout written in HTML and CSS. Satori turns that layout into SVG, and resvg renders the SVG to a PNG.[^3] The result is a plain file at a stable URL, so the crawler has nothing special to do. There is no image asset to keep in sync with the title, which is the reason I did it this way.
+
+One exception: the home page falls back to a single default image (`/og-default.png`), because there is no single post to describe. The guides each get their own, built the same way.[^3]
+
+## Why a fixed preview can stay wrong
+
+This is the part that costs people an afternoon. Facebook's documentation spells out several details:[^2]
+
+- Its crawler scrapes and caches metadata the first time content is shared.
+- The crawler has to see an image at least once before it can be rendered, so the first person to share a link may see no picture.
+- Images are cached by URL. To change an image, use a new URL, and keep the old file because existing posts may still reference it.
+- Updating the image does not update previews that were already shared. Those must be refreshed separately.
+
+The same page offers two ways around the first-share gap: pre-fetching the image through the Sharing Debugger, or adding `og:image:width` and `og:image:height` so the crawler can render the image right away. That second point is why this blog sends the width and height tags.
+
+LinkedIn has its own tool for the same job, called Post Inspector.[^4] I only confirmed that the tool exists. I did not test how long its cache lasts, and I have no measurements for any service other than what Facebook documents.
+
+## Checklist before you share a link
+
+1. The `og:image` URL is absolute and opens in a private browser window with no login.
+2. The image is at least 1200 x 630, well under the service's file limit, and anything important sits away from the edges in case a service crops it.
+3. `og:image:width`, `og:image:height` and `og:image:alt` are present.
+4. If you change a published image, give it a new URL, then ask the services you care about to re-fetch.
+
+## What I did not verify
+
+- I tested no platform's rendering myself. Everything about caching and sizes comes from Facebook's documentation, so other services may differ.
+- Cropping rules vary. I have not checked how any particular service crops a 1200 x 630 image on a narrow screen.
+- Whether OG tags influence search ranking. I found no source either way, so I only claim what they visibly change: how a shared link looks.
+
+## References
+
+[^1]: The Open Graph protocol, [ogp.me](https://ogp.me/). Origin at Facebook, the four required properties (`og:title`, `og:type`, `og:image`, `og:url`), and the optional structured properties `og:image:width`, `og:image:height` and `og:image:alt`, with the statement that a page specifying `og:image` should specify `og:image:alt`. Read November 15, 2026.
+[^2]: Meta for Developers, [Sharing Best Practices: Images](https://developers.facebook.com/docs/sharing/webmasters/images/). Minimum 200 x 200, recommended at least 1200 x 630, 1.91:1 ratio, 8 MB limit, first-share caching behavior, caching by URL, and the Sharing Debugger and width/height workaround. Read November 15, 2026.
+[^3]: This blog's source, `src/utils/og-image.ts` and the route files under `src/pages/og/` in [this blog's repository](https://github.com/sehyunnoh/techblog), using [Satori](https://github.com/vercel/satori) ("convert HTML and CSS to SVG") and [resvg-js](https://github.com/thx/resvg-js). The image size and byte count are my own measurement of the live file at `https://lleg.dev/og/rust-178-open-unsound-issues-only-18-percent-std.png`, November 15, 2026.
+[^4]: LinkedIn, [Post Inspector](https://www.linkedin.com/post-inspector/). The page loaded, but its text gave no description of caching, so I am citing the tool's existence only.
