@@ -1,0 +1,105 @@
+---
+title: "Only 18% of Rust's 178 Open Unsoundness Bugs Are in the Standard Library"
+description: "I counted every I-unsound issue in rust-lang/rust. 178 are open, but only 32 belong to the standard library team, and 2026 has already produced 149 new ones."
+pubDate: 2026-11-15
+tags: ['rust', 'security', 'data']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+
+A post from Microsoft's FORGE Lab reached the Hacker News front page this week under the title "Memory Safety Bugs in Rust Standard Library," with 167 points and 150 comments.[^1] A commenter added a number to the discussion: the Rust project tracks 178 open `I-unsound` issues. That number is easy to check, and checking it turned out to be more interesting than the post's headline suggests.
+
+The short version: the 178 is right, but most of those issues are not in the standard library. They are mostly in the compiler and its type system. And 2026 is an unusual year for how many new ones get filed.
+
+## What the FORGE post says
+
+The post, dated November 9, 2026, covers five soundness bugs the FORGE team reported against Rust's `std` and `core` libraries.[^2] Soundness is a promise: code that does not use the `unsafe` keyword cannot cause memory corruption, whatever else it does. A soundness bug is a case where safe code can break that promise anyway. The five are:
+
+- `MapWindows::clone` is not panic-safe (a nightly-only API).
+- `BTreeMap::insert` breaks its own length bookkeeping if a custom allocator panics.
+- `str::replace` with a custom `Pattern` can produce a `String` that is not valid UTF-8.
+- `process::exit` called from a child thread unmaps the main thread's signal stack.
+- `CommandExt::exec` writes to the global environment pointer while holding only a read lock.
+
+The authors group these into three patterns of misplaced trust inside `unsafe` code: trusting code not to panic, trusting user-written trait implementations to behave, and trusting the underlying operating system. They say some bugs were found with an AI-assisted scanner and then reproduced by hand. The post does not give a total for how many such bugs exist, which is the gap the commenter's 178 was filling.
+
+## What I counted
+
+Rust's issue tracker uses a label, `I-unsound`, for "a soundness hole (worst kind of bug)." I downloaded every issue in `rust-lang/rust` that carries it, open and closed, with the GitHub command line tool, and summarized them with a short Python script.[^3] The file has 763 issues: 178 open, 585 closed.
+
+Two cautions before the numbers. The label covers the whole repository, not just the standard library, so I split by the team labels that triage adds (`T-libs` for the library team, `T-compiler`, `T-types`, `T-lang`, `T-opsem`). An issue can carry several team labels, so those shares add up to more than 100 percent. And I only see issues that still carry the `I-unsound` label today. If maintainers removed it from something they decided was not a real soundness hole, that issue is invisible to me.
+
+## Most open soundness bugs are not in std
+
+<Chart
+  type="bar"
+  format="plain"
+  caption="Open I-unsound issues in rust-lang/rust by team label, November 2026. An issue can have more than one team label, so the bars overlap."
+  label="Bar chart of 178 open I-unsound issues by team label: T-compiler 94, T-types 76, T-libs 32, T-lang 21, T-opsem 15, and 8 with no team label."
+  labels={['T-compiler', 'T-types', 'T-libs', 'T-lang', 'T-opsem', 'no team label']}
+  series={[{ name: 'Open I-unsound issues', data: [94, 76, 32, 21, 15, 8] }]}
+  yTitle="open issues"
+/>
+
+Of the 178 open issues, 94 (53 percent) are labelled for the compiler team and 76 (43 percent) for the types team, which owns the type checker and trait solver. Only 32 (18 percent) carry `T-libs`, the standard library team. The area labels point the same way: the most common are `A-LLVM` (27), `A-borrow-checker` (22) and `A-associated-items` (20).
+
+So when a headline says Rust has memory safety bugs in its standard library, it is true and it is also a small slice. The larger share of known holes are cases where the compiler accepts code it should reject. The standard library bugs are different in kind: they live in `unsafe` blocks that people wrote by hand, which is why the FORGE post focuses on how that code trusts its callers.
+
+Of those 32 standard library issues, 9 (28 percent) are labelled `requires-nightly`, meaning they need an unstable feature to trigger. Across all 178 open issues, 30 (17 percent) carry that label. In other words, a good part of the pile cannot be hit from stable Rust, though most of it can.
+
+## 2026 is not a normal year
+
+<Chart
+  type="bar"
+  format="plain"
+  caption="New I-unsound issues by creation year, all teams and T-libs only. 2026 runs through November 11."
+  label="Grouped bar chart by year from 2019 to 2026. All I-unsound issues created: 47, 77, 64, 51, 92, 74, 62, 149. T-libs issues created: 9, 9, 24, 8, 6, 21, 14, 45."
+  labels={['2019', '2020', '2021', '2022', '2023', '2024', '2025', '2026']}
+  series={[
+    { name: 'All I-unsound', data: [47, 77, 64, 51, 92, 74, 62, 149] },
+    { name: 'T-libs only', data: [9, 9, 24, 8, 6, 21, 14, 45] },
+  ]}
+  yTitle="issues created"
+/>
+
+From 2019 to 2025 the project got between 47 and 92 new soundness issues a year. In 2026, with about six weeks left, there are already 149, roughly 14 a month against about 5 a month in 2025. The standard library label tells the same story at a smaller scale: 45 in 2026 against 14 in 2025.
+
+The spikes are lumpy. The most active month was October 2026 with 44 new issues, but only 9 of those were library issues, so that burst was mostly the compiler. August 2026 had 28 (9 library). I do not know why. The FORGE post says some of its bugs came from an AI-assisted scanner, and that would be one plausible reason for more reports, but my data cannot tell who or what found each issue, so I am not going to attribute the surge to anything.
+
+One consequence is visible in the open list: 93 of the 178 open issues (52 percent) were created in 2026. The backlog is young. Its median age is 0.7 years, though a quarter of it is three years or older, 23 issues are at least five years old, and the oldest is 12.1 years.
+
+## How fast do they get fixed?
+
+| Measure (closed issues, n = 585) | Value |
+|---|---|
+| Median time from open to close | 28 days |
+| Closed within 7 days | 30% |
+| Closed within 30 days | 51% |
+| Closed within 365 days | 81% |
+| 90th percentile | 899 days |
+
+Most issues close quickly, and a long tail does not. This is a slight overstatement of speed, because the open issues are, by definition, the ones that have not closed yet, and they are missing from this table. A fair reading is that fixes are usually fast and a minority of hard ones stay for years.
+
+The five FORGE issues fit that pattern. Three closed in 20, 3 and 1 days. Two are still open. `BTreeMap::insert` (#156490) has been open about six months and needs a nightly feature. The `exec` environment write (#156951) is about five and a half months old, it works on stable Rust, and it is the only one of the five carrying the high-priority label `P-high`.[^4] That second one is the one I would watch: it is the combination of reachable from stable code and unresolved. The post mentions a fix in review for it, which I did not verify beyond the post's own link.
+
+## What this does not show
+
+- **Labels are human judgment.** `I-unsound` and the team labels are applied by maintainers and triagers. An unlabelled or mislabelled bug is not in my count, and 8 open issues have no team label at all.
+- **Counts are not severity.** One bug that lets safe code corrupt memory in a common function is worse than ten that need a nightly feature and a contrived trait implementation. I only counted.
+- **I do not know why 2026 is high.** More bugs, better hunting tools, more attention to the label, or a change in how issues get tagged would all produce this curve.
+- **Not every I-unsound issue is a security hole.** Some require unrealistic code to trigger. The label means the language's promise is broken, not that someone can exploit it.
+- **Ages use a cutoff.** I measured age to November 11, the date of the newest issue in the file, though the data was downloaded on November 15.
+
+## Takeaways
+
+- The commenter's number is right: 178 open `I-unsound` issues in `rust-lang/rust`, out of 763 ever labelled.
+- Only 32 of the 178 (18 percent) are standard library issues. 94 are compiler issues and 76 are type system issues.
+- 2026 has 149 new soundness issues so far, compared with 62 in all of 2025. I cannot say why.
+- Half of closed soundness issues were resolved within 30 days. Of the five FORGE bugs, two are still open, and one of those works on stable Rust.
+- Counting a label is a floor on what is known, not a measure of how safe the language is.
+
+[^1]: [Memory Safety Bugs in Rust Standard Library](https://news.ycombinator.com/item?id=50478701), Hacker News, 167 points and 150 comments when I read it on November 15, 2026. The 178 figure is a commenter's; I recounted it myself.
+[^2]: Yechan Bae, FORGE Lab, [Memory safety bugs in the Rust standard library](https://forge-blog.github.io/posts/rust-std-memory-safety/), published November 9, 2026. The issue list and the three patterns come from this post. I read it through a text summary, so check the original for the authors' own wording.
+[^3]: [`rust-unsound-collect.sh`](/files/rust-unsound-collect.sh), the downloaded [`rust-unsound-issues.json`](/files/rust-unsound-issues.json), [`rust-unsound-analyze.py`](/files/rust-unsound-analyze.py) and the [script output](/files/rust-unsound-output.txt). Data from `gh issue list -R rust-lang/rust --label I-unsound --state all` on November 15, 2026. Standard library only for the analysis.
+[^4]: GitHub issues [#156501](https://github.com/rust-lang/rust/issues/156501), [#156490](https://github.com/rust-lang/rust/issues/156490), [#156491](https://github.com/rust-lang/rust/issues/156491), [#161018](https://github.com/rust-lang/rust/issues/161018) and [#156951](https://github.com/rust-lang/rust/issues/156951) in rust-lang/rust. States, dates and labels are from the downloaded file.

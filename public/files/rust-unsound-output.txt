@@ -1,0 +1,98 @@
+total 763 open 178 closed 585 newest created 2026-11-11 08:20:58
+
+-- open issues by team label --
+T-libs: 32 of 178 (18%)
+T-libs-api: 0 of 178 (0%)
+T-compiler: 94 of 178 (53%)
+T-lang: 21 of 178 (12%)
+T-types: 76 of 178 (43%)
+T-opsem: 15 of 178 (8%)
+T-rustdoc: 0 of 178 (0%)
+T-cargo: 0 of 178 (0%)
+no T- label: 8 of 178 (4%)
+requires-nightly: 30 of 178 (17%)
+A-stdlib-ish (T-libs or T-libs-api): 32 of 178 (18%)
+T-libs open and requires-nightly: 9 of 32 (28%)
+
+-- priority labels on open --
+P-critical: 0 of 178 (0%)
+P-high: 58 of 178 (33%)
+P-medium: 37 of 178 (21%)
+P-low: 10 of 178 (6%)
+no P- label: 73 of 178 (41%)
+
+-- created per year (all, then still open) --
+2013 2 0
+2014 8 2
+2015 24 1
+2016 18 1
+2017 42 3
+2018 53 3
+2019 47 6
+2020 77 2
+2021 64 6
+2022 51 7
+2023 92 15
+2024 74 19
+2025 62 20
+2026 149 93
+
+-- age of open issues (years) --
+median 0.7, p75 3.0, max 12.1
+open >= 1 years old: 82 (46%)
+open >= 3 years old: 45 (25%)
+open >= 5 years old: 23 (13%)
+
+-- days to close (closed issues) --
+median 28 p75 195 p90 899
+closed within 7 days: 175 of 585 (30%)
+closed within 30 days: 297 of 585 (51%)
+closed within 365 days: 474 of 585 (81%)
+Counter({'COMPLETED': 565, 'DUPLICATE': 13, 'NOT_PLANNED': 7})
+
+-- the five FORGE issues --
+156501 CLOSED 20d nightly ['P-low']
+156490 OPEN 183d nightly []
+156491 CLOSED 3d nightly []
+161018 CLOSED 1d stable []
+156951 OPEN 169d stable ['P-high']
+
+-- std/core-area labels (open) --
+[('A-LLVM', 27), ('A-borrow-checker', 22), ('A-associated-items', 20), ('A-higher-ranked', 16), ('A-destructors', 14), ('A-dyn-trait', 13), ('A-trait-system', 13), ('A-lifetimes', 12), ('A-pin', 10), ('A-impl-trait', 10), ('A-codegen', 9), ('A-type-system', 9)]
+
+-- created per year, T-libs only (all, still open) --
+T-libs total 158 open 32
+2019 9 1
+2020 9 0
+2021 24 2
+2022 8 0
+2023 6 0
+2024 21 4
+2025 14 6
+2026 45 19
+
+-- created per month, 2025-07 to 2026-11 (all, T-libs) --
+2025-07 8 1
+2025-08 2 0
+2025-09 1 0
+2025-10 5 2
+2025-11 6 3
+2025-12 2 1
+2026-01 4 3
+2026-02 9 1
+2026-03 8 3
+2026-04 8 2
+2026-05 15 8
+2026-06 6 2
+2026-07 9 5
+2026-08 28 9
+2026-09 10 3
+2026-10 44 9
+2026-11 8 0
+
+-- the five FORGE issues, titles --
+156501 `MapWindows::clone` is not panic-safe; panicking `T::clone` causes uninitialized memory to
+156490 `BTreeMap::insert` is not panic-safe; allocator panic during split propagation breaks leng
+156491 `str::replace` with a custom `Pattern` implementation can create a non-UTF-8 `String` thro
+161018 `process::exit` in a child thread unmaps the main thread's sigalt stack
+156951 `CommandExt::exec` writes to the global environment pointer while holding only a read lock
