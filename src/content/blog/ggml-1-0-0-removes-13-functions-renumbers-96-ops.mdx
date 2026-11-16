@@ -1,0 +1,108 @@
+---
+title: "ggml 1.0.0 removed 13 functions, renumbered 96 ops"
+description: "I diffed ggml's public headers across all 45 release tags. Version 1.0.0 deletes 13 functions and shifts 96 op numbers, yet 0.9.5 shook the API almost as hard."
+pubDate: 2026-11-16
+tags: ['ai', 'systems', 'deep-dive']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+ggml is the tensor library underneath llama.cpp and whisper.cpp. On November 13 it shipped version 1.0.0, nine days after 0.29.0.[^1] A "1.0" usually reads as a promise: the API is settled, and breaking changes will now cost a major version. I wanted to know what that promise looked like in the code, so I compared the public headers of every release tag, 45 of them from 0.9.1 to 1.0.0.
+
+The short version: 1.0.0 is a cleanup, not a freeze. It deleted 13 functions and moved the numeric value of 96 operation constants. Both are the largest numbers in the project's recent history, but neither is without precedent, and the one thing that really did change is a single line in a build file.
+
+## What I compared
+
+A header file is where a C library lists what outsiders may call. ggml keeps its headers in `include/`, and every function meant for outside use is marked `GGML_API` (or `GGML_BACKEND_API` for backend plugins). That list of names, plus the enums and macros next to it, is the public API. Anything else in the source tree is private and free to change.
+
+I wrote a small Python script that reads those headers at each tag with `git show`, extracts the names, and compares neighbouring releases.[^2] It tracks six things: functions, deprecation markers, enum constants and their numeric values, macros, types, and function signatures. It uses regular expressions, not a C compiler, so I checked the 1.0.0 result by hand against a plain `diff` of `ggml.h`. All 13 removals showed up in both.
+
+Between 0.29.0 and 1.0.0 the count of exported functions went from 772 to 760. That is 13 removed and 1 added, a net loss of 1.6 percent. The 119 commits in that window touched 299 files, but almost all of that is backend code (CUDA, Metal, Vulkan, SYCL and others) that never appears in a header.
+
+## The 13 functions
+
+The release notes put it in one line: "Pruned deprecated API and removed the legacy `DIAG_MASK_INF`/`DIAG_MASK_ZERO` ops."[^1] "Deprecated" is a promise too. It means a function still works but its header carries a compiler warning that says what to use instead. Here is what was removed and how long each had carried that warning:
+
+| Removed function | Marked deprecated since | Use instead (from the header) |
+|---|---|---|
+| `ggml_add1`, `ggml_add1_inplace` | 0.10.0 | `ggml_add` |
+| `ggml_rope_custom`, `ggml_rope_custom_inplace` | 0.9.1 or earlier | `ggml_rope_ext` |
+| `ggml_type_sizef` | 0.9.1 or earlier | `ggml_row_size` |
+| `ggml_upscale_ext` | 0.9.1 or earlier | `ggml_interpolate` |
+| `ggml_mul_mat_set_prec`, `ggml_flash_attn_ext_set_prec` | 0.24.0 | `ggml_prec_set_acc` |
+| `ggml_diag_mask_inf`, `ggml_diag_mask_zero` and their `_inplace` forms | never | none named |
+| `ggml_rope_yarn_corr_dims` | never | none named |
+
+Eight of the 13 had a deprecation warning. Five did not: the four `diag_mask` functions and `ggml_rope_yarn_corr_dims` were deleted outright. The `diag_mask` family is the old way to build the triangular mask in attention, so a program using it has no one-line replacement to switch to.
+
+The warning periods are uneven. Four functions carried the marker for the whole span my data covers, which starts at 0.9.1 in September 2025, so at least 14 months. `ggml_add1` had about seven months. The two `set_prec` functions were marked in 0.24.0 on September 14 and gone in 1.0.0 on November 13, which is two months. Release dates are from the project's GitHub releases page.
+
+So "pruned deprecated API" is true for 8 of 13, and for two of those the notice was short. This is a normal pace for a library that has been below 1.0 until now. It just is not a long runway.
+
+## The 96 renumbered constants
+
+An enum in C is a list of names that the compiler turns into consecutive integers. `GGML_OP_NONE` is 0, the next name is 1, and so on. The list `ggml_op` names every operation the library can run (add, multiply, matrix multiply, softmax, and about a hundred more). When you delete a name from the middle, every name after it moves down by one.
+
+1.0.0 deleted three op names: `GGML_OP_ADD1`, `GGML_OP_DIAG_MASK_INF` and `GGML_OP_DIAG_MASK_ZERO`. `GGML_OP_ADD1` sat near the top, so almost everything after it shifted. Of 103 constants in `ggml_op` before, 100 remain, and only 4 kept their old number: `NONE`, `DUP`, `ADD` and `ADD_ID`. The other 96 moved. `GGML_OP_COUNT`, the total, went from 102 to 99. No other enum in the headers changed numbering, including `ggml_type`, the enum that labels tensor data formats.
+
+<Chart
+  type="bar"
+  format="plain"
+  caption="Enum constants whose numeric value changed, per release, for every comparison between neighbouring tags from 0.9.1 to 1.0.0. The 34 releases not shown changed none."
+  label="Bar chart of enum constants whose value changed per release: 0.9.5 78, 0.9.8 12, 0.10.0 1, 0.15.0 42, 0.16.0 1, 0.17.0 11, 0.23.0 1, 0.28.0 11, 0.29.0 1, 1.0.0 96."
+  labels={['0.9.5', '0.9.8', '0.10.0', '0.15.0', '0.16.0', '0.17.0', '0.23.0', '0.28.0', '0.29.0', '1.0.0']}
+  series={[{ name: 'Constants renumbered', data: [78, 12, 1, 42, 1, 11, 1, 11, 1, 96] }]}
+  yTitle="constants renumbered"
+/>
+
+This is the reversal I did not expect. Renumbering is not new to 1.0.0. It happened in 10 of the 44 releases I compared, and the total before 1.0.0 is 158 moved constants. Version 0.9.5 moved 78, because new ops (`CUMSUM`, `TOP_K`, `TRI`, `FILL`, `SOLVE_TRI` and others) were inserted in the middle of the list. 0.15.0 moved 42 the same way. Insertion shifts numbers just as deletion does, and ggml has been inserting ops wherever they fit for a year.
+
+The practical meaning is that a program must not store a raw op number and expect it to mean the same thing after an upgrade. Within one build, that is harmless. Across two builds of the library that talk to each other, it is not. ggml has such a case: the RPC backend lets one machine run tensor operations on another over the network, and op numbers are part of what gets sent. The header shows the project is aware of it. It contains a compile-time check that fails if the op count changes, with a message reminding the developer to update the protocol version.[^3] In 1.0.0 that check now reads 99 instead of 102, and the major version in the same file went from 8 to 10.
+
+<Mermaid
+  caption="How deleting three op names turns into a wire-protocol change. The first four steps are what I read in the headers. The last step follows the release notes' statement that the RPC protocol was bumped to reject incompatible peers."
+  label="Flowchart: three op names removed, 96 constants shift, GGML_OP_COUNT changes from 102 to 99, a compile-time check forces an RPC protocol bump, and older peers are rejected."
+  code={`
+flowchart TD
+  A["Remove ADD1, DIAG_MASK_INF,<br/>DIAG_MASK_ZERO from ggml_op"] --> B["96 of 100 remaining constants<br/>get a new integer value"]
+  B --> C["GGML_OP_COUNT 102 to 99<br/>static_assert in ggml-rpc.h fails"]
+  C --> D["RPC_PROTO_MAJOR_VERSION 8 to 10"]
+  D --> E["Old and new RPC peers<br/>refuse to talk"]
+`}
+/>
+
+## The one line that really changed
+
+Here is what I found most telling. Both 0.29.0 and 1.0.0 contain this line in `src/CMakeLists.txt`: `SOVERSION ${GGML_VERSION_MAJOR}`.[^4] SOVERSION is the version number baked into the name of a shared library file on Linux, such as `libggml.so.0`. The system's loader uses it as a compatibility check. Two builds with the same SOVERSION are supposed to be drop-in replacements for each other.
+
+Because ggml ties that number to the major version, every release from 0.9.1 through 0.29.0 was `libggml.so.0`, including the ones that renumbered 78 and 42 constants. A binary linked against `.so.0` would load any of them. Starting with 1.0.0 it is `libggml.so.1`, so an old binary does not silently pick up the new library.
+
+That is a real change in behaviour, and it is the closest thing in the repository to the promise a "1.0" implies. I could not find a written policy behind it. I searched `README.md`, `CONTRIBUTING.md` and `docs/` at the 1.0.0 tag for terms like semver, stable API and deprecation policy, and found nothing. The release notes do not describe one either. My reading is that 1.0.0 marks the first time the soname moves, and what the project guarantees from here is something I would ask the maintainers, not assume.
+
+## A small mismatch in the notes
+
+The 1.0.0 release notes list `ggml_rope_set_truncate` and `ggml_rope_get_truncate` as new API for controlling YaRN, a context-extension technique for rotary position embeddings. The public header `include/ggml.h` has the setter and not the getter. The getter exists, and it is exported, but it is declared in the internal header `src/ggml-impl.h` and used by the backends.[^5] Library users cannot call it through the public header. The notes are describing the change to the library, not the surface a user sees, which is a reasonable choice and an easy one to misread.
+
+## What this does not show
+
+- **Headers only.** Behaviour can change without a header changing. The release notes describe plenty of that (kernels, schedulers, new quantization support), and I did not test any of it.
+- **A regex is not a compiler.** I validated the 13 removals and the enum shift by hand against `diff`, but the earlier tags are only as good as the parser. A function declared in an unusual style could have been missed on both sides of a comparison.
+- **Downstream breakage is unmeasured.** I did not build llama.cpp or whisper.cpp against 1.0.0. Both vendor their own copy of ggml, so whether a project is affected depends on which copy it uses.
+- **"Deprecated since" has a floor.** The earliest tag I could read is 0.9.1, so four functions are marked "0.9.1 or earlier" and the true age may be longer.
+- **The count of 13 is functions, not behaviours.** `ggml_add1` and `ggml_add` do similar work, so removing the former is small. Removing the `diag_mask` ops is larger.
+
+## Takeaways
+
+- ggml 1.0.0 removed 13 public functions (8 deprecated, 5 not) and added 1, taking the exported count from 772 to 760.
+- It renumbered 96 of 100 `ggml_op` constants because three names were deleted from the middle of the list. Op numbers have never been stable: 10 of 44 releases moved some.
+- The deprecation windows ranged from two months to at least fourteen. Two functions were removed after only 2 months of warning, and five had none.
+- The real signal of "1.0" is the shared-library soname moving from `.so.0` to `.so.1`. I found no written compatibility policy to go with it.
+- If you depend on ggml, pin the exact version, do not persist raw op numbers, and grep your code for the 13 names before upgrading.
+
+[^1]: [ggml v1.0.0 release notes](https://github.com/ggml-org/ggml/releases/tag/v1.0.0), published 2026-11-13. The API-changes section is the source for the quoted sentence and the list of new functions. Release dates for 0.10.0, 0.24.0, 0.29.0 and 1.0.0 are from the [releases page](https://github.com/ggml-org/ggml/releases).
+[^2]: [`ggml-api-diff.py`](/files/ggml-api-diff.py) and its [output for all 44 comparisons](/files/ggml-api-diff-output.txt). It needs git and Python 3 only, and it was run on a blobless clone of `ggml-org/ggml` on November 16, 2026. Usage: `python ggml-api-diff.py <repo> [tag tag ...]`.
+[^3]: [`include/ggml-rpc.h` at v1.0.0](https://github.com/ggml-org/ggml/blob/v1.0.0/include/ggml-rpc.h) compared with [v0.29.0](https://github.com/ggml-org/ggml/blob/v0.29.0/include/ggml-rpc.h). The 1.0.0 notes also mention a move to RPC protocol v9 in another entry. I did not work out how the two bumps relate.
+[^4]: [`src/CMakeLists.txt` at v1.0.0](https://github.com/ggml-org/ggml/blob/v1.0.0/src/CMakeLists.txt), lines 207, 365 and 412. The same three lines exist at v0.29.0. The top-level `CMakeLists.txt` sets `GGML_VERSION_MAJOR` to 0 at 0.29.0 and 1 at 1.0.0.
+[^5]: [`src/ggml-impl.h` at v1.0.0](https://github.com/ggml-org/ggml/blob/v1.0.0/src/ggml-impl.h), line 115, and the definition in `src/ggml.c`. I found the declaration with `git grep` on the 1.0.0 tag.

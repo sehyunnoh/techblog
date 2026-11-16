@@ -1,0 +1,91 @@
+tag       funcs depr |  +fn  -fn ~sig +enum -enum renum -macro -type
+v0.9.3      669    4 |    2    0    0     0     0     0      0     0
+v0.9.4      669    4 |    0    0    0     0     0     0      0     0
+v0.9.5      704    4 |   36    1    4    18     0    78      1     0
+v0.9.6      706    4 |    2    0    2     1     0     0      0     0
+v0.9.7      707    4 |    1    0    0     0     0     0      1     0
+v0.9.8      719    4 |   12    0    0     3     0    12      0     0
+v0.9.9      721    4 |    2    0    0     0     0     0      0     0
+v0.9.10     721    4 |    0    0    0     0     0     0      0     0
+v0.9.11     721    4 |    0    0    0     0     0     0      0     0
+v0.10.0     728    6 |    7    0    2    11     0     1      0     0
+v0.10.1     728    6 |    0    0    0     0     0     0      0     0
+v0.10.2     728    6 |    0    0    0     0     0     0      0     0
+v0.11.0     729    6 |    1    0    0     2     0     0      0     0
+v0.11.1     729    6 |    0    0    0     0     0     0      0     0
+v0.12.0     729    6 |    0    0    0     0     0     0      0     0
+v0.12.1     729    6 |    0    0    0     0     0     0      0     0
+v0.13.0     731    6 |    2    0    0     0     0     0      0     0
+v0.13.1     731    6 |    0    0    0     0     0     0      0     0
+v0.14.0     731    6 |    0    0    0     0     0     0      0     0
+v0.15.0     732    6 |    1    0    1     1     0    42      0     0
+v0.15.1     732    6 |    0    0    0     0     0     0      0     0
+v0.15.2     732    6 |    0    0    0     0     0     0      0     0
+v0.15.3     735    6 |    3    0    0     0     0     0      0     0
+v0.16.0     734    6 |    0    1    0     2     0     1      0     0
+v0.17.0     752    6 |   18    0    0     4     0    11      0     0
+v0.18.0     752    6 |    0    0    0     0     0     0      0     0
+v0.18.1     752    6 |    0    0    0     0     0     0      0     0
+v0.19.0     753    6 |    1    0    0     0     0     0      0     0
+v0.20.0     753    6 |    0    0    1     0     0     0      0     0
+v0.20.1     753    6 |    0    0    0     0     0     0      0     0
+v0.20.2     753    6 |    0    0    0     0     0     0      0     0
+v0.21.0     754    6 |    1    0    0     0     0     0      0     0
+v0.22.0     755    6 |    1    0    0     0     0     0      0     0
+v0.23.0     757    6 |    2    0    0     1     0     1      0     0
+v0.24.0     759    8 |    2    0    0     5     0     0      0     0
+v0.25.0     760    8 |    1    0    2     0     0     0      0     0
+v0.25.1     760    8 |    0    0    0     0     0     0      0     0
+v0.25.2     760    8 |    0    0    0     0     0     0      0     0
+v0.25.3     760    8 |    0    0    0     0     0     0      0     0
+v0.26.0     763    8 |    3    0    0     0     0     0      0     0
+v0.27.0     765    8 |    2    0    0     0     0     0      0     0
+v0.28.0     768    8 |    3    0    0     1     0    11      0     0
+v0.29.0     772    8 |    4    0    0     2     0     1      0     0
+v1.0.0      760    0 |    1   13    0     0     4    96      0     0
+
+=== v0.29.0 -> v1.0.0 detail ===
+added (1):
+    ggml_rope_set_truncate
+removed (13):
+    ggml_add1
+    ggml_add1_inplace
+    ggml_diag_mask_inf
+    ggml_diag_mask_inf_inplace
+    ggml_diag_mask_zero
+    ggml_diag_mask_zero_inplace
+    ggml_flash_attn_ext_set_prec
+    ggml_mul_mat_set_prec
+    ggml_rope_custom
+    ggml_rope_custom_inplace
+    ggml_rope_yarn_corr_dims
+    ggml_type_sizef
+    ggml_upscale_ext
+changed (0):
+newly_deprecated (0):
+macros_added (0):
+macros_removed (0):
+types_added (0):
+types_removed (0):
+enum_added (0):
+enum_removed (4):
+    ggml_op.GGML_OP_ADD1
+    ggml_op.GGML_OP_DIAG_MASK_INF
+    ggml_op.GGML_OP_DIAG_MASK_ZERO
+    ggml_prec.GGML_PREC_DEFAULT
+enum_renumbered by enum: {'ggml_op': 96}
+  ggml_op: 103 constants before, 100 after, 4 kept the same value: ['GGML_OP_NONE', 'GGML_OP_DUP', 'GGML_OP_ADD', 'GGML_OP_ADD_ID']
+removed functions (first tag seen, first tag marked GGML_DEPRECATED):
+    ggml_add1                        v0.9.1    v0.10.0
+    ggml_add1_inplace                v0.9.1    v0.10.0
+    ggml_diag_mask_inf               v0.9.1    None
+    ggml_diag_mask_inf_inplace       v0.9.1    None
+    ggml_diag_mask_zero              v0.9.1    None
+    ggml_diag_mask_zero_inplace      v0.9.1    None
+    ggml_flash_attn_ext_set_prec     v0.9.1    v0.24.0
+    ggml_mul_mat_set_prec            v0.9.1    v0.24.0
+    ggml_rope_custom                 v0.9.1    v0.9.1
+    ggml_rope_custom_inplace         v0.9.1    v0.9.1
+    ggml_rope_yarn_corr_dims         v0.9.1    None
+    ggml_type_sizef                  v0.9.1    v0.9.1
+    ggml_upscale_ext                 v0.9.1    v0.9.1
