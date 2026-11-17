@@ -1,0 +1,127 @@
+---
+title: "75% of top mail domains enforce DMARC; 21 break SPF"
+description: "I checked DNS for the 1,000 biggest domains against Spamhaus's sender rules. Most enforce DMARC, 21 exceed SPF's lookup limit, and reverse DNS is the part DNS cannot settle."
+pubDate: 2026-11-17
+tags: ['security', 'data', 'deep-dive']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+A page of Spamhaus's sender guidelines reached the Hacker News front page this week with 116 points.[^1] Spamhaus runs the blocklists that many mail servers consult before deciding whether to accept a message. Its page lists what a sender has to do to stay off them, and it says a new rule starts rolling out in November 2026: every sending IP address needs a valid HELO name, a reverse DNS (PTR) record, and a matching A record. Another line says not to "remain at `p=none` permanently" in DMARC.
+
+Those are statements about DNS, and DNS is public. So I asked a narrow question: how many of the world's biggest domains already look the way Spamhaus wants? I took the top 1,000 domains from the Tranco ranking and looked up their records.[^2]
+
+The short version is that the large domains are mostly in good shape, a few trip over one specific SPF limit, and the headline rule about reverse DNS is the one I cannot test from outside.
+
+## A quick vocabulary
+
+Four terms carry this post. **SPF** is a DNS record listing which servers may send mail for a domain. **DKIM** is a cryptographic signature added to each message. **DMARC** is a record that tells receivers what to do when SPF and DKIM checks fail: `p=none` means "just report," `quarantine` means "treat as suspicious," and `reject` means "refuse it." **Reverse DNS** (a PTR record) maps an IP address back to a hostname, and "forward-confirmed" means that hostname resolves to the same IP again, so neither side can be faked alone.
+
+## What I measured, and what DNS cannot show
+
+The ranking is Tranco list K97GW, created November 16, 2026, which combines five sources over 30 days.[^3] For each of the 1,000 domains I asked Cloudflare's DNS-over-HTTPS service for the DMARC record, the SPF record, the MX hosts (the servers that receive the domain's mail), and the reverse DNS of those servers. The run took 78 seconds.
+
+<Mermaid
+  caption="What the survey asks for each domain. The dashed box is the part Spamhaus's new rule is about, and public DNS does not list it."
+  label="Flowchart: a domain leads to a DMARC TXT lookup, an SPF TXT lookup that follows includes and counts lookups, and an MX lookup that leads to A, PTR and A again for forward-confirmed reverse DNS. A dashed box labelled sending IPs is not visible in DNS."
+  code={`
+flowchart TD
+  D["domain from the Tranco top 1000"] --> M["_dmarc TXT<br/>policy p=, rua="]
+  D --> S["SPF TXT<br/>follow include, count lookups"]
+  D --> X["MX hosts"]
+  X --> A["A record of each MX host"]
+  A --> P["PTR of that IP"]
+  P --> B["A record of the PTR name<br/>contains the same IP?"]
+  D -.-> Z["IPs that actually send the mail<br/>not listed in public DNS"]
+  style Z stroke-dasharray: 5 5
+`}
+/>
+
+Three limits shape everything below. First, DNS shows the servers that receive a domain's mail, not the ones that send it. Second, I cannot see DKIM, because a DKIM key lives under a selector name that only the sender knows. Third, many of the top 1,000 are not mail domains at all. Of the 1,000, 691 publish an MX record, 10 publish a "null MX" (a record that says the domain accepts no mail), and 299 publish nothing. The no-mail group is full of content-delivery and infrastructure names, such as `akamai.net` and `b-cdn.net`. I report the 691 separately because a CDN has no reason to publish DMARC.
+
+To rule out my resolver being wrong, I re-asked Google Public DNS about every domain that had MX hosts but no DMARC record. All 76 agreed.[^5]
+
+## DMARC: three quarters enforce, one in six still only watches
+
+<Chart
+  type="bar"
+  format="plain"
+  caption="DMARC policy of the apex domain, for all 1,000 domains and for the 691 that publish MX records. One domain published a record with no policy and is left out of the first series."
+  label="Grouped bar chart. All 1,000 domains: reject 436, quarantine 177, none 116, no record 270. The 691 domains with MX hosts: reject 344, quarantine 172, none 99, no record 76."
+  labels={['reject', 'quarantine', 'p=none', 'no record']}
+  series={[
+    { name: 'All 1,000 domains', data: [436, 177, 116, 270] },
+    { name: '691 with MX hosts', data: [344, 172, 99, 76] },
+  ]}
+  yTitle="domains"
+/>
+
+Among the 691 mail-receiving domains, 344 (49.8 percent) say `reject` and 172 (24.9 percent) say `quarantine`, so 516 (74.7 percent) enforce. Another 99 (14.3 percent) publish `p=none`, and 76 (11 percent) publish nothing. Counting only the 615 that have a record, 16.1 percent are at `none`. Almost all of them ask for reports (93.7 percent have an `rua=` address), so these are domains that are watching, not domains that forgot.
+
+That is the group Spamhaus's "do not remain at none" line is aimed at, and the surprise is who is in it. `live.com` (rank 32), `msn.com` (97) and `outlook.com` (137) all publish `p=none` with `sp=quarantine`, which applies the stricter policy to subdomains only.[^6] The same goes for `t-online.de` (96), a large German mail provider, which has `p=none` and no subdomain policy at all. I do not know why. Large mailbox providers have more to lose from a mistaken reject than a small company does, since their users send mail through many routes, but that is my guess and not something the records say.
+
+Rank does not predict much. The share of domains that enforce is 65 percent in ranks 1 to 100, 62 percent in 101 to 300, 58 percent in 301 to 600, and 63 percent in 601 to 1000. Being famous does not make a domain strict.
+
+## SPF: 21 records break a limit that Spamhaus names
+
+SPF has a rule that surprises people: a record may cause at most 10 further DNS lookups while a receiver evaluates it. Every `include:`, `a`, `mx`, `ptr`, `exists` and `redirect=` term counts, and includes are followed into the records they point to.[^4] Go over 10 and the receiver is supposed to give a "permanent error," which many treat as a failure. The Spamhaus page repeats the 10-lookup limit.
+
+<Chart
+  type="bar"
+  format="plain"
+  caption="Number of DNS lookups needed to evaluate each domain's SPF record, grouped, for the 760 domains with exactly one SPF record."
+  label="Bar chart of SPF lookup counts: 0 to 3 lookups 391 domains, 4 to 7 lookups 252, 8 to 10 lookups 96, 11 or more 21."
+  labels={['0 to 3', '4 to 7', '8 to 10', '11 or more']}
+  series={[{ name: 'Domains', data: [391, 252, 96, 21] }]}
+  yTitle="domains"
+/>
+
+Most records are small. 391 of 760 need three lookups or fewer, and 146 need none because they list IP addresses directly. But 21 (2.8 percent) are over the limit, and 96 more (12.6 percent) sit at 8 to 10, one new vendor away from joining them. The worst is `pubmatic.com` (rank 421) at 24 lookups. Others over the limit include `who.int` (17), `dyndns.org` (17), `iiko.it` (15), `applovin.com` (15), `bluehost.com` (14) and `etsy.com` (11).
+
+I checked one by hand to make sure my counter was not inflating numbers. The SPF record of `mit.edu` is a single `include:` that points into a chain of nine records on an SPF-management service, plus two `exists:` terms at the end. That is 9 includes and 2 exists, so 11, and my script said 11.[^7] The count is right, and "over 10" is a statement about the record as published today.
+
+A smaller finding: 3 domains publish more than one SPF record, which the standard also treats as an error, and 33 have no `all` mechanism (some of those use `redirect=` instead, which is legitimate). Of the 760 single records, 433 end in `-all` (reject non-listed senders), 276 in `~all` (soft fail), and 18 in `?all` (no opinion).
+
+## Reverse DNS: the rule I can only half test
+
+This is the rule with a date on it. For each domain with IPv4 MX hosts, I took the IP, looked up its PTR name, then looked up that name's A record and checked that the original IP came back.
+
+| Measure | Domains (of 685) | IPs (of 2,332) |
+|---|---|---|
+| Every MX IP passes forward-confirmed reverse DNS | 606 (88.5%) | 2,171 pass (93.1%) |
+| At least one MX IP has no PTR record | 71 (10.4%) | 128 (5.5%) |
+| At least one PTR does not resolve back to the IP | 14 (2.0%) | 33 (1.4%) |
+
+The domain rows overlap, since a domain with several MX servers can fail in both ways.
+
+This looks alarming for the 71 domains with a missing PTR, and I think it is mostly the wrong thing to be alarmed by. Spamhaus's rule is about the IPs that send mail. What I measured is the IPs that receive it. They are often different machines. `live.com` and `outlook.com` show it clearly: their MX hosts resolve to 52.101.x.x addresses that have no PTR record at all, yet Microsoft plainly delivers mail from other, properly named IPs.[^8] A missing PTR on an inbound server is a curiosity. A missing PTR on an outbound server is a listing risk, and DNS gives me no way to find outbound servers short of reading SPF records and guessing.
+
+So I cannot say how many of the top 1,000 will be caught by the November rollout. Nothing in this data speaks to it either way.
+
+## What this does not show
+
+- **Top domains are not senders.** Tranco ranks by traffic and DNS popularity. Of 1,000 names, 299 have no MX at all. The mail-receiving 691 include many that rarely send.
+- **Receiving is not sending.** The reverse DNS numbers describe inbound servers. The rule applies to outbound ones.
+- **I read Spamhaus through a text summary.** The effective date, the "do not remain at `p=none`" line and the 10-lookup limit come from a summarized fetch of the page, and I did not check the exact wording against the live page. Read the original before relying on a date.
+- **One day, one resolver family.** Everything is a snapshot from November 17, 2026 from Cloudflare, with a Google cross-check for one question only.
+- **IPv6 and subdomains are skipped.** I looked at IPv4 MX addresses and only the apex domain, though Spamhaus also sets IPv6 rules.
+- **DKIM, HELO names, bounce rates and list hygiene are not measured.** Several of Spamhaus's requirements cannot be seen from DNS.
+
+## Takeaways
+
+- Among 691 top domains that accept mail, 74.7 percent publish an enforcing DMARC policy and 16.1 percent of those with a record stay at `p=none`. Some very large ones do, including `live.com`, `outlook.com` and `msn.com`.
+- 21 of 760 single SPF records (2.8 percent) exceed the 10-lookup limit, and another 96 are within 2 of it. This is a number you can check for your own domain in a minute.
+- Fame does not predict strictness: enforcement is between 58 and 65 percent across every rank band.
+- Reverse DNS on an MX server tells you little about the rule Spamhaus is rolling out, which is about sending IPs. Do not read the 10.4 percent as a failure rate.
+- If you run outbound mail, check the sending IP's PTR and A records first, and count your SPF lookups second.
+
+[^1]: [Spamhaus sender guidelines](https://www.spamhaus.org/sender-guidelines/), discussed on [Hacker News](https://news.ycombinator.com/item?id=50523784) (116 points). The November 2026 rollout, the `p=none` line and the 10-lookup limit are as the page read through a text summary on November 17, 2026. I did not compare the wording against the page itself.
+[^2]: Scripts and data: [`spamhaus-dns-survey.py`](/files/spamhaus-dns-survey.py), [`spamhaus-dns-analyze.py`](/files/spamhaus-dns-analyze.py), [`spamhaus-dns-crosscheck.py`](/files/spamhaus-dns-crosscheck.py), the [per-domain results](/files/spamhaus-dns-results.csv), [analysis output](/files/spamhaus-dns-analysis-output.txt) and [cross-check output](/files/spamhaus-dns-crosscheck-output.txt). Python 3 standard library only. Queries go to Cloudflare's public DNS-over-HTTPS JSON endpoint.
+[^3]: Le Pochat et al., [Tranco](https://tranco-list.eu/), list [K97GW](https://tranco-list.eu/list/K97GW/1000), created 2026-11-16, built from Chrome UX Report, Farsight, Majestic, Cloudflare Radar and Umbrella data, one entry per registrable domain. The list as I used it is in [`tranco-K97GW-top1000.csv`](/files/tranco-K97GW-top1000.csv).
+[^4]: SPF evaluation rules are in [RFC 7208 section 4.6.4](https://www.rfc-editor.org/rfc/rfc7208#section-4.6.4). I count `include`, `a`, `mx`, `ptr`, `exists` and `redirect`, follow `include` and `redirect`, and treat a domain with zero or several SPF records as not evaluable. DMARC is [RFC 7489](https://www.rfc-editor.org/rfc/rfc7489). Null MX is [RFC 7505](https://www.rfc-editor.org/rfc/rfc7505).
+[^5]: Google Public DNS ([dns.google](https://dns.google/)) was asked for `_dmarc.<domain>` TXT for each of the 76 domains that had MX hosts and no DMARC record in the Cloudflare run. It returned a DMARC record for none of them, and no lookup failed.
+[^6]: DMARC records read directly with the survey script on November 17, 2026: `live.com` and `outlook.com` have `p=none; sp=quarantine; pct=100`, `msn.com` the same with a different report address, and `t-online.de` has `p=none` with a report address only. Ranks are Tranco ranks.
+[^7]: The `mit.edu` SPF chain was printed and counted by hand: one include into `_s00430413.autospf.email`, then includes through `_s004304130` to `_s004304137`, plus `exists:%{i}._spf.mta.salesforce.com` and `exists:%{i}._spf.sparkpostmail.com`.
+[^8]: The MX host `live-com.olc.protection.outlook.com` resolves to 52.101.9.85, 52.101.41.199, 52.101.60.67 and 52.101.194.156. A PTR query for the first two returned status 3 (name does not exist). I looked at a sample, not all four.

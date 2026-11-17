@@ -1,0 +1,47 @@
+
+=== all: 1000 domains ===
+DMARC p=: {'reject': '436 (43.6%)', 'none-published': '270 (27.0%)', 'quarantine': '177 (17.7%)', 'none': '116 (11.6%)', 'missing-p': '1 (0.1%)'}
+  with a DMARC record: 730 (73.0%)
+  of those, p=none: 116 (15.9%) | has rua: 679 (93.0%) | pct below 100: 11 (1.5%)
+  enforcing (quarantine or reject): 613 (61.3%)
+SPF published: 763 (76.3%) | more than one SPF record: 3 (0.3%)
+  final qualifier: {'-all': 433, '~all': 276, 'no-all': 33, '?all': 18}
+  lookup count: over 10: 21 (2.8%) | 8 to 10: 96 (12.6%) | max: 24
+
+=== domains with at least one MX host: 691 domains ===
+DMARC p=: {'reject': '344 (49.8%)', 'quarantine': '172 (24.9%)', 'none': '99 (14.3%)', 'none-published': '76 (11.0%)'}
+  with a DMARC record: 615 (89.0%)
+  of those, p=none: 99 (16.1%) | has rua: 576 (93.7%) | pct below 100: 9 (1.5%)
+  enforcing (quarantine or reject): 516 (74.7%)
+SPF published: 648 (93.8%) | more than one SPF record: 3 (0.4%)
+  final qualifier: {'-all': 338, '~all': 264, 'no-all': 31, '?all': 12}
+  lookup count: over 10: 21 (3.3%) | 8 to 10: 96 (14.9%) | max: 24
+
+null MX (declares it accepts no mail): 10 (1.0%)
+no MX and not null MX: 299 (29.9%)
+
+MX hosts with IPv4 addresses: 685 domains
+  every MX IP passes forward-confirmed rDNS: 606 (88.5%)
+  at least one MX IP has no PTR record: 71 (10.4%)
+  at least one MX IP has a PTR that does not resolve back: 14 (2.0%)
+  total MX IPs: 2332 | passing: 2171 | no PTR: 128
+
+=== DMARC enforcing share by rank bucket (all domains) ===
+ranks 1-100: enforcing 65, p=none 12, no record 23 of 100
+ranks 101-300: enforcing 124, p=none 15, no record 61 of 200
+ranks 301-600: enforcing 173, p=none 38, no record 88 of 300
+ranks 601-1000: enforcing 251, p=none 51, no record 98 of 400
+
+Sample of SPF over 10 lookups:
+  #222 iiko.it lookups=15
+  #240 mit.edu lookups=11
+  #246 applovin.com lookups=15
+  #270 who.int lookups=17
+  #344 etsy.com lookups=11
+  #357 branch.io lookups=11
+  #421 pubmatic.com lookups=24
+  #436 unsplash.com lookups=13
+  #458 bluehost.com lookups=14
+  #488 markmonitor.com lookups=11
+  #491 hostgator.com lookups=11
+  #492 dyndns.org lookups=17

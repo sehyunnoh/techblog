@@ -1,0 +1,3 @@
+domains with MX but no DMARC per Cloudflare: 76
+Google Public DNS finds a DMARC record for: 0 []
+Google lookups that failed outright: 0
