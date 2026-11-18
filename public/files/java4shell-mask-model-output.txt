@@ -1,0 +1,19 @@
+tail length 1..63, tail ends in one or two '=':
+  tail '='      length 1: output_size -1 -> output_mask all ones (64 bytes stored)
+  tail 'A='     length 2: output_size -1 -> output_mask all ones (64 bytes stored)
+  tail '=='     length 2: output_size -2 -> output_mask all ones (64 bytes stored)
+  tail 'AA='    length 3: output_size -1 -> output_mask all ones (64 bytes stored)
+  tail 'A=='    length 3: output_size -2 -> output_mask all ones (64 bytes stored)
+  5 cases, tail lengths [1, 2, 3]
+  tails of length 4..63 that underflow: 0
+
+64 x 'A' + '=': 65 bytes in, Java sizes the result at 50 bytes
+  64-byte loop decodes 64 chars -> dp = 48; tail '=': output_size -1, mask all ones: True
+  store covers offsets 48..111; past the 50-byte result: 62 bytes (offsets 50..111)
+
+128 x 'A' + '=': 129 bytes in, Java sizes the result at 98 bytes
+  64-byte loop decodes 128 chars -> dp = 96; tail '=': output_size -1, mask all ones: True
+  store covers offsets 96..159; past the 98-byte result: 62 bytes (offsets 98..159)
+
+with the 'cmpl(length, 4); jcc less, L_bruteForce' guard:
+  underflowing tails that still reach the mask code: 0

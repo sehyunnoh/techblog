@@ -1,0 +1,129 @@
+---
+title: "Java4Shell: 59 of 70 JDK tags have the code, 4-line fix"
+description: "Java4Shell (CVE-2026-114938) comes down to a missing length check. I scanned 70 OpenJDK tags and rebuilt the mask math, but my CPU cannot trigger the bug itself."
+pubDate: 2026-11-18
+tags: ['security', 'systems', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+
+The security firm Calif disclosed a memory-corruption bug in OpenJDK's Base64 decoder on November 17, 2026, the day OpenJDK and Oracle released patches, and the write-up reached 977 points on Hacker News.[^1] They call it Java4Shell, give it CVE-2026-114938 and a CVSS 4.0 score of 9.2, and say it can lead to remote code execution in products such as Jenkins, Keycloak and Confluence. Those exploit chains are withheld, so I cannot check them. What I can check is the part that is public: the source code of OpenJDK, tag by tag.
+
+So this post stays small on purpose. It asks which JDK releases contain the faulty code, what the fix changes, and whether the arithmetic in the write-up holds up. It also has to admit something up front: the bug only exists on CPUs with AVX-512 VBMI, and the laptop I ran this on does not have them, so I could not trigger it myself.
+
+## Why Base64 has assembly in it
+
+Base64 turns bytes into text, and back. It shows up in logins, file uploads and message formats, which is why a decoder bug is reachable from so many places. Java's decoder is written in Java, but HotSpot, the JVM that runs your program, can swap in a hand-written machine-code version when a method gets hot. Such a replacement is called an **intrinsic**. On x86-64 CPUs with the AVX-512 VBMI instruction set, the Base64 intrinsic handles 64 input characters per step.[^2]
+
+A mask is the one concept you need. AVX-512 can store 64 bytes with a single instruction, and a 64-bit mask says which of those 64 bytes are really written. A 1 bit means write, a 0 bit means leave the memory alone. The decoder uses a mask for the last, partial chunk of input so it does not write past the end of the output.
+
+The mask comes from an instruction named `bzhi`. `bzhiq(-1, n)` gives you the lowest `n` bits set to 1. The Intel manual page for it says the index is taken from the low 8 bits of the second operand, and that when the index is 64 or larger nothing is cleared.[^3] So a request for "the lowest 255 bits" quietly returns a mask of all 64 ones.
+
+## The arithmetic
+
+Here is the tail logic as it appears in `generate_base64_decodeBlock()`, in the file `stubGenerator_x86_64.cpp` (I checked `jdk-17.0.21.0.3-ga` and `jdk-21.0.13.0.3-ga`):[^4]
+
+```
+output_size = (length / 4) * 3
+if the tail ends in '=':  output_size -= 1
+   and if the byte before it is '=':  output_size -= 1
+output_mask = bzhiq(-1, output_size)
+```
+
+If the leftover tail is shorter than four characters, `(length / 4) * 3` is zero. A padded tail then subtracts one or two from zero and gets -1 or -2. Seen as an index, -1 is 255 in the low byte, so `bzhiq` returns all ones. The decoder then stores 64 bytes where it meant to store none.
+
+I wrote a small model of this to see how many tails behave that way. It is a paper model, not a run of the real instructions.[^5] Tails are written with `A` as filler, from 1 to 63 characters long, ending in one or two `=`:
+
+| Tail | Length | `output_size` | Mask |
+|---|---|---|---|
+| `=` | 1 | -1 | all ones |
+| `A=` | 2 | -1 | all ones |
+| `==` | 2 | -2 | all ones |
+| `AA=` | 3 | -1 | all ones |
+| `A==` | 3 | -2 | all ones |
+
+Five shapes, all of them shorter than four characters. Every padded tail of length 4 to 63 stays at zero or above, so none of them misbehave. The write-up lists six forms (`=`, `==`, `X=`, `X==`, `XY=` and `===`), and mine are the same set by length, with `A` standing in for every filler letter and `===` counted among the `==` cases.
+
+Now the famous trigger, 64 `A` characters and one `=`. Java first sizes the result with `3 * ((len + 3) / 4) - paddings`, which for 65 characters is 50 bytes.[^6] The stub decodes the first 64 characters into 48 bytes. The one `=` left over is a tail of length 1, so the mask is all ones and a 64-byte store starts at offset 48. It covers offsets 48 to 111, and the result array ends at 50. That is 62 bytes past the end, offsets 50 to 111. The proof of concept in the write-up expects exactly that: 62 changed bytes, first at 50, last at 111. I derived those numbers from the source before comparing them, and they match.
+
+<Mermaid
+  caption="The tail path of the AVX-512 Base64 stub, simplified from the C++ source. The four added lines of the fix are the dashed box: padded tails under four characters are sent back to the Java code."
+  label="Flowchart: Java sizes the result array, the stub decodes 64 characters per step, and the final 1 to 63 characters compute output_size and a store mask. For a tail shorter than four characters ending in an equals sign, output_size becomes minus one or minus two, the mask becomes all ones, and 64 bytes are stored. A dashed box shows the fix, which sends tails shorter than four characters to the Java code before the mask is computed."
+  code={`
+flowchart TD
+  J["Java: decodedOutLength<br/>65 chars -> 50-byte result"] --> L["stub: 64-char blocks<br/>writes 48 bytes"]
+  L --> T["tail of 1 to 63 chars"]
+  T --> G["fix: tail shorter than 4?<br/>hand it to Java"]
+  G -->|no| O["output_size = (len/4)*3<br/>minus 1 or 2 per '='"]
+  O --> M["mask = bzhiq(-1, output_size)"]
+  M -->|"size below 0"| W["mask all ones<br/>64-byte store at offset 48"]
+  M -->|"size 0 or more"| N["mask covers only the<br/>decoded bytes"]
+  G -->|yes| S["safe: Java decodes the tail"]
+  style G stroke-dasharray: 5 5
+`}
+/>
+
+## Which releases contain it
+
+The write-up says the problem affects "OpenJDK from version 17.0.6 or newer".[^7] A claim like that is easy to test, because the source is public. I listed every `-ga` tag of the OpenJDK repositories for 11, 17, 21 and 25, plus the main repository's GA tags for 18 to 27, and downloaded the Base64 stub file at each tag.[^8] For each one I asked whether the AVX-512 stub has its own tail path, meaning the `bzhiq(output_mask, ...)` line, and whether the four-line guard is present.
+
+| Repository | Tags | Tail path present | Guard present |
+|---|---|---|---|
+| `jdk11u-dev` (11.0.2 to 11.0.33.1) | 4 | 0 | 0 |
+| `jdk17u` | 28 | 21 (17.0.6 to 17.0.21.1) | 1 (17.0.21.1) |
+| `jdk21u` | 18 | 18 | 1 (21.0.13.1) |
+| `jdk25u` | 10 | 10 | 1 (25.0.5.1) |
+| `jdk` GA tags 18 to 27 | 10 | 10 | 0 |
+
+The 17 line matches the write-up to the tag. Everything up to `jdk-17.0.5-ga` has no tail path, and `jdk-17.0.6-ga` is the first with it. That is also the release where the Java side of the decoder gained a new `isMIME` parameter, which fits a backport of the AVX-512 work from a newer JDK. JDK 21 and 25 have the code in their first GA tag. JDK 11 has none of it in the four tags I sampled, and I did not scan 8.
+
+A few things this table does not say. It shows the code is there, not that every build is exploitable, because the stub also needs AVX-512 VBMI hardware, an input long enough to reach it (the write-up says more than 128 characters on 17, and my reading of the source agrees: a `cmpl(length, 128)` sends shorter inputs down the old path) and a JIT that has compiled the method. The main-repository tags for 18 to 27 are release snapshots, not supported update lines. I did not look for later patches of the non-LTS releases, so the 0 in the last row is not a claim that they have no fix.
+
+## What the fix changes
+
+Compare the 17.0.21.0.3 tag (the one Oracle lists as vulnerable) with 17.0.21.1 and the whole file differs by four lines:[^9]
+
+```
++    // A padded Base64 tail shorter than one complete block is handled by Java.
++    __ cmpl(length, 4);
++    __ jcc(Assembler::less, L_bruteForce);
++
+```
+
+The same four lines appear between `jdk-21.0.13.0.3-ga` and `jdk-21.0.13.1-ga`, and between `jdk-25.0.5.0.3-ga` and `jdk-25.0.5.1-ga`. They sit right before the code that computes the mask. A tail below four characters now jumps to `L_bruteForce`, the slow path, which the Java code finishes. In my model, no underflowing tail reaches the mask code once that rule is applied.
+
+I cannot tell you these three tags are the official fixed builds. The OpenJDK advisory returned a 403 to my fetch, and the write-up does not list fixed version numbers. The evidence is only that the `.1` tag right after each vulnerable Oracle build adds exactly this guard and nothing else to the file. That is consistent, and I would still confirm with your vendor's advisory.
+
+## What I could not reproduce
+
+My machine has an Intel Core Ultra 7 258V, which has AVX2 but no AVX-512. HotSpot confirms it: asking for `-XX:UseAVX=3` prints "UseAVX=3 is not supported on this CPU, setting it to UseAVX=2".[^10] I wrote my own version of the check in the write-up, which warms up the decoder, decodes `A` times n plus `=` into a 4096-byte array and counts changed bytes past the expected result. On OpenJDK 24 and on Temurin 17.0.15 it reports zero changed bytes for both 64 and 128 `A` characters.
+
+That zero tells you about my CPU, not about the bug. It does fit the hardware claim, and the source explains two details of it. On 17, the intrinsic is switched on only when `UseAVX > 2`, so Temurin 17.0.15 on my machine had `UseBASE64Intrinsics` at false by default. On 21 and 25 the intrinsic is on for any AVX2 machine, but the VBMI stub that holds the bug sits behind `supports_avx512_vbmi()`, and the JVM clears that feature when `UseAVX` is below 3 (I read that in the 21.0.13.0.3 source and did not check 25). Both facts support the mitigations in the write-up, `-XX:UseAVX=2` and `-XX:-UseBASE64Intrinsics`. I did not test either on a CPU where the bug fires.
+
+## What this does not show
+
+- I did not run the bug. No AVX-512 machine, no overwrite. The 62-byte figure comes from the model and the source, and the proof of concept's own expectations agree with it.
+- The exploit chains, the 11 named products and the hours-and-dollars figures are Calif's claims. I did not test any of them.
+- I did not read the OpenJDK advisory, so fixed-build numbers are inferred from tags.
+- The scan is a text match on one file per tag. A backport that renamed the code would slip past it, and I did not scan JDK 8.
+- A web search for the CVE identifier returned no record of it, so Calif's own page is the only source I have for the number and the score.
+
+## Takeaways
+
+- The bug is one missing comparison. A tail of 1 to 3 characters ending in `=` makes the output size negative, and `bzhiq` turns a negative index into "keep everything".
+- By source, the faulty AVX-512 stub is in 17.0.6 and later, all of 21 and 25, and nothing I scanned in 11. The write-up's version claim holds for the 17 line.
+- Three `.1` tags (17.0.21.1, 21.0.13.1, 25.0.5.1) differ from the vulnerable Oracle builds by exactly the four-line guard.
+- Whether you are exposed depends on the CPU. `grep -m1 '^flags' /proc/cpuinfo` and look for `avx512vbmi`. If it is absent, this stub never runs.
+- On affected hardware, update first. If you cannot yet, `-XX:-UseBASE64Intrinsics` is the narrower switch than `-XX:UseAVX=2`, which also turns off AVX-512 for everything else.
+
+[^1]: Calif, [Java4Shell: Write once, RCE everywhere](https://calif.io/java4shell), dated by its patch-release note (November 17, 2026), and its [Hacker News thread](https://news.ycombinator.com/item?id=50538240) (977 points). Everything attributed to Calif here comes from that page, which I read in full.
+[^2]: The decoder stub is `generate_base64_decodeBlock()` in `src/hotspot/cpu/x86/stubGenerator_x86_64.cpp` of the [openjdk/jdk17u](https://github.com/openjdk/jdk17u) and [openjdk/jdk21u](https://github.com/openjdk/jdk21u) repositories.
+[^3]: [BZHI, Zero High Bits Starting with Specified Bit Position](https://www.felixcloutier.com/x86/bzhi), a mirror of the Intel Software Developer's Manual entry. The index is `SRC2[7:0]`, and when it is not below the operand size the destination is a copy of the first source with CF set.
+[^4]: Source read from raw.githubusercontent.com at the tags named, for example `openjdk/jdk17u` at `jdk-17.0.21.0.3-ga`. The `L_finalBit` section covers "1 to 63 bytes left to decode".
+[^5]: Model and output: [`java4shell-mask-model.py`](/files/java4shell-mask-model.py) and [`java4shell-mask-model-output.txt`](/files/java4shell-mask-model-output.txt). Python 3 standard library only.
+[^6]: `Base64.Decoder.decodedOutLength()` in `java/util/Base64.java` at `jdk-17.0.6-ga`: `3 * (int) ((len + 3L) / 4) - paddings`. For 65 characters with one `=`, that is 3 * 17 - 1 = 50.
+[^7]: The same statement on the Calif page also lists Oracle Java SE builds 8u511b33-perf, 17.0.21.0.3, 21.0.13.0.3, 25.0.5.0.3 and 27.0.1.0.3 as vulnerable, and says the hardware must support `avx512f`, `avx512bw`, `avx512vbmi` and `bmi2`. ARM64 is not affected.
+[^8]: Script, per-tag data and output: [`java4shell-source-scan.py`](/files/java4shell-source-scan.py), [`java4shell-source-scan.csv`](/files/java4shell-source-scan.csv) and [`java4shell-source-scan-output.txt`](/files/java4shell-source-scan-output.txt). It needs `git` for `ls-remote` and Python 3 and makes about 140 downloads, two per tag. Tags were listed on November 18, 2026.
+[^9]: Compared with `diff` on `stubGenerator_x86_64.cpp` at the two tags in each pair. The whole file grows from 7,813 to 7,817 lines on 17, 4,339 to 4,343 on 21 and 4,369 to 4,373 on 25.
+[^10]: Probe and output on this machine (OpenJDK 24+36 and Temurin 17.0.15+6): [`Base64TailProbe.java`](/files/Base64TailProbe.java) and [`java4shell-local-probe-output.txt`](/files/java4shell-local-probe-output.txt). It writes only inside its own 4096-byte array.

@@ -1,0 +1,30 @@
+### /c/Users/sehyu/.jdks/openjdk-24/bin/java
+openjdk version "24" 2025-03-18
+      int UseAVX                                   = 2                                    {ARCH product} {default}
+     bool UseBASE64Intrinsics                      = true                                      {product} {default}
+runtime=24+36-3646 sink=true
+n=64 rejected=true expectedLen=50 changedPastResult=0 first=-1 last=-1
+runtime=24+36-3646 sink=true
+n=128 rejected=true expectedLen=98 changedPastResult=0 first=-1 last=-1
+-- request UseAVX=3
+OpenJDK 64-Bit Server VM warning: UseAVX=3 is not supported on this CPU, setting it to UseAVX=2
+runtime=24+36-3646 sink=true
+n=128 rejected=true expectedLen=98 changedPastResult=0 first=-1 last=-1
+### /c/Users/sehyu/.jdks/temurin-17.0.15/bin/java
+openjdk version "17.0.15" 2025-04-15
+     intx UseAVX                                   = 2                                    {ARCH product} {default}
+     bool UseBASE64Intrinsics                      = false                                     {product} {default}
+Error: LinkageError occurred while loading main class Base64TailProbe
+	java.lang.UnsupportedClassVersionError: Base64TailProbe has been compiled by a more recent version of the Java Runtime (class file version 68.0), this version of the Java Runtime only recognizes class file versions up to 61.0
+Error: LinkageError occurred while loading main class Base64TailProbe
+	java.lang.UnsupportedClassVersionError: Base64TailProbe has been compiled by a more recent version of the Java Runtime (class file version 68.0), this version of the Java Runtime only recognizes class file versions up to 61.0
+-- request UseAVX=3
+OpenJDK 64-Bit Server VM warning: UseAVX=3 is not supported on this CPU, setting it to UseAVX=2
+Error: LinkageError occurred while loading main class Base64TailProbe
+	java.lang.UnsupportedClassVersionError: Base64TailProbe has been compiled by a more recent version of the Java Runtime (class file version 68.0), this version of the Java Runtime only recognizes class file versions up to 61.0
+### /c/Users/sehyu/.jdks/temurin-17.0.15/bin/java
+openjdk version "17.0.15" 2025-04-15
+runtime=17.0.15+6 sink=true
+n=64 rejected=true expectedLen=50 changedPastResult=0 first=-1 last=-1
+runtime=17.0.15+6 sink=true
+n=128 rejected=true expectedLen=98 changedPastResult=0 first=-1 last=-1
