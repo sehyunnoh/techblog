@@ -1,0 +1,33 @@
+domains: 1000; got an HTTP status or a TLS answer: 710 (71.0%)
+status classes: {'2xx': 479, 'none': 302, '4xx': 168, '3xx': 42, '5xx': 9}
+ALPN result: {'h2': 623, 'no TLS answer': 300, 'http/1.1': 58, 'none': 19}
+negotiate h2: 623 (62.3%); of those that answered TLS at all: 623 (89.0%)
+
+Server header family, all answering domains: {'(no Server header)': 179, 'cloudflare': 164, 'other': 138, 'nginx': 93, 'google': 32, 'akamai': 27, 'apache': 20, 'envoy': 19, 's3': 16, 'cloudfront': 10, 'openresty': 9, 'varnish': 3}
+Server header family, h2 domains: {'cloudflare': 164, '(no Server header)': 145, 'other': 123, 'nginx': 72, 'google': 32, 'akamai': 27, 'envoy': 16, 's3': 14, 'apache': 12, 'openresty': 8, 'cloudfront': 7, 'varnish': 3}
+
+Server header contains 'nginx': 93 domains; of those, h2 negotiated: 72
+  with a version number: 15; without: 78
+  nginx/1.14.0   sites 2  negotiating h2 2  listed affected
+  nginx/1.14.1   sites 1  negotiating h2 0  listed affected
+  nginx/1.18.0   sites 2  negotiating h2 1  listed affected
+  nginx/1.22.0   sites 1  negotiating h2 1  listed affected
+  nginx/1.26.3   sites 1  negotiating h2 0  listed affected
+  nginx/1.27.5   sites 1  negotiating h2 1  listed affected
+  nginx/1.28.0   sites 1  negotiating h2 0  listed affected
+  nginx/1.30.3   sites 1  negotiating h2 1  listed affected
+  nginx/1.30.7   sites 3  negotiating h2 3  not in listed range
+  nginx/1.31.3   sites 1  negotiating h2 1  listed affected
+  nginx/1.31.8   sites 1  negotiating h2 0  listed affected
+  versions on distribution builds (Server header names the distro): 4
+  version in listed range: 12; of those negotiating h2: 7
+
+openresty (nginx-based, version not comparable): 9; h2: 8
+
+rank buckets, share negotiating h2 among domains that answered TLS:
+  ranks 1-100: 62 (91.2%)
+  ranks 101-300: 124 (91.2%)
+  ranks 301-600: 178 (90.4%)
+  ranks 601-1000: 259 (86.6%)
+
+errors: {'gaierror': 225, 'TimeoutError': 58, 'ConnectionResetError': 50, 'SSLError': 7, 'RemoteDisconnected': 3, 'ConnectionRefusedError': 2}

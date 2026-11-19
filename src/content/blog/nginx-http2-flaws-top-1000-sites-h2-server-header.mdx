@@ -1,0 +1,117 @@
+---
+title: "62% of top sites speak HTTP/2, but only 15 show an nginx version"
+description: "Two nginx HTTP/2 flaws were disclosed on November 18. I probed the top 1,000 domains: 623 negotiate HTTP/2, 93 name nginx, and only 15 reveal a version number."
+pubDate: 2026-11-19
+tags: ['security', 'data', 'deep-dive']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+On November 18, Wiz Research published two critical flaws in nginx's HTTP/2 code, and the write-up collected 1,389 points on Hacker News.[^1] Both are rated CVSS 4.0 9.2, both can lead to remote code execution without logging in, and both need one precondition: HTTP/2 has to be switched on. One of them, CVE-2026-123007, is reachable in a default configuration once HTTP/2 is enabled, according to Wiz.
+
+That precondition is something anyone can look at from outside. So this post asks a plain question about the busiest part of the web: how many of the top 1,000 domains even meet it, how many of them identify themselves as nginx, and how many say enough about their version for an outsider to compare it with the advisory?
+
+The answer to the last part is the interesting one. It is very few, and that is why a scan like this can say little about who is actually exposed.
+
+## A little vocabulary
+
+**HTTP/2** is the newer way browsers and servers talk over a single connection, and almost every site that uses HTTPS offers it. The two sides agree on it during the TLS handshake through an extension called **ALPN**: the client lists the protocols it speaks (`h2` for HTTP/2, `http/1.1` for the old one) and the server picks. **nginx** is a web server and reverse proxy, which means it often sits in front of the real application and handles the connection for it. A **Server header** is a line in a web response, such as `Server: nginx/1.30.7`, that names the software. Servers are free to shorten it, change it or leave it out.
+
+## What I measured
+
+The list is the same Tranco top 1,000 (list K97GW, created November 16) that I used for an email-DNS survey two days ago.[^2] For every domain the script made one HTTP/1.1 `HEAD` request over TLS, followed up to three redirects, and read the Server header. Then it opened one more TLS connection to the final host, offered `h2` and `http/1.1`, and wrote down which one the server chose. No exploit traffic and no page content: this is what a browser sees in the first few packets.[^3]
+
+<Mermaid
+  caption="The probe for each domain. The dashed box is what the survey cannot see: the version an operator has hidden, and what a CDN in front of the server is really running."
+  label="Flowchart: a domain gets an HTTP/1.1 HEAD request over TLS, following up to three redirects, and the Server header is recorded. A second TLS connection to the final host offers the h2 and http/1.1 protocols and records the choice. A dashed box shows that hidden versions and software behind a CDN are not visible."
+  code={`
+flowchart TD
+  D["domain from the Tranco top 1000"] --> H["HEAD over TLS<br/>follow up to 3 redirects"]
+  H --> S["record the Server header"]
+  H --> A["second TLS connection to the final host<br/>offer h2 and http/1.1"]
+  A --> P["record which protocol the server picks"]
+  S -.-> Z["hidden versions, CDN in front,<br/>patched packages with old numbers"]
+  style Z stroke-dasharray: 5 5
+`}
+/>
+
+Of the 1,000 domains, 700 completed a TLS handshake on port 443. The other 300 did not: 225 do not resolve to an address at their bare name, which is typical of infrastructure names such as CDN and DNS-provider domains, and the rest timed out, reset the connection or refused it. I report percentages against the 700.
+
+## HTTP/2 is the default
+
+Of the 700 that answered, 623 (89.0 percent) chose `h2`, 58 chose `http/1.1` and 19 gave no ALPN answer at all. The share is almost flat across the ranking: 91.2 percent in ranks 1 to 100, 91.2 percent in 101 to 300, 90.4 percent in 301 to 600 and 86.6 percent in 601 to 1000.
+
+So for the top of the web, "HTTP/2 enabled" is not a narrow filter. It is where nearly everyone already is.
+
+## Who answers at the front door
+
+The more useful question is whose software is on the other end of those 623 HTTP/2 connections. I grouped the Server header into families.
+
+<Chart
+  type="bar"
+  format="plain"
+  horizontal
+  caption="Server header family for the 623 domains that negotiated HTTP/2. 'No header' and 'other' say nothing useful about nginx. The six smaller families are Envoy (16), S3 (14), Apache (12), OpenResty (8), CloudFront (7) and Varnish (3)."
+  label="Bar chart of the 623 HTTP/2 domains by Server header: cloudflare 164, no header 145, other 123, nginx 72, six smaller families together 60, google 32, akamai 27."
+  labels={['cloudflare', 'no header', 'other', 'nginx', 'six small', 'google', 'akamai']}
+  series={[
+    { name: 'domains negotiating h2', data: [164, 145, 123, 72, 60, 32, 27] },
+  ]}
+  xTitle="domains"
+/>
+
+Seventy-two of the 623 (11.6 percent) name nginx. Another 8 say `openresty`, an nginx-based server whose version number is not the same thing as nginx's. About a quarter of the domains answer with Cloudflare, and Wiz notes that CDNs and web application firewalls that terminate HTTP/2 themselves may partly block the exploit, though how much depends on the implementation.[^1] That is one more reason a header count is a poor stand-in for exposure.
+
+Counting every responding domain, 93 of 710 (13.1 percent) have `nginx` in the Server header, and 72 of those negotiated HTTP/2. The remaining 21 either only offered HTTP/1.1 or did not complete the second handshake.
+
+## Fifteen versions
+
+Of the 93 that name nginx, 78 give no version, probably because the operator turned it off. Fifteen print one. The table groups them by version; I left the individual domains out on purpose, and I explain why below.
+
+| Version shown | Sites | Negotiating h2 | Against the version range in the Wiz post |
+|---|---|---|---|
+| 1.14.0 to 1.18.0 | 5 | 3 | inside the listed range |
+| 1.22.0 to 1.28.0 | 4 | 2 | inside the listed range |
+| 1.30.3, 1.31.3, 1.31.8 | 3 | 2 | inside the listed range |
+| 1.30.7 | 3 | 3 | fixed stable release |
+
+Twelve of the fifteen show a version inside the range the advisory lists (nginx OSS 1.9.5 through 1.31.8), and seven of those twelve also negotiated HTTP/2. Three show 1.30.7, the stable-branch fix, and all three negotiated HTTP/2. Those three were already patched, or at least claim to be, one day after disclosure.
+
+I would not read the first three rows as "twelve vulnerable sites". Four of the fifteen have a distribution name in the header, such as `(Ubuntu)`, and distribution builds work differently. Debian's security FAQ says plainly that it backports security fixes to the version shipped in a stable release instead of upgrading, so an old-looking number can still be a patched package.[^4] The fixed releases the advisory names are also only on two branches, 1.30 and 1.31, so as far as that list goes a site on 1.28.0 has no patched number inside its own line. And a Server header can say anything: I could not check what is really running.
+
+## What the fix looks like
+
+The nginx source is public, which lets me do something the header scan cannot. Between `release-1.31.8` and `release-1.31.9` the HTTP/2 file `ngx_http_v2.c` changes in three places, and between `release-1.30.6` and `release-1.30.7` it changes in two.[^5]
+
+- The window-update check, `window > NGX_HTTP_V2_MAX_WINDOW - h2c->send_window`, now also subtracts `h2c->send_queued`.
+- A call to `ngx_reusable_connection(h2c->connection, 0)` is added after a stream is created.
+- On the mainline branch only, an unrelated flag test changes from `==` to `&`.
+
+My reading, which the diff does not state: the first change matches Wiz's description of an unsigned-arithmetic problem in the send window, and the second matches its description of a connection that stays on the reusable list while a request is using it. I have not run either path. A rough corroboration of the stated start versions: the window check already exists in `release-1.9.5`, the release in which nginx's own documentation says the HTTP/2 module appeared, and the number of `ngx_reusable_connection` call sites in `ngx_http_v2.c` goes from 2 in 1.19.6 to 4 in 1.19.7, the version where Wiz says the other bug begins.[^6] That is a count, not a proof.
+
+## What this does not show
+
+- It does not test for either vulnerability, and I sent no exploit traffic. A site that shows an old nginx may be patched, and a site that hides its version may not be.
+- The Server header is self-reported. CDNs replace it, many operators remove it, and 145 HTTP/2 domains sent none at all.
+- Only the bare domain was probed, after redirects. Subdomains and the origin servers behind CDNs are not in this data.
+- 300 of the 1,000 domains did not answer. Most of those are names that serve no website, but about 75 timed out or reset the connection and I did not chase them.
+- It is one snapshot taken on the day after disclosure. Two runs a few minutes apart disagreed slightly (610 and 623 HTTP/2 domains, 89 and 93 naming nginx, 13 and 15 showing a version) because some servers failed on the first try, so I added a retry and use the second run.
+- I left the per-site table out of the published data. The flaws were disclosed a day earlier and a list of named sites with old nginx versions would work as a target list. The script and the aggregate output are published, and anyone can rerun the survey.
+- I read the Wiz write-up through a page-reading tool and did not compare it with F5's advisory, so the version ranges and CVSS scores are as summarized.
+
+## Takeaways
+
+- The precondition is common. 89 percent of top domains that completed a TLS handshake negotiated HTTP/2, so "we have HTTP/2 on" is not a risk filter.
+- From outside, version numbers are nearly invisible. Only 15 of 93 nginx-labelled domains show one, and a count of old numbers overstates the real exposure because of patched packages.
+- Three sites already showed the fixed 1.30.7 on the day after disclosure, which is the opposite of a slow response.
+- Check your own server instead of someone else's header: `nginx -v`, then whether `http2 on;` or `listen ... http2` is set. Wiz lists `http2 off;` (nginx 1.25.1 or later) as the stopgap until you upgrade.
+- If you run nginx behind a CDN, find out whether the CDN or your own nginx terminates HTTP/2. The answer decides which of the two is exposed.
+
+[^1]: Nir Ohfeld and Tomer Schwartz (Wiz Research), [Unauthenticated Remote Code Execution in NGINX: CVE-2026-123633 and CVE-2026-123007](https://www.wiz.io/blog/nginx-http2-rce-vulnerabilities), November 18, 2026, and its [Hacker News thread](https://news.ycombinator.com/item?id=50547374) (1,389 points). Affected versions (nginx OSS 1.19.7 to 1.31.8 for the first CVE, 1.9.5 to 1.31.8 for the second), fixed versions (1.30.7 and 1.31.9), the default-configuration claim, the CDN remark and the `http2 off;` mitigation are as a page-reading tool summarized the post on November 19, 2026. I did not read it in full.
+[^2]: Le Pochat et al., [Tranco](https://tranco-list.eu/), list [K97GW](https://tranco-list.eu/list/K97GW/1000), created 2026-11-16. The list is in [`tranco-K97GW-top1000.csv`](/files/tranco-K97GW-top1000.csv); the earlier survey is [75% of top mail domains enforce DMARC; 21 break SPF](/posts/spamhaus-sender-rules-top-1000-domains-dns-check/).
+[^3]: Scripts and aggregate output: [`nginx-h2-survey.py`](/files/nginx-h2-survey.py), [`nginx-h2-analyze.py`](/files/nginx-h2-analyze.py) and [`nginx-h2-analysis-output.txt`](/files/nginx-h2-analysis-output.txt). Python 3 standard library only. The run took about 3.5 minutes with 16 threads, at most ten requests per site, run on November 19, 2026. TLS certificates are not verified, because the question is what the server offers, not whether the site is trustworthy.
+[^4]: Debian, [Security FAQ](https://www.debian.org/security/faq): "Instead of upgrading to a new release we backport security fixes to the version that was shipped in the stable release." Other distributions work in a similar way, but I only checked Debian's statement.
+[^5]: I compared `src/http/v2/ngx_http_v2.c` at the tags `release-1.31.8`, `release-1.31.9`, `release-1.30.6` and `release-1.30.7` of [nginx/nginx](https://github.com/nginx/nginx) with `diff`. Both release lines contain the `send_queued` change and the `ngx_reusable_connection(h2c->connection, 0)` line. Only 1.31.9 contains the flag test.
+[^6]: The [ngx_http_v2_module documentation](https://nginx.org/en/docs/http/ngx_http_v2_module.html) says the module appeared in 1.9.5 and that the `http2` directive appeared in 1.25.1. I counted the text `NGX_HTTP_V2_MAX_WINDOW - h2c->send_window)` and `ngx_reusable_connection` in `ngx_http_v2.c` at `release-1.9.5`, `release-1.19.6`, `release-1.19.7` and `release-1.28.0`.
