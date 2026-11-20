@@ -1,0 +1,104 @@
+---
+title: "OpenSSL EncodeBlock overflows at 1.61 GB of input"
+description: "EVP_EncodeBlock (CVE-2026-121481) returns a wrong int once the input passes 1,610,612,733 bytes. I called it for real and scanned 248 OpenSSL release tags."
+pubDate: 2026-11-20
+tags: ['security', 'systems', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+
+On November 20, 2026 the top story on Hacker News was a pull request against OpenSSL, titled "Buffer overflow in EVP_EncodeBlock() (CVE-2026-121481, CVSS 9.8)".[^1] The pull request is the fix, the advisory itself is still pending, and the description says the OpenSSL security team asked for it to be fixed in public. That gives us an unusual position for a few days: the patch is readable, the official write-up is not.
+
+So this post sticks to what a patch and a compiler can show. Which input size breaks the function, what the function actually returns when that happens, and how far back in OpenSSL's history the same code goes. I will also say where my understanding stops, because there is a gap between "this integer is wrong" and "this is a 9.8", and I could not close it from public information.
+
+## What EVP_EncodeBlock does
+
+Base64 turns every 3 bytes into 4 printable characters, padding the end with `=` when the length is not a multiple of 3. `EVP_EncodeBlock(out, in, n)` is OpenSSL's one-call version of that: you hand it `n` bytes, it writes the text plus a terminating NUL, and it returns the number of characters written.
+
+Look at the types. In every release I checked, `n` is an `int` and so is the return value.[^2] An `int` on mainstream platforms is 32 bits, so the largest value it can hold is 2,147,483,647. The output is 4/3 the size of the input, rounded up to a multiple of 4, which means the output can need more than that even when the input itself is a perfectly valid `int`.
+
+The arithmetic is short enough to do by hand. The output length is `4 * ceil(n / 3)`. It stops fitting in an `int` as soon as `ceil(n / 3)` reaches 536,870,912, because 4 times that is exactly 2<sup>31</sup>. The first input length where that happens is 1,610,612,734. The fix pull request writes the safe limit as `(INT_MAX / 4) * 3`, which is 1,610,612,733, the same boundary seen from the other side.
+
+<Mermaid
+  caption="How an input that is a valid int still produces an output length that is not. The numbers are the boundary I measured below."
+  label="Flowchart: an input length n is a valid int up to 2,147,483,647. The encoder emits 4 characters per 3 input bytes. At n equal to 1,610,612,733 the output length is 2,147,483,644 and fits. At n equal to 1,610,612,734 the output length is 2,147,483,648, which does not fit in an int, so the returned value is minus 2,147,483,648."
+  code={`
+flowchart LR
+  A["n = 1,610,612,733<br/>valid int"] --> B["output = 4 * ceil(n/3)<br/>= 2,147,483,644"]
+  B --> C["fits in int<br/>returned as is"]
+  D["n = 1,610,612,734<br/>valid int"] --> E["output = 4 * ceil(n/3)<br/>= 2,147,483,648"]
+  E --> F["does not fit in int<br/>returned: -2,147,483,648"]
+`}
+/>
+
+## Calling the real function
+
+An off-by-one in a boundary is the kind of claim worth testing instead of trusting. I loaded a real `libcrypto` (the OpenSSL 3.5.7 build that ships with Git for Windows, dated June 9, 2026) from Python, allocated the input, and called `EVP_EncodeBlock` at the two lengths on either side of the boundary.[^3] The output buffer was always allocated at the correct size, so no memory is written out of bounds. The test only looks at the number that comes back.
+
+| Input bytes (`n`) | Real output size | Value returned |
+|---|---|---|
+| 1,610,612,733 | 2,147,483,644 | 2,147,483,644 |
+| 1,610,612,734 | 2,147,483,648 | -2,147,483,648 |
+
+One byte of input apart, and the answer flips from correct to the most negative `int`. It took about half a second each on this machine and needed roughly 4 GB of free memory for the two buffers.
+
+Two caveats that matter. Signed integer overflow is undefined behavior in C, so the wrap to a negative number is what this compiler and this build happened to do, not something the language promises. And the function did not crash or write anywhere it should not: a correctly sized buffer, as I gave it, is handled fine. The wrong thing is the number it reports.
+
+## From a wrong number to a memory bug
+
+Here is the part I cannot show. A wrong return value is only a security problem if some caller trusts it. The pull request text says the bug can be reached from the command line by passing a very large `-proxy_pass` value to `openssl s_client`, supplied through an environment variable so that it fits in the argument limits, and that it matches the pattern of CVE-2021-23840, an earlier length bug in the same family.[^1]
+
+I read the one caller the pull request touches, `base64encode()` in `crypto/http/http_client.c`, as it is in the 3.6.5 source.[^4] It computes the buffer size in a `size_t`, allocates `4 * ceil(len / 3) + 1`, calls `EVP_EncodeBlock`, and then checks that the return value is not negative and not larger than the size it allocated. By that reading the oversized input is caught there, and the pull request changes the pre-check from `len > INT_MAX` to `len > (INT_MAX / 4) * 3`, which would simply reject it earlier. I did not find the path where a bad return value turns into a write past a buffer, and the advisory that presumably describes it has not been published.
+
+So I cannot tell you why this is rated 9.8, or which applications are exposed. A score that high usually reflects a network-reachable path that needs no login. That would be a different claim from "an integer is wrong at 1.6 GB", and my data supports only the second.
+
+## How old is the code
+
+The question I can answer is how far back the same function goes. I listed the release tags of the OpenSSL repository (the `openssl-3.x.y` and `OpenSSL_1_1_1w` style names, excluding alphas, betas and FIPS tags) and downloaded `crypto/evp/encode.c` at each one.[^5] For each tag the script finds `EVP_EncodeBlock`, reads the declaration of the counter that becomes the return value, and looks for any guard on the length.
+
+<Chart
+  type="bar"
+  format="plain"
+  caption="Release tags whose EVP_EncodeBlock returns an int and has no length guard, grouped by series. All 248 release tags were scanned and none has a guard."
+  label="Bar chart of the 248 OpenSSL release tags by series, all with the unguarded int-returning function: 0.9.x 69, 1.0.x 65, 1.1.x 37, 3.x 72, 4.x 5."
+  labels={['0.9.x', '1.0.x', '1.1.x', '3.x', '4.x']}
+  series={[
+    { name: 'release tags', data: [69, 65, 37, 72, 5] },
+  ]}
+  yTitle="tags"
+/>
+
+All 248 tags contain `EVP_EncodeBlock` with an `int` return, and none of them has a length check in it. The oldest, `OpenSSL_0_9_1c`, already has it. For 243 of them the internal counter is a plain `int` that gets 4 added per 3 input bytes, so the wrap happens inside the function. In the five 4.x tags (4.0.0 to 4.0.3 and 4.1.0) the helper counts in a `size_t` and an AVX2-based encoder was added, but the public function still casts the result back to `int`, so the number it returns is truncated the same way.[^6]
+
+That count says only that the same shape of code exists. It does not say that every release is vulnerable in the sense of the advisory, and it says nothing about whether a distribution has already backported the patch. Which versions OpenSSL itself calls affected will be in the advisory, and that is the list to trust.
+
+## What the fix does
+
+The pull request touches four files for 59 added and 2 removed lines. In `EVP_EncodeBlock` it adds a check that the length is not negative and not above `(INT_MAX / 4) * 3`, and returns early for a length of zero. It adds a similar guard to `EVP_DecodeBlock` for negative lengths, fixes the bound in `http_client.c`, documents the limits in the manual page and adds a test.[^1]
+
+There is one detail to watch. The pull request description says invalid inputs now return `-1`. The diff I downloaded implements the new length checks with `OPENSSL_assert`, which aborts the program on failure instead of returning, and a comment in it points to a separate issue, #33812, about moving the check into the internal functions so it can report failure. Whichever way it lands, the description and the diff I read did not agree on November 20, and the pull request was still open.
+
+## Trade-offs and what this does not show
+
+- I measured one build on one platform. The returned value is undefined behavior, so another compiler or optimization level could behave differently.
+- The test needs about 4 GB of free memory, which is also a hint about exploitability: an attacker has to get a server to hold a 1.6 GB buffer first, though a CLI tool run by a script with an environment variable is a different story.
+- The tag scan is a text analysis of one file. It does not build any release, and it did not look at the other places that call the function.
+- I did not read the advisory because it does not exist yet. The 9.8 score is quoted from the Hacker News title.
+- Distributions backport fixes, so a version number says little about whether a given machine has the patch.
+
+## Takeaways
+
+- The boundary is exact: 1,610,612,733 input bytes encode fine, and 1,610,612,734 bytes make `EVP_EncodeBlock` return -2,147,483,648 on the build I tested.
+- The shape of the code is old. All 248 release tags I scanned, back to 0.9.1c, have an `int`-returning `EVP_EncodeBlock` with no length guard.
+- If you call `EVP_EncodeBlock` in your own code, check the input length against `(INT_MAX / 4) * 3` before the call, and never size a buffer from its return value.
+- If you run OpenSSL, wait for the advisory and your distribution's update instead of working from a version number in a blog post, including this one.
+- When a patch lands before its advisory, the diff is a good first source, but read the code and the description separately. Here they did not match.
+
+[^1]: [openssl/openssl pull request 33652](https://github.com/openssl/openssl/pull/33652), "[NSF] [CVE-2026-121481] Buffer overflow in EVP_EncodeBlock()", and its [Hacker News thread](https://news.ycombinator.com/item?id=50569226) (248 points on the morning of November 20, 2026). The title, CVSS 9.8 score, description and the 4-file, +59/-2 diff are as shown by the GitHub API and the `.diff` file that day. The pull request was open and not merged.
+[^2]: `crypto/evp/encode.c` at the release tags, for example [openssl-3.6.5](https://github.com/openssl/openssl/blob/openssl-3.6.5/crypto/evp/encode.c) and [openssl-4.1.0](https://github.com/openssl/openssl/blob/openssl-4.1.0/crypto/evp/encode.c). The signature is `int EVP_EncodeBlock(unsigned char *t, const unsigned char *f, int dlen)`.
+[^3]: Script and output: [`openssl-encodeblock-overflow.py`](/files/openssl-encodeblock-overflow.py) and [`openssl-encodeblock-overflow-output.txt`](/files/openssl-encodeblock-overflow-output.txt). Python 3.12 with `ctypes`, loading `libcrypto-3-x64.dll` from Git for Windows (OpenSSL 3.5.7, June 9, 2026) on a 64-bit Windows 11 machine with 31.5 GB of RAM.
+[^4]: `crypto/http/http_client.c` at [openssl-3.6.5](https://github.com/openssl/openssl/blob/openssl-3.6.5/crypto/http/http_client.c), function `base64encode()`, and `evp_encodeblock_int()` in `crypto/evp/encode.c` of the same tag, where `ret += 4` is added to an `int` once per 3 input bytes.
+[^5]: Script and output: [`openssl-encodeblock-scan.py`](/files/openssl-encodeblock-scan.py) and [`openssl-encodeblock-scan-output.txt`](/files/openssl-encodeblock-scan-output.txt). It needs `git` for `ls-remote` and Python 3, and makes one download per tag. Tags were listed on November 20, 2026: 248 release tags across series 0.9, 1.0, 1.1, 3.x and 4.x. The guard test is a text pattern (`INT_MAX`, an assert on `dlen`, or a comparison of `dlen`), so a guard written differently would be missed.
+[^6]: `crypto/evp/encode.c` at [openssl-4.1.0](https://github.com/openssl/openssl/blob/openssl-4.1.0/crypto/evp/encode.c): `EVP_EncodeBlock` calls `encode_base64_avx2()` or `evp_encodeblock_int()` and returns `(int)` of the result in every branch. The AVX2 encoder is not in the 3.x tags I checked (no `encode_base64_avx2` in 3.5.9 or 3.6.5).
