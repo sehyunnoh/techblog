@@ -1,0 +1,7 @@
+tags scanned: 102
+  read_status=fixed      read_colon_line=fixed      3
+  read_status=vulnerable read_colon_line=vulnerable 99
+
+first/last tag per class (by tag name order):
+  ('fixed', 'fixed'): gpgme-1.24.4 .. gpgme-2.3.1
+  ('vulnerable', 'vulnerable'): GPGME-0-1-3 .. gpgme-2.2.0

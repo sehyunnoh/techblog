@@ -1,0 +1,127 @@
+---
+title: "99 of 102 GPGME tags have the double free, and 2.3.0 never shipped"
+description: "GPGME's CVE-2026-129975 double free is in 99 of 102 tags, back to November 2000, and the first fixed release you could install was 2.3.1. I scanned every tag and read the fix commits."
+pubDate: 2026-11-21
+tags: ['security', 'systems', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+
+On November 20, 2026 the GnuPG project announced a "critical security bug" in GPGME, the C library that most programs use to talk to GnuPG.[^1] The advisory says a crafted OpenPGP key with a very long user ID can trigger a double free, that data can be exfiltrated from applications that, for example, verify signed data, and that remote code execution "can't be ruled out". It lists Gpg4win, most mail clients, many XMPP clients, Samba and Flatpak among the affected software.
+
+The advisory also contains a few sentences that invite checking. It says the bug is in "all prior versions", it names 2.3.1 as the fix, and it says in passing that 2.3.0 "was never publicly available". The source code is public, so I went through all 102 tags of the repository and read the three commits involved. The scan agrees with the advisory about how widespread the bug is, and adds a detail about why 2.3.0 does not exist as a release.
+
+## The bug in one page of C
+
+Two functions in `src/engine-gpg.c` read what the `gpg` child process writes: `read_status()` for status lines and `read_colon_line()` for key listings. Both keep their working buffer in the engine's context object, start with 1,024 bytes, and grow it when a line does not fit. The growing looks like this (simplified from the 2.2.0 source):
+
+```c
+char *buffer = gpg->status.buffer;        // local copy of the pointer
+...
+buffer = realloc (buffer, bufsize);       // may move the block, old one is freed
+...
+nread = _gpgme_io_read (...);
+if (nread == -1)
+  return gpg_error_from_syserror ();      // early return
+...
+gpg->status.buffer = buffer;              // only stored here, at the very end
+```
+
+Some background for readers who do not write C. `realloc` asks for a bigger block of memory. If the block has to move, the old block is freed and the function returns the address of the new one. After that, any copy of the old address is a stale pointer: it points at memory that was already given back.
+
+Here the context object still holds the old address when the function returns early. Later the context is cleaned up and frees that address a second time. That is a double free. It matters because allocators sometimes reuse the freed block for something else in between, so a second `free` can corrupt unrelated data instead of just crashing, and that is what turns a crash into a possible exploit.[^2]
+
+<Mermaid
+  caption="Why the early return is the dangerous part. The context keeps the old pointer until the very last line of the function, so anything that returns before that leaves it stale."
+  label="Sequence diagram. read_status reads the buffer pointer from the context, calls realloc which frees the old block and returns a new one, then reads from gpg. If the read fails, the function returns early without writing the new pointer into the context. When the context is released later, it frees the old pointer a second time."
+  code={`
+sequenceDiagram
+  participant F as read_status()
+  participant C as context (gpg->status.buffer)
+  participant M as allocator
+  F->>C: read pointer P1
+  F->>M: realloc(P1, bigger)
+  M-->>F: P2 (P1 is freed)
+  F->>F: read from gpg fails
+  F-->>C: return early, P2 never stored
+  Note over C: still holds P1
+  C->>M: free(P1) at cleanup
+  Note over M: second free of P1
+`}
+/>
+
+## What the fix commits show
+
+The fix is small. Commit `14499348` by Werner Koch on November 14 moves the two assignments `gpg->status.buffer = buffer` and `gpg->status.bufsize = bufsize` up to right after the `realloc`, so the context is correct no matter where the function exits, and does the same in `read_colon_line()`.[^3] The commit message credits Johan Carlsson through HackerOne and says it fixes "a 24 years old bug". The advisory adds that GitLab was told on November 12 and that disclosure was originally planned for November 25. It was moved up because of a separate Ruby issue that forced GitLab to update early.
+
+Then come two more commits, and these are the part I found interesting.
+
+On November 15, `4254af7d` ("Improve code in engine-gpg for easier debugging") rewrote both functions so that every exit goes through one `leave:` label.[^4] In the process the line `err = 0;` that used to sit inside one branch was dropped, and `err` was left uninitialized. In the new code a normal read, with no callback to set `err`, falls through to `leave:` and returns whatever happened to be on the stack. The result is a function that signals random errors on success.
+
+On November 19, `b283b290` fixes it with a one-line change per function (`err = 0` at the declaration) and a commit message that says to remember "not to hack when suffering from flu". `NEWS` for 2.3.1 says "Fix a regression in 2.3.0".
+
+So the fix was written on the 14th, the regression crept in on the 15th, the 2.3.0 tag was cut on the 18th, and the regression was caught before anyone used it. The advisory's line that 2.3.0 "was never publicly available" matches what the history looks like. The first public release with a working fix is 2.3.1, tagged November 19.
+
+<Mermaid
+  caption="Timeline from the commit history and the advisory. Dates are commit or tag dates in the public gpgme repository."
+  label="Timeline: November 12 GitLab is informed. November 14 fix commit 14499348. November 15 refactor commit 4254af7d introduces an uninitialized variable. November 18 tag 2.3.0, never public. November 19 regression fix and tag 2.3.1. November 20 tag 1.24.4 and the public advisory."
+  code={`
+flowchart LR
+  A["Nov 12<br/>GitLab informed"] --> B["Nov 14<br/>fix commit<br/>14499348"]
+  B --> C["Nov 15<br/>refactor 4254af7d<br/>leaves err unset"]
+  C --> D["Nov 18<br/>tag 2.3.0<br/>never public"]
+  D --> E["Nov 19<br/>regression fix<br/>tag 2.3.1"]
+  E --> F["Nov 20<br/>tag 1.24.4<br/>advisory"]
+`}
+/>
+
+## Counting the tags
+
+To see how far back the pattern goes, I cloned the repository (a 4 MB partial clone is enough, since only one file per tag is needed) and wrote a script that does the following for each of the 102 tags.[^5] It finds the gpg engine source, which is called `rungpg.c` in the old trees and `engine-gpg.c` since 2009. It extracts `read_status()` and `read_colon_line()`, then looks for a `realloc` on the local buffer. It classifies the function as vulnerable if there is a `return` or `goto` between that call and the line that stores the new pointer into the context. The failure check right after `realloc` (`if (!buffer) return`) is excluded, since there is nothing to lose when the allocation fails.
+
+The result is 99 tags with the vulnerable shape in both functions and 3 with the fixed shape: `gpgme-2.3.0`, `gpgme-2.3.1` and `gpgme-1.24.4`. No tag has one function fixed and the other not.
+
+<Chart
+  type="bar"
+  format="plain"
+  stacked
+  caption="Release tags in the gpgme repository by series, split by whether read_status() and read_colon_line() have the stale-pointer shape. 102 tags in total."
+  label="Stacked bar chart of 102 gpgme tags. Series 0.x has 32 vulnerable and 0 fixed, series 1.x has 60 vulnerable and 1 fixed, series 2.x has 7 vulnerable and 2 fixed."
+  labels={['0.x', '1.x', '2.x']}
+  series={[
+    { name: 'vulnerable shape', data: [32, 60, 7] },
+    { name: 'fixed shape', data: [0, 1, 2] },
+  ]}
+  yTitle="tags"
+/>
+
+Two things stand out.
+
+The first is age. The oldest tag in the repository, `V0-0-0` from November 16, 2000, already has the shape. Using `git log -S` on the line `gpg->status.buffer = buffer` I traced it to a commit from November 7, 2000 with the message "Just a backup for now". The commit that the fix message names as the origin, `f12433c1` from July 2002, is a large commit in which I could see the function being reindented, but the `realloc` and the store at the end were already there before it. So by this measure the pattern is about 26 years old, not 24, and `f12433c1` looks like the point where the code was reformatted rather than where it was written. I did not compare every line of that commit, so treat that as a reading of the diff, not a verdict.
+
+The second is 1.24.4. It is a tag of the legacy 1.x branch, dated November 20, and its `NEWS` says it is from a branch created just before the 2.0 split and that the project "can't guarantee that it will see all security patches".[^6] The diff against 1.24.3 for `engine-gpg.c` is the same ten-line change as the main fix, without the refactoring that caused the regression. The advisory text I read does not mention 1.24.4. If a distribution you use still ships a 1.x GPGME, that tag is the smaller change to take, or the patch attached to the advisory, which the advisory says will probably apply cleanly even to very old versions.
+
+## What the scan does not show
+
+- The scan is a text analysis of one file per tag. It shows the code shape from the advisory. It does not build or run any release.
+- I did not reproduce the double free or any exploit. The advisory says a very long user ID triggers it, and the shape of the code is consistent with that (a line longer than the 1,024-byte buffer forces a `realloc`), but I have not shown which early exit an attacker can force.
+- The advisory's claims about exfiltration and a possible RCE are the project's own and I have no independent measurement for them.
+- Distributions backport fixes, so a version number says little about a given machine. Debian, for example, patches older versions in place instead of bumping them.
+- The tag list includes a few names left over from the repository's Subversion history (`gpgme-1-base`, `dd9jn_pre_test_20020702`), which is why the count is 102 and not a clean list of releases.
+
+## Takeaways
+
+- 99 of the 102 tags in the gpgme repository have the stale-pointer shape in both `read_status()` and `read_colon_line()`, back to the oldest one from November 2000.
+- The first public release with a working fix is 2.3.1. Tag 2.3.0 has the security fix but also an uninitialized `err`, and the project says it never released it.
+- If you run the 1.x line, 1.24.4 (November 20) carries only the minimal fix. If you build GPGME statically into your own program, rebuilding against a fixed version is what counts.
+- The refactor that landed one day after a security fix is a good reminder that a small, reviewable change travels better than a cleanup bundled next to it.
+- Check what your own programs link. A shared library update does nothing for a binary that carries its own copy.
+
+[^1]: [GnuPG Security Advisory for GPGME (T8557, CVE-2026-129975)](https://lists.gnupg.org/pipermail/gnupg-announce/2026q4/000517.html), Werner Koch, gnupg-announce, November 20, 2026. Quoted details (all prior versions affected, crafted long user ID, 2.3.0 never publicly available, disclosure moved up from November 25, affected software list) are from the text of that message. I found it through the [Hacker News thread](https://news.ycombinator.com/item?id=50587208).
+[^2]: General background: a double free is described in [CWE-415](https://cwe.mitre.org/data/definitions/415.html). Whether a double free is exploitable depends on the allocator and on what is allocated between the two frees, which the advisory also notes.
+[^3]: Commits in [github.com/gpg/gpgme](https://github.com/gpg/gpgme): `14499348` "Fix a double free in the status line read code" (November 14, 2026), the same change as `b4358e92` on the 1.24 branch. Read with `git show` on a local partial clone.
+[^4]: `4254af7d` "Improve code in engine-gpg for easier debugging" (November 15, 2026), and `b283b290` "Fix a stupid regression" (November 19, 2026), whose message names `4254af7d` as the `Fixes-commit`. The 2.3.0 source of `read_status()` shows `err` declared without a value and returned at the `leave:` label.
+[^5]: Script and output: [`gpgme-doublefree-scan.py`](/files/gpgme-doublefree-scan.py), [`gpgme-doublefree-scan-output.txt`](/files/gpgme-doublefree-scan-output.txt) and the per-tag [`gpgme-doublefree-scan.csv`](/files/gpgme-doublefree-scan.csv). Setup is `git clone --bare --filter=blob:none https://github.com/gpg/gpgme.git`, then `python gpgme-doublefree-scan.py gpgme.git out.csv`. Runs in about 40 seconds. Tags read on November 21, 2026. My first two versions of the script missed old tags that write `( GpgObject gpg )` with spaces and treated the allocation-failure return as a bug, and I fixed both before using the numbers here.
+[^6]: `NEWS` and the diff of `src/engine-gpg.c` between tags `gpgme-1.24.3` and `gpgme-1.24.4`, and the tag dated November 20, 2026. The advisory text I read lists 2.3.1 as the fix and does not mention 1.24.4.
