@@ -1,0 +1,109 @@
+---
+title: "Valkey's 43% sorted set saving is 28% of real memory"
+description: "Valkey 9.2 replaces the sorted set skiplist with a B+ tree and claims 43% less memory per member. I built 9.1.4 and 9.2.0 and measured 28% (sequential) and 23% (random) on 5 million members."
+pubDate: 2026-11-22
+tags: ['data', 'systems', 'benchmark', 'deep-dive']
+draft: false
+---
+
+import Mermaid from '../../components/Mermaid.astro';
+import Chart from '../../components/Chart.astro';
+
+On November 16, 2026 the Valkey project published a post about its next release, 9.2, titled "From Skiplists to B+ Trees".[^1] Sorted sets (the `ZADD`, `ZRANGE`, `ZRANK` family) have always been a skiplist underneath. In 9.2 a large sorted set becomes a B+ tree instead, and the post says that in a 5-million-member test it "reduced per-member memory overhead by 36-43%", saving up to 109 MB.
+
+Those are good numbers, and the post is careful about what it measured: the ordered index only, without the member strings or the hashtable that every sorted set also carries. That is a fair way to compare two data structures. It is also not the number you will see on your own server, where the member strings and the hashtable are there too. So I built both versions and measured the whole thing.
+
+## What the claim measures
+
+A Valkey sorted set keeps each member in two structures at once. A hashtable maps member to score, so `ZSCORE` is fast. An ordered structure keeps members sorted by score, so ranges and ranks are fast. Only the second one changes in 9.2. The first and the member bytes stay as they were.
+
+The post reports the ordered structure alone: 50.3 bytes per member for the skiplist, 28.5 for the new tree with sequential inserts (43% less) and 32.0 with random inserts (36% less). Whatever else a member costs is a constant added to both sides, and a constant in the denominator shrinks the percentage.
+
+<Mermaid
+  caption="What each percentage is a percentage of. The post's 43% is measured against the ordered index only. A server's memory counter includes the parts that did not change."
+  label="Flowchart. A sorted set splits into the ordered index, which changes from skiplist to B+ tree in Valkey 9.2, and the member data plus hashtable, which stay the same. The 43 percent figure divides by the ordered index alone, while the used_memory counter divides by both parts."
+  code={`
+flowchart LR
+  Z["one sorted set member"] --> I["ordered index<br/>skiplist -> B+ tree<br/>changed in 9.2"]
+  Z --> R["member string + hashtable entry<br/>unchanged"]
+  I --> P["post's 43%:<br/>divides by this part only"]
+  I --> U["used_memory:<br/>divides by both parts"]
+  R --> U
+`}
+/>
+
+## What I measured
+
+I took the `9.1.4` and `9.2.0` tags from the valkey-io/valkey repository, built each with plain `make -j8` on WSL2 (Ubuntu 24.04, 8 cores), and ran one server at a time with persistence turned off.[^2] A small script inserts 5 million members into one sorted set with pipelined `ZADD`, each member exactly 20 bytes and each score a distinct integer, and reports how much `used_memory` grew. For the random case the same scores are inserted in shuffled order. Every configuration ran three times.
+
+`OBJECT ENCODING` confirms the two builds do what the post says: `skiplist` on 9.1.4, `btree` on 9.2.0.
+
+<Chart
+  type="bar"
+  format="plain"
+  caption="Growth of used_memory per member for a 5-million-member sorted set with 20-byte members. Three runs per bar agreed to within 0.05 bytes."
+  label="Bar chart of bytes per member. Sequential insert: Valkey 9.1.4 78.27, Valkey 9.2.0 56.47. Random insert: Valkey 9.1.4 78.27, Valkey 9.2.0 60.09."
+  labels={['Sequential insert', 'Random insert']}
+  series={[
+    { name: 'Valkey 9.1.4 (skiplist)', data: [78.27, 78.27] },
+    { name: 'Valkey 9.2.0 (B+ tree)', data: [56.47, 60.09] },
+  ]}
+  yTitle="bytes per member"
+/>
+
+The whole sorted set costs 78.3 bytes per member on 9.1.4. On 9.2.0 it costs 56.5 with sequential scores (28% less) and 60.1 with random order (23% less). In absolute terms that is 109.0 MB saved sequentially and 90.9 MB randomly, on a data set of about 391 MB.
+
+Here is the part that makes me trust both numbers. The post's index-only figures imply a saving of 21.8 bytes per member for sequential inserts (50.3 minus 28.5) and 18.3 for random (50.3 minus 32.0). My whole-server difference is 21.8 and 18.2. The savings match to a tenth of a byte, and so does the 109 MB. The claim is right. It is the percentage that changes, because roughly 28 bytes per member (78.3 minus the post's 50.3) sit outside the part that was rewritten.
+
+| Insert order | 9.1.4 | 9.2.0 | Saved per member | Post's claim (index only) | Whole sorted set |
+|---|---|---|---|---|---|
+| Sequential | 78.27 B | 56.47 B | 21.8 B | 43% | 27.9% |
+| Random | 78.27 B | 60.09 B | 18.2 B | 36% | 23.2% |
+
+I could not reproduce the post's split of that total into "index" and "everything else". The 37 bytes it derives for a skiplist node does come out of the source (a 16-byte header plus 16 bytes per level at an average of 1.33 levels is 37.3), but in 9.1.4 the member string is stored inside the node itself, after the level array, so a node with a 20-byte member comes to about 59 bytes before the allocator rounds it. How the post gets from there to 50.3 for the index alone is not described, and I did not try to guess. What I can say is that the difference between the two versions is solid, and the absolute split is the post's.
+
+## Does the saving hold at other sizes?
+
+Not exactly. I kept the sequential inserts and varied the member length, then the set size.
+
+<Chart
+  type="bar"
+  format="plain"
+  caption="Used_memory growth per member by member length, sequential inserts, 5 million members, one run each."
+  label="Bar chart of bytes per member by member length. 8-byte members: 9.1.4 68.26, 9.2.0 48.47. 20-byte: 78.27 and 56.47. 50-byte: 116.45 and 88.48. 100-byte: 177.05 and 136.47."
+  labels={['8 B members', '20 B members', '50 B members', '100 B members']}
+  series={[
+    { name: 'Valkey 9.1.4 (skiplist)', data: [68.26, 78.27, 116.45, 177.05] },
+    { name: 'Valkey 9.2.0 (B+ tree)', data: [48.47, 56.47, 88.48, 136.47] },
+  ]}
+  yTitle="bytes per member"
+/>
+
+The saving in bytes is not constant: 19.8 for 8-byte members, 21.8 for 20, 28.0 for 50 and 40.6 for 100. As a share of the total it falls from 29.0% to 22.9%, because longer members make the unchanged part bigger. I did not dig into why the byte saving grows with member length. My guess is allocator size classes (the skiplist node and the member share one allocation, and jemalloc rounds those up in steps), but I have not verified that.
+
+Set size matters less. With 20-byte members and sequential inserts the saving was 28.3% at 100,000 members, 27.0% at 1 million and 27.9% at 5 million. These were single runs, so I would not read the wobble as a trend.
+
+## Pitfalls when you check this yourself
+
+- **`MEMORY USAGE` is not a good yardstick for the old structure.** For a collection it estimates by sampling a few elements (5 by default, per the command's documentation).[^3] On 9.1.4, three runs over identical data gave 94.9, 70.9 and 75.7 bytes per member, while the real figure from `used_memory` was 78.3 every time. On 9.2.0 it returned 55.86 each time, close to the 56.47 that `used_memory` showed. If you compare versions with `MEMORY USAGE`, the noise is on the skiplist side.
+- **Insert speed is a different question, and mine is a weak answer.** One client, one pipelined connection, WSL2. Sequential inserts took 8.4 to 8.7 seconds on 9.1.4 and 9.5 to 10.4 on 9.2.0, so slightly slower for me. Random inserts took 21.8 to 23.6 seconds against 14.9 to 15.9, so clearly faster. The post's throughput table (for example `ZADD` updating scores 105% faster) comes from a different setup on a 64-core machine and I did not test it.
+- **This is `used_memory`, not RSS.** Allocator fragmentation and what the operating system actually hands out can differ, and I did not measure either.
+
+## What I did not test
+
+- Whether the benchmark branch in the post matches the merged code. The post says its numbers come from a PR branch and were "not rerun for the merged commit". I measured the `9.2.0` tag, which is what you can actually build.
+- Members that share long prefixes or sorted sets with many equal scores. My members are `m` followed by zero-padded digits, with unique scores.
+- Small sorted sets. Valkey keeps those in a compact encoding anyway, and the new tree only applies to large ones.
+- Other allocators, other platforms, and anything about latency under load.
+
+## Takeaways
+
+- The 43% is real, and it is a statement about the ordered index. For a whole sorted set with 20-byte members I measured 28% less memory with sequential scores and 23% less with random ones.
+- Compared with the post, my measured saving per member agrees to 0.1 byte for both insert orders. Compared with the headline, it is a smaller percentage because the member strings and hashtable did not change.
+- Expect the percentage to fall as members get longer (29% at 8 bytes, 23% at 100) and the byte saving to rise.
+- To check it on your own data, compare `INFO memory` before and after loading, not `MEMORY USAGE`, and use the version's `OBJECT ENCODING` to confirm which structure you are measuring.
+- 9.2 changes the encoding name reported for large sorted sets to `btree`. Anything that parses that string needs a look.
+
+[^1]: [From Skiplists to B+ Trees: Making Valkey Sorted Sets More Memory Efficient](https://valkey.io/blog/from-skiplists-to-b+tree/), Rain Valentine and Dragos Andriciuc, valkey.io, November 16, 2026. Quoted numbers (50.3, 28.5, 32.0 bytes per member, 43% and 36%, 109 MB and 92 MB, the 37-byte derivation, the "not rerun for the merged commit" remark) are from that page. The implementation is [valkey-io/valkey pull request 4206](https://github.com/valkey-io/valkey/pull/4206), merged on August 6, 2026. I found the post through the [Hacker News thread](https://news.ycombinator.com/item?id=50534387).
+[^2]: Tags `9.1.4` and `9.2.0` of [valkey-io/valkey](https://github.com/valkey-io/valkey), downloaded as tarballs on November 22, 2026. The skiplist node layout is `zskiplistNode` in `src/server.h` of 9.1.4 (level chosen by `zslRandomLevel` in `src/t_zset.c`, one extra level with probability 0.25). Script and raw output: [`valkey-zset-memory.py`](/files/valkey-zset-memory.py) and [`valkey-zset-memory-output.txt`](/files/valkey-zset-memory-output.txt). Run it as `python3 valkey-zset-memory.py <valkey-server> seq|rand <members> <member_length> <runs>`. It takes about 10 seconds per 5-million-member run.
+[^3]: [MEMORY USAGE](https://valkey.io/commands/memory-usage/), Valkey command documentation: for nested data types, the `SAMPLES` option sets how many elements are sampled to estimate usage, and the default is 5.

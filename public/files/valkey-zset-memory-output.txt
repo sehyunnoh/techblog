@@ -1,0 +1,25 @@
+# host: 6.18.58.1-microsoft-standard-WSL2, 8 cpus; builds: make -j8 from GitHub tags 9.1.4 and 9.2.0
+valkey_version:9.1.4 order=seq n=5000000 mlen=20 run=1 enc=skiplist used_delta=391420128 per_member=78.28B MEMORY_USAGE=474558408 (94.91B/member) insert_s=8.4
+valkey_version:9.1.4 order=seq n=5000000 mlen=20 run=2 enc=skiplist used_delta=391359184 per_member=78.27B MEMORY_USAGE=354553480 (70.91B/member) insert_s=8.7
+valkey_version:9.1.4 order=seq n=5000000 mlen=20 run=3 enc=skiplist used_delta=391315488 per_member=78.26B MEMORY_USAGE=378509512 (75.70B/member) insert_s=8.5
+valkey_version:9.2.0 order=seq n=5000000 mlen=20 run=1 enc=btree used_delta=282345024 per_member=56.47B MEMORY_USAGE=279301336 (55.86B/member) insert_s=9.5
+valkey_version:9.2.0 order=seq n=5000000 mlen=20 run=2 enc=btree used_delta=282351192 per_member=56.47B MEMORY_USAGE=279307480 (55.86B/member) insert_s=10.4
+valkey_version:9.2.0 order=seq n=5000000 mlen=20 run=3 enc=btree used_delta=282335192 per_member=56.47B MEMORY_USAGE=279291736 (55.86B/member) insert_s=9.5
+valkey_version:9.1.4 order=rand n=5000000 mlen=20 run=1 enc=skiplist used_delta=391321152 per_member=78.26B MEMORY_USAGE=378535304 (75.71B/member) insert_s=22.2
+valkey_version:9.1.4 order=rand n=5000000 mlen=20 run=2 enc=skiplist used_delta=391369832 per_member=78.27B MEMORY_USAGE=394567368 (78.91B/member) insert_s=23.6
+valkey_version:9.1.4 order=rand n=5000000 mlen=20 run=3 enc=skiplist used_delta=391365904 per_member=78.27B MEMORY_USAGE=402549768 (80.51B/member) insert_s=21.8
+valkey_version:9.2.0 order=rand n=5000000 mlen=20 run=1 enc=btree used_delta=300452504 per_member=60.09B MEMORY_USAGE=298918168 (59.78B/member) insert_s=14.9
+valkey_version:9.2.0 order=rand n=5000000 mlen=20 run=2 enc=btree used_delta=300364248 per_member=60.07B MEMORY_USAGE=298795096 (59.76B/member) insert_s=15.9
+valkey_version:9.2.0 order=rand n=5000000 mlen=20 run=3 enc=btree used_delta=300489536 per_member=60.10B MEMORY_USAGE=298829784 (59.77B/member) insert_s=15.8
+# member length sweep, sequential, 5M members, 1 run
+valkey_version:9.1.4 order=seq n=5000000 mlen=8 run=1 enc=skiplist used_delta=341296952 per_member=68.26B MEMORY_USAGE=346528456 (69.31B/member) insert_s=8.6
+valkey_version:9.2.0 order=seq n=5000000 mlen=8 run=1 enc=btree used_delta=242339352 per_member=48.47B MEMORY_USAGE=239295640 (47.86B/member) insert_s=9.2
+valkey_version:9.1.4 order=seq n=5000000 mlen=50 run=1 enc=skiplist used_delta=582256888 per_member=116.45B MEMORY_USAGE=586533576 (117.31B/member) insert_s=9.1
+valkey_version:9.2.0 order=seq n=5000000 mlen=50 run=1 enc=btree used_delta=442386008 per_member=88.48B MEMORY_USAGE=439343320 (87.87B/member) insert_s=10.1
+valkey_version:9.1.4 order=seq n=5000000 mlen=100 run=1 enc=skiplist used_delta=885270136 per_member=177.05B MEMORY_USAGE=874541128 (174.91B/member) insert_s=10.3
+valkey_version:9.2.0 order=seq n=5000000 mlen=100 run=1 enc=btree used_delta=682337624 per_member=136.47B MEMORY_USAGE=679294936 (135.86B/member) insert_s=11.4
+# size sweep, sequential, 20-byte members
+valkey_version:9.1.4 order=seq n=100000 mlen=20 run=1 enc=skiplist used_delta=7732272 per_member=77.32B MEMORY_USAGE=7900615 (79.01B/member) insert_s=0.1
+valkey_version:9.2.0 order=seq n=100000 mlen=20 run=1 enc=btree used_delta=5545048 per_member=55.45B MEMORY_USAGE=5434584 (54.35B/member) insert_s=0.2
+valkey_version:9.1.4 order=seq n=1000000 mlen=20 run=1 enc=skiplist used_delta=80889392 per_member=80.89B MEMORY_USAGE=83072776 (83.07B/member) insert_s=1.6
+valkey_version:9.2.0 order=seq n=1000000 mlen=20 run=1 enc=btree used_delta=59066904 per_member=59.07B MEMORY_USAGE=58415768 (58.42B/member) insert_s=1.7
