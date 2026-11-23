@@ -1,0 +1,127 @@
+---
+title: "36 nginx advisories in 2026 vs 19 in 9 years"
+description: "nginx 1.30.7 and 1.31.9 fixed 10 flaws on November 18, taking 2026 to 36 advisories, against 19 in 2017 to 2025. At most 10 trace to AI firms; the other 26 are still a record."
+pubDate: 2026-11-23
+tags: ['security', 'web', 'data']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+On November 18, nginx 1.30.7 (stable) and 1.31.9 (mainline) shipped with fixes for ten security problems at once.[^1] Ten in one release is a lot for nginx. What surprised me more was the running total. nginx.org keeps a single page listing every security advisory the project has ever published, and when I counted the rows by year, 2026 had 36. The nine years before it, 2017 through 2025, had 19 between them.
+
+The popular explanation is AI. Several of this year's finders say their bugs came out of automated, model-driven analysis, and the November batch was reported under the name "nginx2root" by a company that sells exactly that. So I went back through the release notes to see how far that explanation reaches. It reaches less far than the headlines suggest, and the part it doesn't cover is the more interesting half.
+
+## A little vocabulary
+
+A **security advisory** is the project's public notice that a version range has a vulnerability, with a severity and a fixed version. Most carry a **CVE** id, a public identifier from the shared Common Vulnerabilities and Exposures catalogue. nginx has two release lines: **mainline** (1.31.x, new features) and **stable** (1.30.x, fixes only). Security fixes land in both on the same day. Bugs like **use-after-free** (memory is used after being handed back) and **buffer overflow** (writing past the end of a memory block) are the memory-safety mistakes C programs are prone to, and they make up most of this year's list.
+
+## How I counted
+
+Three files on nginx.org hold everything needed, and a script fetches each once:[^2]
+
+- `security_advisories.html` has one entry per advisory: title, severity, CVE ids and the vulnerable version range. It has no dates.
+- `news.html` and the yearly archives (`2009.html` to `2026.html`) announce each release and name the CVE ids it fixed, with a date.
+- `CHANGES` lists every mainline version with its release date, and the "Thanks to" line for each security fix.
+
+<Mermaid
+  caption="How each advisory gets a year and an age. Twelve old advisories (eleven from 2009 to 2012, one from 2025) are never named in a news item and fall back to the year in their CVE id."
+  label="Flowchart: each advisory from security_advisories.html is matched by CVE id to the earliest news item that names it, which gives its disclosure date. If no news item names it, the year in the CVE id is used. The first version in its vulnerable range is looked up in CHANGES to get the date the bug shipped. Age is the disclosure date minus that date."
+  code={`
+flowchart TD
+  A["advisory row<br/>severity, CVE ids, vulnerable range"] --> B{"a news item<br/>names its CVE?"}
+  B -- yes --> C["disclosure date = earliest such news item"]
+  B -- no --> D["year from the CVE id"]
+  A --> E["first vulnerable version<br/>looked up in CHANGES"]
+  C --> F["age = disclosure date minus<br/>that version's release date"]
+  E --> F
+`}
+/>
+
+The page lists 78 advisories. 65 match a dated news item. Of the rest, 12 fall back to the year in their CVE id (all but one from 2009 to 2012) and one, a 2010 Windows issue, has no CVE id at all and is left out of the yearly count. Every one of the 36 CVE ids from 2026 on the advisory page also appears in `CHANGES`, and every 2026 advisory matched a news item, so this year's figures don't rely on the fallback.
+
+## The count
+
+<Chart
+  type="bar"
+  format="plain"
+  caption="nginx security advisories per year, by the date of the release that fixed them. 2015, 2020 and 2023 had none. 2026 is counted to November 23."
+  label="Bar chart of nginx advisories per year: 2009 5, 2010 2, 2011 2, 2012 2, 2013 3, 2014 4, 2015 0, 2016 4, 2017 1, 2018 3, 2019 3, 2020 0, 2021 1, 2022 2, 2023 0, 2024 7, 2025 2, 2026 36."
+  labels={['2009', '2010', '2011', '2012', '2013', '2014', '2015', '2016', '2017', '2018', '2019', '2020', '2021', '2022', '2023', '2024', '2025', '2026']}
+  series={[{ name: 'Advisories', data: [5, 2, 2, 2, 3, 4, 0, 4, 1, 3, 3, 0, 1, 2, 0, 7, 2, 36] }]}
+  yTitle="advisories"
+/>
+
+For sixteen years the number moved between zero and seven. The previous high was 2024 with seven. 2026 has 36, which is close to the 41 of all earlier years combined. nginx rates its own advisories as major, medium, minor or low, and this year's split is 5 major, 25 medium and 6 minor or low. So the jump isn't a pile of trivial findings either. Five major ratings is more than any earlier year, where the most was three, in 2009.
+
+The fixes arrived in nine separate release days, not one big cleanup:
+
+<Chart
+  type="bar"
+  format="plain"
+  stacked
+  caption="The 36 advisories of 2026 by release date, split by what the finder's own write-up or credit line says about method. 'AI vendor, method not stated' means the credit names an AI security company but I found no write-up saying how that bug was found."
+  label="Stacked bar chart of 2026 advisories by release date. Feb 4: 1 other. Mar 24: 1 documented AI, 1 AI vendor method not stated, 4 other. May 13: 3 documented AI, 3 other. May 22: 1 other. Jun 17: 3 other. Jul 15: 3 other. Sep 15: 1 other. Oct 14: 5 other. Nov 18: 3 documented AI, 2 AI vendor method not stated, 5 other."
+  labels={['Feb 4', 'Mar 24', 'May 13', 'May 22', 'Jun 17', 'Jul 15', 'Sep 15', 'Oct 14', 'Nov 18']}
+  series={[
+    { name: 'Write-up says AI found it', data: [0, 1, 3, 0, 0, 0, 0, 0, 3] },
+    { name: 'AI vendor, method not stated', data: [0, 1, 0, 0, 0, 0, 0, 0, 2] },
+    { name: 'Other credit or none', data: [1, 4, 3, 1, 3, 3, 1, 5, 5] },
+  ]}
+  yTitle="advisories"
+/>
+
+## How much of it is AI
+
+To answer that without guessing, I only counted a bug as AI-found when the finder's own write-up says so, and matched it to the "Thanks to" line in `CHANGES`.
+
+- **CVE-2026-27654** (WebDAV buffer overflow, March 24) is credited to "Calif.io in collaboration with Claude and Anthropic Research." Calif's write-up says Claude flagged the overflow in `ngx_http_dav_copy_move_handler()` while three researchers worked through it in parallel sessions.[^3] (For transparency: this blog's posts are researched and drafted with Claude.)
+- **CVE-2026-42945, 42946 and 40701** (May 13) are credited to Leo Lin. DepthFirst's write-up, by Zhenpeng (Leo) Lin, says an internal autonomous system found the rewrite-module overflow, and lists the other two as results of the same run.[^4] That write-up also claims CVE-2026-42934, which `CHANGES` credits to someone else, so I left that one out.
+- **CVE-2026-123634, 121810 and 113425** (November 18) are credited to Xint.io. Xint's nginx2root post says "a fully automated Xint scan found the other four without human guidance."[^5]
+
+That is 7 of 36. Three more could be added if you lean generous. Xint's post says its fourth automated finding was CVE-2026-123633, but `CHANGES` credits that one to "Albert of Vexera AI". The headline bug, CVE-2026-123007, was found by "a Xint researcher" while preparing for a competition, which doesn't say what tools they used. And an mp4 overflow in March credits "Xint Code" and Aisle Research, with no write-up I could find. That gives at most 10.
+
+Take all ten away and 2026 still has 26 advisories, more than three times the previous record. The remaining credits are spread wide: 31 distinct names across the year, with no one above four. Some of those people may have used AI tools without saying so, and the count can't see that. But "AI found them" only explains this year's number if you assume it for bugs where nobody has claimed it.
+
+## Old code, new eyes
+
+The other pattern is age. For each 2026 advisory I took the first version in nginx's own "Vulnerable:" range and looked up when that version shipped.
+
+<Chart
+  type="bar"
+  format="plain"
+  caption="How long each 2026 bug had been in a released nginx before it was fixed, measured from the first vulnerable version's release date in CHANGES. Median 12.5 years."
+  label="Bar chart of the age of the 36 bugs fixed in 2026. Under 1 year: 5. 1 to 5 years: 6. 5 to 10 years: 6. 10 to 15 years: 4. 15 to 20 years: 12. 20 years or more: 3."
+  labels={['< 1 yr', '1 to 5', '5 to 10', '10 to 15', '15 to 20', '20+']}
+  series={[{ name: 'Advisories', data: [5, 6, 6, 4, 12, 3] }]}
+  yTitle="advisories"
+/>
+
+Nineteen of the 36 bugs were more than ten years old when they were fixed. Fifteen first shipped in a 0.x release, the version line that ended in 2011. The oldest, a buffer overflow when `alias` meets `rewrite` (fixed October 14), traces back to 0.1.29 from 2005. The mail proxy use-after-free in the November batch goes back to 0.5.33, about 19 years. These are modules few people would call new: rewrite, charset, WebDAV, SSI, mail, resolver.
+
+That matters for how to read the jump. If the extra advisories were mostly in HTTP/3 or other recent code, you could blame churn. Only 11 of the 36 come from code younger than five years. Most of what got fixed this year had been sitting in configurations people have run unchanged for a decade, which is the case for paying attention to the stable line even if you never touch a new feature.
+
+## What this count can't tell you
+
+- **Advisories are not exploits.** The count says nothing about attacks in the wild. Many of these bugs need a specific configuration: `alias` with `try_files`, `ssi` with AIO, the mail proxy, `charset_map`. Your exposure depends on your config, not on the yearly total.
+- **Policy can move the number.** The page is whatever the nginx team decides deserves an advisory. Six minor or low advisories this year suggests the bar isn't set high, but I couldn't find a stated policy change to check that against.
+- **Dates are release dates.** A bug fixed on November 18 may have been reported in October (Xint's timeline says October 16). That shifts a few advisories between months, not between years.
+- **Credit lines are one-sided.** They record who reported first, as nginx saw it. The Vexera/Xint and DepthFirst/Carlier overlaps show that several finders can hit the same bug.
+- **Severity here is nginx's scale.** F5's advisories score some of the same bugs differently in CVSS. I used nginx.org's labels because they are on the same page as the count. My [earlier post on the HTTP/2 flaws](/posts/nginx-http2-flaws-top-1000-sites-h2-server-header/) quotes the CVSS figures.
+
+## Takeaways
+
+- nginx.org lists 36 advisories fixed in 2026, against 19 in 2017 to 2025 and 41 in every earlier year combined. The previous single-year high was 7.
+- Finder write-ups tie 7 of the 36 to AI tools directly, and at most 10 if you count AI vendor credits without a stated method. The other 26 alone are more than three times any earlier year.
+- 19 of the 36 bugs were over ten years old, with a median age of 12.5 years. Mature modules, not new features, carried most of the year.
+- Nine separate security release days in one year means upgrading only for "big" CVEs leaves you behind. If you run nginx, being on 1.30.7 or 1.31.9 is the current floor.
+- Recompute it yourself: one Python script and a handful of public nginx.org pages.
+
+## References
+
+[^1]: nginx.org, [news](https://nginx.org/news.html), entry for 2026-11-18, and [nginx security advisories](https://nginx.org/en/security_advisories.html), both read November 23, 2026.
+[^2]: Script and full output: [`nginx-advisories-by-year.py`](/files/nginx-advisories-by-year.py) and [`nginx-advisories-output.txt`](/files/nginx-advisories-output.txt). Python 3 standard library only. It fetches `en/security_advisories.html`, `news.html`, the yearly archives `2009.html` to `2026.html`, [`en/CHANGES`](https://nginx.org/en/CHANGES) and the older `en/CHANGES-0.5` to `CHANGES-0.8`. Run on November 23, 2026.
+[^3]: Anas Cherni and Thai Duong, [Claude + Humans vs nginx: CVE-2026-27654](https://calif.io/research/nginx), Calif, April 10, 2026.
+[^4]: Zhenpeng (Leo) Lin, [NGINX Rift: achieving nginx RCE via an 18-year-old vulnerability](https://depthfirst.com/research/nginx-rift-achieving-nginx-rce-via-an-18-year-old-vulnerability), DepthFirst, May 13, 2026.
+[^5]: Xint, [nginx2root: remote code execution](https://xint.io/blog/nginx2root-remote-code-execution), November 18, 2026.
