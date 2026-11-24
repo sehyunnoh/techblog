@@ -1,0 +1,92 @@
+== Aligned experimental runs ==
+  chrome    160.0.8178.0           id=5169723185299456 wpt=e00a7b14e8 2026-11-23T19:14
+  firefox   163.0a1                id=5153677573357568 wpt=e00a7b14e8 2026-11-23T16:07
+  safari    257 preview            id=6287652018716672 wpt=e00a7b14e8 2026-11-23T06:46
+  ladybird  1.0-5d7cc30690c        id=5185123310632960 wpt=e00a7b14e8 2026-11-23T04:36
+  tests in every run: 126916
+
+== Totals over common tests ==
+  browser     raw pass         of       norm  norm %  | without WebCryptoAPI: raw, norm
+  chrome     2,247,671  2,301,514  120,683.5  95.09%  | 2,191,659  120,423.2
+  firefox    2,197,511  2,295,971  111,694.3  88.01%  | 2,141,745  111,451.1
+  safari     2,181,019  2,291,162  110,036.6  86.70%  | 2,133,085  109,822.6
+  ladybird   2,196,213  2,285,427  104,689.5  82.49%  | 2,129,068  104,366.4
+
+== Ladybird minus Safari TP, by top-level directory ==
+  (raw = passing subtests; norm = per-test scores; sub = subtests; tests = test files)
+  WebCryptoAPI                 raw  +19,211 norm    +109.1 sub   70,994 tests    340
+  editing                      raw   +9,622 norm     +33.4 sub  117,327 tests    889
+  webdriver                    raw   +4,587 norm    +226.8 sub   10,533 tests    693
+  sanitizer-api                raw   +3,458 norm     +38.8 sub    3,839 tests     51
+  domparsing                   raw   +1,251 norm      +7.5 sub    3,760 tests    100
+  mimesniff                    raw   +1,202 norm      -0.1 sub    3,886 tests      7
+  touch-events                 raw     +895 norm      +9.3 sub      998 tests     15
+  custom-elements              raw     +794 norm     +33.4 sub    4,859 tests    222
+  referrer-policy              raw     +385 norm     +52.3 sub    8,816 tests  1,483
+  mathml                       raw     +303 norm     +20.0 sub    4,737 tests    627
+  resource-timing              raw     +271 norm      +4.4 sub    1,213 tests    172
+  cookies                      raw     +202 norm     +15.3 sub    1,294 tests     89
+  preload                      raw     +158 norm     +11.0 sub      958 tests     90
+  html                         raw     +124 norm    -216.2 sub  161,558 tests 10,979
+  pointerevents                raw     +117 norm     -20.1 sub    2,714 tests    263
+  ...
+  encoding                     raw     -303 norm     -15.2 sub 1,152,416 tests  1,349
+  compression                  raw     -322 norm     -22.0 sub    1,316 tests     78
+  svg                          raw     -343 norm    -252.4 sub   16,609 tests  1,572
+  websockets                   raw     -356 norm    -177.0 sub    2,390 tests    800
+  mediacapture-record          raw     -638 norm    -102.8 sub      724 tests    120
+  urlpattern                   raw     -756 norm      -4.6 sub    3,266 tests     30
+  fs                           raw     -783 norm     -76.2 sub    1,123 tests    103
+  webrtc                       raw   -1,260 norm    -171.4 sub    2,425 tests    270
+  webtransport                 raw   -1,309 norm    -125.3 sub    1,435 tests    151
+  streams                      raw   -1,349 norm     -67.6 sub    5,807 tests    318
+  IndexedDB                    raw   -1,354 norm    -189.3 sub    5,853 tests    820
+  fetch                        raw   -1,537 norm    -122.9 sub   13,345 tests    963
+  service-workers              raw   -2,190 norm    -248.5 sub    3,267 tests    336
+  webcodecs                    raw   -3,154 norm    -233.6 sub    3,984 tests    322
+  css                          raw   -6,740 norm   -3003.2 sub  225,216 tests 35,800
+  total: raw +15,194  norm -5,347.1
+  directories Ladybird leads (norm > 0): 44, trails (norm < 0): 109, of 263
+  /css: 35,800 files, 27,521 with no subtests (reftests etc.); those account for norm -2,512 of the /css difference
+
+== Where the subtests are (share of all subtests vs share of test files) ==
+  encoding       1,152,416 subtests  50.2%    1,349 files   1.1%
+  css              225,216 subtests   9.8%   35,800 files  28.2%
+  wasm             192,286 subtests   8.4%      619 files   0.5%
+  html             161,558 subtests   7.0%   10,979 files   8.7%
+  editing          117,327 subtests   5.1%      889 files   0.7%
+  WebCryptoAPI      70,994 subtests   3.1%      340 files   0.3%
+  dom               67,180 subtests   2.9%      865 files   0.7%
+  third_party       53,838 subtests   2.3%   53,838 files  42.4%
+  without third_party (test262): raw diff +15,326  norm diff -5,215.1
+  without third_party and encoding: raw diff +15,629  norm diff -5,199.9
+
+== Largest test files by subtest count (Ladybird run) ==
+   15,521 subtests  ladybird  15,521  safari  15,521  /wasm/core/simd/simd_f64x2_pmin_pmax.wast.js.html
+   15,521 subtests  ladybird  15,521  safari  15,521  /wasm/core/simd/simd_f32x4_pmin_pmax.wast.js.html
+   11,333 subtests  ladybird  11,333  safari  11,333  /html/dom/reflection-text.html
+   10,920 subtests  ladybird  10,920  safari  10,920  /dom/ranges/Range-set.html
+   10,653 subtests  ladybird  10,653  safari  10,653  /wasm/core/simd/simd_f64x2_cmp.wast.js.html
+   10,341 subtests  ladybird  10,341  safari  10,341  /wasm/core/simd/simd_f32x4_cmp.wast.js.html
+   10,031 subtests  ladybird  10,031  safari  10,031  /wasm/core/f64.wast.js.html
+   10,031 subtests  ladybird  10,031  safari  10,031  /wasm/core/f32.wast.js.html
+    9,617 subtests  ladybird   9,617  safari   9,617  /wasm/core/f32_cmp.wast.js.html
+    9,617 subtests  ladybird   9,617  safari   9,617  /wasm/core/f64_cmp.wast.js.html
+  WebCryptoAPI: 340 test files (0.27% of files), 70,994 subtests (3.09% of subtests)
+    ladybird: 67,145 passing WebCryptoAPI subtests
+    safari: 47,934 passing WebCryptoAPI subtests
+
+== History: Ladybird vs Safari TP, aligned runs ==
+  on or before wpt sha        LB raw    STP raw  raw diff   LB norm  STP norm norm diff  raw diff w/o WebCrypto
+  2026-06-01   c4645dd038  1,953,253  2,045,903   -92,650    88,378    96,004    -7,626  -104,758
+  2026-07-01   080962fd4d  2,079,071  2,050,450   +28,621    89,231    96,927    -7,696  +16,705
+  2026-08-01   4a5810a124  2,080,304  2,142,690   -62,386    90,423   103,773   -13,349  -74,302
+  2026-09-01   53bc812da2  2,083,312  2,134,624   -51,312    91,569   104,994   -13,425  -67,031
+  2026-10-01   eed8aea457  2,109,074  2,162,234   -53,160    95,263   106,963   -11,700  -68,867
+  2026-10-15   8834c3701b  2,087,837  2,138,043   -50,206    91,389   102,198   -10,809  -65,451
+  2026-10-22   05e0c59d42  2,122,573  2,171,605   -49,032    96,705   108,081   -11,375  -67,526
+  2026-10-25   ffe56d4420  2,156,185  2,172,079   -15,894    97,846   108,208   -10,362  -34,388
+  2026-10-27   d697fd3c6d  2,180,120  2,172,359    +7,761   101,465   108,279    -6,814  -10,733
+  2026-10-31   458d0f3658  2,184,730  2,172,990   +11,740   102,152   108,529    -6,376  -6,754
+  2026-11-10   91d0bab137  2,189,921  2,176,438   +13,483   103,539   109,567    -6,028  -5,769
+  2026-11-24   e00a7b14e8  2,196,213  2,181,019   +15,194   104,690   110,037    -5,347  -4,017

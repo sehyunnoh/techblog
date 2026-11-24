@@ -1,0 +1,171 @@
+---
+title: "Ladybird tops Safari on WPT subtests, trails on tests"
+description: "Ladybird's alpha passes 15,194 more WPT subtests than Safari Technology Preview, yet scored per test file it is 5,347 points behind. WebCryptoAPI alone covers the lead."
+pubDate: 2026-11-24
+tags: ['web', 'frontend', 'data']
+draft: false
+---
+
+import Chart from '../../components/Chart.astro';
+import Mermaid from '../../components/Mermaid.astro';
+
+Ladybird, the browser that builds its own engine instead of forking Chromium, WebKit or Gecko, went into alpha on November 23 with downloads for macOS and Linux.[^1] The announcement itself has no numbers in it. The number people have been repeating comes from the project's October newsletter: "On October 26, we passed Safari Technology Preview on WPT," ending the month at 2,184,722 subtests.[^2]
+
+That is a big claim for a project that started as a hobby inside an operating system written from scratch. It is also easy to check, because the results are public. So I downloaded them and counted. The short version: the claim is accurate, to within eight subtests. But it depends on what you count, and counted the other reasonable way, Ladybird is still well behind Safari.
+
+## A little vocabulary
+
+**WPT** (web-platform-tests) is the shared test suite that all the major browser engines contribute to and run. Each test is a file, usually an HTML page. Most files are **testharness** tests, which make many individual checks, and each check is a **subtest**.[^3] A file that tests one CSS property might hold 3 subtests. A file that walks through a Japanese text encoding character by character holds 1,000. Some files have no subtests at all, such as **reftests**, which pass if a page renders pixel-identical to a reference page.[^4]
+
+**Safari Technology Preview** (STP) is Apple's early-access build of Safari, ahead of the shipping browser. It is the fair comparison for Ladybird's nightly builds, since both run the newest code each engine has.
+
+The results live on **wpt.fyi**, which publishes every run as a JSON file: one entry per test file, with a status and a pair of numbers, passed subtests and total subtests.[^5]
+
+## How I counted
+
+The wpt.fyi runs API can return an *aligned* set: runs from different browsers on the same WPT revision, so every browser faced exactly the same tests. I took the latest aligned set that includes Chrome Canary, Firefox Nightly, STP and Ladybird (WPT revision `e00a7b14e8`, runs from November 23), and for history, the latest aligned STP and Ladybird pair on or before twelve dates since June.[^6]
+
+<Mermaid
+  caption="Two ways to turn one run's results into a single number. The newsletter uses the left path. Each test file is one row in the run's summary JSON."
+  label="Flowchart: a test file's summary row has a status and passed and total subtest counts. If it has no subtests, it counts as one subtest that passes when the status is PASS. Path one adds up passing subtests across all files, giving the subtest count. Path two scores each file as passed divided by total, between 0 and 1, and adds up those scores, giving the per-test score."
+  code={`
+flowchart TD
+  A["one test file<br/>status + passed/total subtests"] --> B{"any subtests?"}
+  B -- no --> C["count it as 1 subtest<br/>passing if status is PASS"]
+  B -- yes --> D["passed, total"]
+  C --> E["subtest count<br/>sum of passed"]
+  D --> E
+  C --> F["per-test score<br/>sum of passed / total"]
+  D --> F
+`}
+/>
+
+Before trusting my own arithmetic, I checked it against Ladybird's. For the October 31 run, my subtest count is 2,184,730. The newsletter says 2,184,722. The newsletter also says the count went "from about 2.12 million on October 22 to about 2.18 million on October 27"; I get 2,122,573 and 2,180,120. Whatever small difference remains (a run picked a few hours apart, or how a crashed file is counted), the method is the same one Ladybird uses.
+
+## The crossover is real, and it happened fast
+
+<Chart
+  type="line"
+  format="plain"
+  caption="Ladybird minus Safari Technology Preview on aligned WPT runs. Above zero means Ladybird is ahead. The subtest line crosses zero between October 25 and 27; the per-test line never does."
+  label="Line chart with two series over twelve dates from June 1 to November 23, 2026. Subtest difference: -92,650, +28,621, -62,386, -51,312, -53,160, -50,206, -49,032, -15,894, +7,761, +11,740, +13,483, +15,194. Per-test score difference: -7,626, -7,696, -13,349, -13,425, -11,700, -10,809, -11,375, -10,362, -6,814, -6,376, -6,028, -5,347."
+  labels={['Jun 1', 'Jul 1', 'Aug 1', 'Sep 1', 'Oct 1', 'Oct 15', 'Oct 22', 'Oct 25', 'Oct 27', 'Oct 31', 'Nov 10', 'Nov 23']}
+  series={[
+    { name: 'Subtests passed, difference', data: [-92650, 28621, -62386, -51312, -53160, -50206, -49032, -15894, 7761, 11740, 13483, 15194] },
+    { name: 'Per-test score, difference', data: [-7626, -7696, -13349, -13425, -11700, -10809, -11375, -10362, -6814, -6376, -6028, -5347], dashed: true },
+  ]}
+  yTitle="Ladybird minus Safari TP"
+/>
+
+On the subtest line, Ladybird was about 49,000 behind on October 22 and about 7,800 ahead on October 27. The newsletter's date checks out. STP barely moved over those five days (+201 subtests on the same files), so this was Ladybird climbing, not Safari slipping.
+
+I split that five-day jump by top-level directory. On files present in both runs, Ladybird gained 24,551 subtests in `/css`, 10,211 in `/editing`, 4,452 in `/svg` and about 3,100 each in `/sanitizer-api` and `/webdriver`. The newsletter credits AI coding agents: "We pointed AI coding agents at WPT and asked them to fill in missing functionality. They made lots of small fixes, and those added up." I didn't go through Ladybird's commits to confirm who or what wrote each fix, so that part stays the project's account. The directories match what it says, at least.
+
+One point on the chart needs a warning. The July 1 run shows Ladybird *ahead* by 28,621, then 62,386 behind a month later. I didn't chase that one down. What I did check is where the big moves come from overall: on files present in both the June 1 and November 23 runs, 125,086 of Ladybird's 214,692 added subtests are in `/wasm`, where a single file can hold 15,521 subtests. When a few files like that time out or change size, tens of thousands of subtests appear or vanish. A single run is a noisy sample.
+
+## Half of all subtests sit in one directory
+
+The subtest count treats every subtest as equal, so it helps to know where they are. They are not spread evenly.
+
+<Chart
+  type="bar"
+  horizontal
+  format="percent"
+  caption="Share of all subtests versus share of test files, for the eight directories with the most subtests, in the November 23 aligned run. /encoding is half of every subtest but about 1% of files."
+  label="Horizontal bar chart. Share of subtests and share of files: encoding 50.2 and 1.1 percent, css 9.8 and 28.2, wasm 8.4 and 0.5, html 7.0 and 8.7, editing 5.1 and 0.7, WebCryptoAPI 3.1 and 0.3, dom 2.9 and 0.7, third_party 2.3 and 42.4."
+  labels={['encoding', 'css', 'wasm', 'html', 'editing', 'WebCryptoAPI', 'dom', 'third_party']}
+  series={[
+    { name: 'Share of subtests', data: [50.2, 9.8, 8.4, 7.0, 5.1, 3.1, 2.9, 2.3] },
+    { name: 'Share of test files', data: [1.1, 28.2, 0.5, 8.7, 0.7, 0.3, 0.7, 42.4] },
+  ]}
+/>
+
+1,152,416 of the 2,297,450 subtests, just over half, are in `/encoding`. Nearly all of them come from the legacy Japanese, Korean and Chinese encoding tests, which check one character per subtest and are split into chunks of 1,000. Every browser here passes almost all of them (Ladybird 1,152,093, STP 1,152,396), so they add about 1.15 million to everyone's total and decide nothing. The race happens in the other half.
+
+At the opposite end, `/third_party` is 42% of test files but only 2.3% of subtests. That is test262, the JavaScript language suite, imported as one file per test with no subtests. I'll come back to it, because it is the obvious objection to the alternative count.
+
+## Count test files instead, and the order flips
+
+Scoring each file from 0 to 1 (all subtests pass = 1, half pass = 0.5) stops a 1,000-subtest file from outweighing a 3-subtest one. Over the 126,916 files that all four runs share:
+
+<Chart
+  type="bar"
+  format="percent"
+  caption="Average per-test score over the 126,916 test files common to all four aligned runs of November 23. By raw subtests, Ladybird is second (2,196,213); by this score, it is last."
+  label="Bar chart of average per-test score: Chrome Canary 95.09 percent, Firefox Nightly 88.01, Safari Technology Preview 86.70, Ladybird 82.49."
+  labels={['Chrome Canary', 'Firefox Nightly', 'Safari TP', 'Ladybird']}
+  series={[{ name: 'Average per-test score', data: [95.09, 88.01, 86.7, 82.49] }]}
+  yTitle="average score"
+/>
+
+| Browser | Subtests passed | Per-test score | Average |
+| --- | ---: | ---: | ---: |
+| Chrome Canary 160 | 2,247,671 | 120,683.5 | 95.09% |
+| Firefox Nightly 163 | 2,197,511 | 111,694.3 | 88.01% |
+| Safari TP 257 | 2,181,019 | 110,036.6 | 86.70% |
+| Ladybird 1.0 nightly | 2,196,213 | 104,689.5 | 82.49% |
+
+By subtests, Ladybird is 15,194 ahead of STP and only 1,298 behind Firefox Nightly. By test files, it is 5,347 behind STP, which is about 4.2 points of average. Ladybird's own trend is good under both counts: the per-test gap was 13,425 on September 1 and is 5,347 now. It just hasn't crossed zero.
+
+Is the per-test score unfair to Ladybird because of test262's 53,838 one-subtest files? No. Ladybird passes 52,685 of them and STP 52,817, nearly a tie. Removing `/third_party` entirely leaves the per-test gap at 5,215. Removing `/encoding` as well leaves the subtest lead at 15,629. Neither choice is what flips the result.
+
+## Where the gap actually comes from
+
+Breaking both differences down by directory shows two different races.
+
+<Chart
+  type="bar"
+  horizontal
+  format="plain"
+  height={420}
+  caption="Counted in passing subtests: Ladybird minus Safari TP by top-level directory, November 23. WebCryptoAPI alone is bigger than the whole 15,194 lead."
+  label="Horizontal bar chart of passing subtests, Ladybird minus Safari TP: WebCryptoAPI +19,211; editing +9,622; webdriver +4,587; sanitizer-api +3,458; html +124; svg -343; fetch -1,537; service-workers -2,190; webcodecs -3,154; css -6,740."
+  labels={['WebCryptoAPI', 'editing', 'webdriver', 'sanitizer-api', 'html', 'svg', 'fetch', 'service-workers', 'webcodecs', 'css']}
+  series={[{ name: 'Subtests passed, difference', data: [19211, 9622, 4587, 3458, 124, -343, -1537, -2190, -3154, -6740] }]}
+/>
+
+<Chart
+  type="bar"
+  horizontal
+  format="plain"
+  height={420}
+  caption="The same ten directories counted per test file instead. WebCryptoAPI shrinks to +109 and /css grows to -3,003, more than half of the total -5,347."
+  label="Horizontal bar chart of per-test score, Ladybird minus Safari TP: WebCryptoAPI +109; editing +33; webdriver +227; sanitizer-api +39; html -216; svg -252; fetch -123; service-workers -249; webcodecs -234; css -3,003."
+  labels={['WebCryptoAPI', 'editing', 'webdriver', 'sanitizer-api', 'html', 'svg', 'fetch', 'service-workers', 'webcodecs', 'css']}
+  series={[{ name: 'Per-test score, difference', data: [109.1, 33.4, 226.8, 38.8, -216.2, -252.4, -122.9, -248.5, -233.6, -3003.2], slot: 2 }]}
+/>
+
+`/WebCryptoAPI` is 340 files, 0.3% of the suite, holding 70,994 subtests. Ladybird passes 67,145 of them and STP 47,934, a 19,211 difference. That one directory is bigger than Ladybird's whole lead of 15,194. Take it out and the subtest race is 2,129,068 to 2,133,085, Ladybird 4,017 behind. The lead comes from files like `okp_importKey_failures_Ed448.https.any.html`, 770 subtests each, which Ladybird passes in full and STP passes 10 of. That file runs twice, once in a window and once in a worker, so this one test of Ed448 key-import errors is a 1,520-subtest swing on its own.
+
+`/css` is the opposite case: 35,800 files with only about six subtests each on average. Ladybird trails there by 6,740 subtests, which looks like a rounding error next to 2.2 million. Per test, it is 3,003 points, more than half of the total per-test gap. 27,521 of those CSS files have no subtests at all, mostly reftests that compare rendering against a reference page, and they account for 2,512 of the 3,003. That is layout and painting, the part of an engine that decides whether a real page looks right, and the subtest count weighs each of those files as a single subtest.
+
+Counting directories rather than points: by per-test score, Ladybird is ahead of STP in 44 of 263 top-level directories and behind in 110 (the rest are within half a point). After `/css`, the biggest per-test deficits are in `/svg`, `/service-workers`, `/webcodecs`, `/html`, `/IndexedDB`, `/webrtc` and `/websockets`. Most of those are the APIs sites use to work offline, store data, stream media and hold open connections, and most web apps lean on them far more than on Ed448 key-import error handling.
+
+## What neither number tells you
+
+Both counts are defensible, and I'm not arguing the subtest count is dishonest. The run summaries record subtests, Ladybird stated precisely what it measured, and it reproduces. The problem is the shorthand. "Passed Safari on WPT" reads as "is now more compatible than Safari," and the data doesn't support that yet.
+
+There are limits to my side too:
+
+- **Single runs.** Each point is one run per browser. Timeouts move whole files in and out, as the July point shows. Several runs per date would give a range; I used one.
+- **Different machines.** Ladybird's runs are on Linux, and STP only exists for macOS. Platform-specific failures, fonts and timing all differ, and WPT doesn't correct for that.
+- **Tests aren't websites.** WPT checks standards behavior, one feature at a time. A browser can pass a test file and still break a site because of performance, a missing feature WPT doesn't test well, or bot detection. The same newsletter lists sites that only just started working, such as Google Slides opening and nytimes.com getting past its bot check.
+- **AI attribution.** The late-October jump lines up with the newsletter's account of AI agents making small fixes, by directory. I didn't verify authorship commit by commit.
+- **My scoring rule.** I scored files myself from the run summaries, counting a file with no subtests as one subtest. A crash or timeout scores 0 either way. Other dashboards may treat those cases differently and land on slightly different totals.
+
+## Takeaways
+
+- Ladybird's claim checks out on its own terms: my recount of the October 31 run is within 8 subtests of the newsletter's 2,184,722, and the crossover over Safari TP falls between October 25 and 27.
+- The lead is 15,194 subtests on November 23, and one directory, `/WebCryptoAPI` (0.3% of test files), contributes 19,211. Without it, Ladybird is 4,017 behind.
+- Scored per test file, Ladybird is at 82.49% against Safari TP's 86.70%, last of the four engines, with `/css` alone accounting for more than half the gap.
+- Half of all WPT subtests are legacy CJK encoding checks that every engine passes. Any total that adds raw subtests is mostly measuring the same 1.15 million for everyone.
+- The trend is still real. Ladybird closed the per-test gap from 13,425 to 5,347 points in under three months, without forking anyone's engine.
+
+## References
+
+[^1]: Andreas Kling, [Ladybird is now in alpha](https://ladybird.org/posts/alpha/), November 23, 2026. Discussed on [Hacker News](https://news.ycombinator.com/item?id=50614249).
+[^2]: Ladybird, [October 2026 newsletter](https://ladybird.org/newsletter/2026-10-31/), section "Web Platform Tests (WPT)", read November 24, 2026.
+[^3]: web-platform-tests documentation, [testharness.js tests](https://web-platform-tests.org/writing-tests/testharness.html).
+[^4]: web-platform-tests documentation, [Reftests](https://web-platform-tests.org/writing-tests/reftests.html).
+[^5]: [wpt.fyi](https://wpt.fyi/) and its runs API, [`/api/runs`](https://wpt.fyi/api/runs?aligned&max-count=1&sha=e00a7b14e8&products=chrome%5Bexperimental%5D,firefox%5Bexperimental%5D,safari%5Bexperimental%5D,ladybird). Run ids used for November 23: Chrome 5169723185299456, Firefox 5153677573357568, Safari TP 6287652018716672, Ladybird 5185123310632960.
+[^6]: Script and full output: [`ladybird-wpt-recount.py`](/files/ladybird-wpt-recount.py) and [`ladybird-wpt-recount-output.txt`](/files/ladybird-wpt-recount-output.txt). Python 3 standard library only. It downloads 28 run summaries of about 14 MB each (roughly 390 MB in total, cached locally) and finished in about 90 seconds. Run on November 24, 2026.
