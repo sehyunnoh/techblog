@@ -1,0 +1,43 @@
+== 1. Count comparisons (exact tests, two-sided)
+Original: quit within 3 min      12/17 vs 6/19  Fisher p=0.0437  Barnard p=0.0289  Boschloo p=0.0289
+Original: every problem right    0/17 vs 2/19  Fisher p=0.4873  Barnard p=0.2840  Boschloo p=0.3145
+Easier: quit within 3 min        0/9 vs 0/8  Fisher p=1.0000  Barnard p=1.0000  Boschloo p=nan
+Bonferroni x9 on quit-rate Fisher p: 0.393
+
+== 2. The eight runs the classifier terminated
+k_present  min_p    max_p    share_of_(q,r)_with_p<0.05
+        0  0.0038  0.3455  0.44
+        1  0.0019  0.3586  0.50
+        2  0.0019  0.3715  0.48
+        3  0.0021  0.3815  0.50
+        4  0.0022  0.5467  0.48
+        5  0.0022  0.5467  0.42
+        6  0.0021  0.3815  0.48
+        7  0.0019  0.3715  0.50
+        8  0.0019  0.3586  0.44
+All 165 allocations: 78 keep p<0.05
+
+== 3. Minutes worked: what the means imply about runs that did NOT quit
+present  5 non-quitters averaged between 5.89 and 13.43 min
+absent   13 non-quitters averaged between 16.52 and 18.05 min
+
+== 4. Break-even standard deviation for each minutes comparison
+Mental arithmetic, original    gap   8.4 min  break-even SD  12.38 min (148.6% of mean)
+Mental arithmetic, easier      gap   1.4 min  break-even SD   1.35 min ( 16.0% of mean)
+Home valuation, impossible     gap  16.0 min  break-even SD  17.50 min ( 44.2% of mean)
+Home valuation, borderline     gap   4.0 min  break-even SD   4.26 min (  4.5% of mean)
+Home valuation, possible       gap   3.0 min  break-even SD   3.19 min (  4.7% of mean)
+LoRA repair                    gap   4.0 min  break-even SD   2.74 min (  2.0% of mean)
+Locked chip                    gap   2.0 min  break-even SD   1.37 min (  1.5% of mean)
+Chess compression              gap  24.0 min  break-even SD  16.46 min ( 12.0% of mean)
+Word search                    gap   2.0 min  break-even SD   1.37 min (  2.9% of mean)
+
+== 5. Power of a two-sample t-test at alpha=0.05 (two-sided)
+d=0.5: n=5:0.11  n=10:0.19  n=17:0.29  n=20:0.34  n=40:0.60  (n per arm for 80%: 64)
+d=1.0: n=5:0.29  n=10:0.56  n=17:0.81  n=20:0.87  n=40:0.99  (n per arm for 80%: 17)
+d=1.5: n=5:0.55  n=10:0.89  n=17:0.99  n=20:1.00  n=40:1.00  (n per arm for 80%: 9)
+d=2.0: n=5:0.79  n=10:0.99  n=17:1.00  n=20:1.00  n=40:1.00  (n per arm for 80%: 6)
+Smallest exact two-sided Mann-Whitney p with 5 v 5: 0.0079
+Fisher p for 5 v 5 at 0/5 vs 5/5, 1/5 vs 5/5, 1/5 vs 4/5: 0.0079, 0.0476, 0.2063
+Chart data, power at d=1.0 for n=3..40: [0.159, 0.223, 0.286, 0.347, 0.406, 0.461, 0.513, 0.562, 0.607, 0.649, 0.687, 0.721, 0.753, 0.781, 0.807, 0.83, 0.851, 0.869, 0.885, 0.9, 0.912, 0.924, 0.934, 0.942, 0.95, 0.957, 0.963, 0.968, 0.972, 0.976, 0.979, 0.982, 0.985, 0.987, 0.989, 0.99, 0.992, 0.993]
+Chart data, power at d=0.5 for n=3..40: [0.077, 0.092, 0.108, 0.123, 0.139, 0.154, 0.17, 0.185, 0.201, 0.216, 0.232, 0.247, 0.262, 0.278, 0.293, 0.308, 0.323, 0.338, 0.353, 0.367, 0.382, 0.396, 0.41, 0.424, 0.438, 0.451, 0.465, 0.478, 0.491, 0.504, 0.516, 0.529, 0.541, 0.553, 0.564, 0.576, 0.587, 0.598]
