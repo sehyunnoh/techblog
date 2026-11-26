@@ -1,0 +1,97 @@
+== 1. Does data.json reproduce its own leaderboard?
+largest |recomputed - published| over all models: 0.0005 points
+humans JS/PY/C++ recomputed 87.533 vs published 87.533%
+published solutions whose UTF-8 byte length != listed size: 0 of 5632
+
+== 2. Cell counts on JS/PY/C++ (96 cells)
+some model shorter than human: 62; human shorter than every model: 14; tied: 20
+Astra alone vs humans: shorter 53, longer 26, same 17
+total bytes over the 96 cells: Astra 8073, humans 8308 (-2.83%)
+  js: Astra 2597 bytes, humans 2748 bytes (-5.49%)
+  py: Astra 2464 bytes, humans 2511 bytes (-1.87%)
+  cc: Astra 3012 bytes, humans 3049 bytes (-1.21%)
+original four languages, some model shorter than human: 93
+
+== 3. Where the oracle sets the reference
+cells where Known Best beats every competitor: 126 {'py': 9, 'cc': 18, 'rb': 17, 'raku': 19, 'rkt': 17, 'gs': 18, 'js': 18, 'hs': 10}
+in those cells the oracle is on average 4.7% shorter than the best competitor (max 25.7%)
+
+== 4. Scores under three references
+competitor                    overall no-oracle   JS/PY/C++ no-oracle
+gpt-6.2-astra-max              91.934    96.161      92.265    95.467
+humans                            nan       nan      87.533    90.553
+claude-fable-5.2-xhigh         86.611    90.464      86.634    89.582
+gemini-4-neon-xhigh            87.280    91.300      86.549    89.566
+gpt-6.2-sol-max                85.599    89.544      86.211    89.256
+gemini-4-carbon-high           85.894    89.738      85.122    88.039
+gemini-4-argon-high            84.598    88.468      84.827    87.738
+claude-opus-5.5-xhigh          83.567    87.351      83.516    86.404
+gpt-6-astra-max                79.917    83.501      79.466    82.204
+gpt-6.1-terra-max              78.875    82.459      78.541    81.332
+claude-sonnet-5.5-xhigh        76.638    80.080      77.248    79.917
+gpt-6.1-sol-max                75.722    79.105      75.531    78.152
+gemini-4-hydrogen-xhigh        74.796    78.140      74.288    76.830
+claude-opus-5-xhigh            72.291    75.414      72.313    74.745
+gpt-5.6-sol-max                71.601    74.757      71.585    73.924
+gpt-5.5-xhigh                  69.464    72.470      71.341    73.706
+gpt-5.6-terra-max              63.512    66.234      67.056    69.199
+gemini-3.8-flash-high          63.701    66.424      65.928    68.142
+claude-haiku-5.5-max           61.832    64.329      63.987    66.032
+gpt-6-sol-max                  58.487    61.053      63.173    65.130
+claude-haiku-5.5-xhigh         56.796    59.155      58.655    60.550
+gpt-5.6-luna-max               52.483    54.582      57.870    59.673
+gpt-6-luna-max                 47.975    49.993      52.911    54.651
+overall rank changes without the oracle: none
+JS/PY/C++ published: Astra 92.265  humans 87.533  gap +4.732
+JS/PY/C++ no oracle: Astra 95.467  humans 90.553  gap +4.914
+Astra scored against the human record itself (100 = tie with humans): 107.660
+
+== 5. How much the square matters (JS/PY/C++, published reference)
+linear          Astra 95.888 humans 93.268 gap +2.620
+squared (site)  Astra 92.265 humans 87.533 gap +4.732
+cubed           Astra 89.052 humans 82.608 gap +6.444
+overall rank changes, linear instead of squared: none
+
+== 6. Bootstrap over the 32 problems: Astra minus humans on JS/PY/C++
+gap +4.732, 95% bootstrap interval [+1.391, +8.126], share of resamples where humans lead 0.0032
+problems where Astra's 3-language average beats humans: 20, humans ahead: 12, even: 0
+largest per-problem Astra leads: [('26', 24.8), ('08', 23.4), ('31', 20.0), ('30', 19.5)]
+chart data, per-problem gap sorted: [('26', 24.76), ('08', 23.43), ('31', 20.04), ('30', 19.49), ('27', 18.39), ('13', 16.76), ('32', 11.18), ('04', 11.02), ('18', 10.56), ('21', 8.46), ('24', 7.53), ('23', 7.12), ('19', 6.32), ('20', 6.15), ('01', 5.54), ('28', 4.72), ('10', 2.72), ('07', 2.34), ('16', 0.82), ('15', 0.24), ('14', -0.04), ('09', -0.12), ('06', -0.43), ('22', -0.69), ('11', -1.2), ('12', -2.55), ('17', -5.81), ('03', -5.82), ('25', -6.68), ('29', -7.22), ('02', -7.93), ('05', -17.66)]
+problems 01-19 (Rhino 1.7R4 JS): mean gap +2.01; problems 20-32 (Rhino 1.7.7): +8.71; permutation p=0.061
+share of the gap from the top 4 problems: 58%
+js: Astra 90.555 humans 80.980 gap +9.575
+py: Astra 93.049 humans 90.579 gap +2.470
+cc: Astra 93.190 humans 91.039 gap +2.151
+
+== 7. Haiku 5.5 max vs xhigh, and 'shorter of the two'
+max shorter in 160, longer in 52, equal in 44
+shorter-of-two overall: 64.140
+
+== 8. Same solutions, moving target: scores across the site's git history
+human records changed between first and last data.json: 0 of 128 cells
+GPT-6 Astra cells whose size changed: 11 (['js']), total bytes 19565 -> 19523
+JS/PY/C++ score by data.json version (only rows where something changed):
+2026-09-29 1a5f87eada gpt-6-astra-max=84.732  humans=93.933
+2026-09-30 e24a6c323b gpt-6-astra-max=84.697  humans=93.895
+2026-10-11 5b74cfcc15 gpt-6-astra-max=83.798  humans=92.896
+2026-10-18 4185e3fd13 gpt-6-astra-max=83.598  humans=92.704
+2026-10-27 8a7bedba94 gpt-6-astra-max=83.399  humans=92.496
+2026-10-29 949fab4fa2 gpt-6-astra-max=82.611  humans=91.657
+2026-10-31 197ff7c579 gpt-6-astra-max=82.207  humans=91.165
+2026-11-06 1dba533978 gpt-6-astra-max=81.100  humans=89.912
+2026-11-11 08e537fb65 gpt-6-astra-max=81.069  humans=89.882
+2026-11-14 eb93b5274b gpt-6-astra-max=80.999  humans=89.812
+2026-11-17 7e126d5240 gpt-6-astra-max=80.386  humans=89.187
+2026-11-20 b2530bd720 gpt-6-astra-max=79.895  gpt-6.2-astra-max=92.923  humans=88.642
+2026-11-21 a44eae035f gpt-6-astra-max=79.376  gpt-6.2-astra-max=92.266  humans=88.052
+2026-11-22 5f7882ba37 gpt-6-astra-max=79.466  gpt-6.2-astra-max=92.265  humans=87.533
+
+== 9. The 2026-11-22 JS signature change (commit 5f7882ba37)
+competitor sizes that changed: 271, bytes saved -> count {3: 222, 4: 1, 5: 1, 6: 32, 9: 14, 12: 1}
+cells affected: 13, languages ['js'], problems 20-32
+human records changed by it: 0
+example, problem 21 JS, GPT-6.2 Astra before: function g(a)[x.toString(2)for(i in a.split(n=''))if(n^=-!(x=(n?2*x:-2)-~a[i]),!++n)]
+                                          after:  g={g(a)[x.toString(2)for(i in a.split(n=''))if(n^=-!(x=(n?2*x:-2)-~a[i]),!++n)]}.g
+JS/PY/C++ with those cells reverted: Astra 91.913 humans 87.733 gap +4.180 (current +4.732)
+problems 20-32 mean gap with the change reverted: +7.35 (current +8.71)
+JS/PY/C++ cells whose reference size changed since the first version: 61 of 96
