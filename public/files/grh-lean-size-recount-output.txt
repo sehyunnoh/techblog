@@ -1,0 +1,115 @@
+== original (dl/original.tar.gz)
+  files               175,187
+  bytes         1,030,531,854
+  lines            17,374,215
+  nonblank         15,531,759
+  code             15,531,759
+  code_bytes      914,688,622
+  bytes/code line 66.3
+  code lines >200 chars 165,488
+  duplicate files 14 (19,665 bytes)
+  declarations theorem 784,092, def 212,819, lemma 34,663, abbrev 13,202, structure 8,286, instance 7,820, example 4,662, inductive 121, class 43
+  declarations total 1,065,708
+  keywords sorry 0, admit 0, native_decide 0, implemented_by 0, extern 0, unsafe 0
+  top folders by code lines:
+      11,050,038  src/Development
+       2,789,976  src/Formalism
+         963,283  src/GroundTheory
+         498,172  src/ReciprocityTheory
+         173,982  src/CompanionTheory
+          47,696  src/PositivityTheory
+           8,561  src/Lemmata
+              19  src
+== alpoge (dl/alpoge.tar.gz)
+  files                58,956
+  bytes           920,533,926
+  lines            13,709,130
+  nonblank         12,093,827
+  code             11,876,786
+  code_bytes      651,205,951
+  bytes/code line 77.5
+  code lines >200 chars 77,646
+  duplicate files 5 (1,313 bytes)
+  declarations theorem 543,864, def 136,550, lemma 25,700, abbrev 9,955, structure 6,142, instance 5,426, inductive 83, class 34, example 2
+  declarations total 727,756
+  keywords sorry 7, admit 0, native_decide 0, implemented_by 0, extern 0, unsafe 2
+  top folders by code lines:
+       8,567,594  src/Development
+       2,039,227  src/Formalism
+         682,005  src/GroundTheory
+         404,850  src/ReciprocityTheory
+         145,863  src/CompanionTheory
+          32,463  src/PositivityTheory
+           4,297  src/Lemmata
+             195  tools/ci_native
+== main (dl/main.tar.gz)
+  files                   805
+  bytes            29,842,238
+  lines               479,472
+  nonblank            434,069
+  code                305,495
+  code_bytes       16,820,556
+  bytes/code line 97.7
+  code lines >200 chars 0
+  duplicate files 0 (0 bytes)
+  declarations lemma 15,997, def 3,304, theorem 1,484, abbrev 1,043, instance 725, structure 392, class 85, inductive 9
+  declarations total 23,039
+  keywords sorry 5, admit 0, native_decide 0, implemented_by 0, extern 0, unsafe 0
+  top folders by code lines:
+         181,356  src/Lib
+         124,092  src/New
+              23  src
+              13  scripts
+              11  .
+== readable (dl/grh-lean.tar.gz:grh)
+  files                   805
+  bytes            30,051,096
+  lines               477,151
+  nonblank            432,547
+  code                299,919
+  code_bytes       16,674,942
+  bytes/code line 100.2
+  code lines >200 chars 0
+  duplicate files 0 (0 bytes)
+  declarations lemma 16,684, def 3,329, theorem 1,548, abbrev 1,045, instance 741, structure 395, class 85, inductive 9
+  declarations total 23,836
+  keywords sorry 5, admit 0, native_decide 0, implemented_by 0, extern 0, unsafe 0
+  top folders by code lines:
+         299,919  grh
+== compact (dl/grh-lean.tar.gz:grh-compact)
+  files                   796
+  bytes             7,421,012
+  lines               112,854
+  nonblank             95,050
+  code                 76,166
+  code_bytes        5,331,238
+  bytes/code line 97.4
+  code lines >200 chars 1
+  duplicate files 0 (0 bytes)
+  declarations lemma 7,074, def 2,127, abbrev 780, instance 693, structure 162, class 86, theorem 19, inductive 3
+  declarations total 10,944
+  keywords sorry 5, admit 0, native_decide 0, implemented_by 0, extern 0, unsafe 0
+  top folders by code lines:
+          76,166  grh-compact
+== mathlib (dl/mathlib.tar.gz:Mathlib)
+  files                 8,624
+  bytes            98,870,876
+  lines             2,340,927
+  nonblank          1,879,888
+  code              1,525,867
+  code_bytes       68,963,859
+  bytes/code line 64.8
+  code lines >200 chars 0
+  duplicate files 0 (0 bytes)
+  declarations theorem 129,335, lemma 60,947, def 33,095, instance 27,646, abbrev 3,668, class 2,006, structure 1,701, example 553, inductive 332, opaque 1
+  declarations total 259,284
+  keywords sorry 31, admit 2, native_decide 1, implemented_by 0, extern 0, unsafe 163
+  top folders by code lines:
+       1,525,867  Mathlib
+== relative to original
+  original       code 100.0000%  bytes 100.0000%  decls  1,065,708
+  alpoge         code 76.4677%  bytes 89.3261%  decls    727,756
+  main           code  1.9669%  bytes  2.8958%  decls     23,039
+  readable       code  1.9310%  bytes  2.9161%  decls     23,836
+  compact        code  0.4904%  bytes  0.7201%  decls     10,944
+  mathlib        code  9.8242%  bytes  9.5942%  decls    259,284
