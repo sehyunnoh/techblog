@@ -1,0 +1,7750 @@
+{
+ "measured_at": "2026-11-28T11:05:56.440314+00:00",
+ "marketplace_ref": "05790c0871eea870c8c1103bb4a72542472f1ec0",
+ "plugins": [
+  {
+   "name": "42crunch-api-security-testing",
+   "kind": "git-subdir",
+   "repo": "42Crunch-AI/claude-plugins",
+   "sha": "faf5305385de8afed9468904e8639be737aff39e",
+   "path": "plugins/api-security-testing",
+   "ref": "v1.5.5",
+   "pin_date": "2026-05-12T16:29:59Z",
+   "behind": 45,
+   "pin_age_days": 199.8
+  },
+  {
+   "name": "adobe-for-creativity",
+   "kind": "git-subdir",
+   "repo": "adobe/skills",
+   "sha": "0f487c9b1b98d8e62dfc80ee4d28b29f5471261f",
+   "path": "plugins/creative-cloud/adobe-for-creativity",
+   "ref": "main",
+   "pin_date": "2026-10-15T09:33:59Z",
+   "behind": 12,
+   "pin_age_days": 44.1
+  },
+  {
+   "name": "agent-sdk-dev",
+   "kind": "local"
+  },
+  {
+   "name": "agentforce-adlc",
+   "kind": "url",
+   "repo": "SalesforceAIResearch/agentforce-adlc",
+   "sha": "09bf1539d41f9ff355ba3eb5d05d4a75813423bb",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-12T23:47:07Z",
+   "behind": 0,
+   "pin_age_days": 76.5
+  },
+  {
+   "name": "ai-plugins",
+   "kind": "url",
+   "repo": "endorlabs/ai-plugins",
+   "sha": "2de00883bd2be8b8578b46ab09baf2c8731376de",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-08-27T15:53:27Z",
+   "behind": 8,
+   "pin_age_days": 92.8
+  },
+  {
+   "name": "aikido",
+   "kind": "url",
+   "repo": "AikidoSec/aikido-claude-plugin",
+   "sha": "e72df7749ff54736bc1a6b57acff0c7799c9bda7",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-11-20T10:28:40Z",
+   "behind": 0,
+   "pin_age_days": 8.0
+  },
+  {
+   "name": "airtable",
+   "kind": "git-subdir",
+   "repo": "Airtable/skills",
+   "sha": "812ee67f1fd3d76fb45ff8df40afaa0448602ba8",
+   "path": "plugins/airtable",
+   "ref": "main",
+   "pin_date": "2026-07-21T18:20:47Z",
+   "behind": 0,
+   "pin_age_days": 129.7
+  },
+  {
+   "name": "airwallex-agentos",
+   "kind": "git-subdir",
+   "repo": "airwallex/airwallex-marketplace",
+   "sha": "877551077786664d1cbeb32013443291c66e69e6",
+   "path": "plugins/airwallex-agentos",
+   "ref": "master",
+   "pin_date": "2026-10-14T10:02:47Z",
+   "behind": 0,
+   "pin_age_days": 45.0
+  },
+  {
+   "name": "aiven",
+   "kind": "url",
+   "repo": "aiven/aiven-ai-plugins",
+   "sha": "634f41d6852957cb9280e9245f2ea6f74645b4f1",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-07-12T10:21:18Z",
+   "behind": 0,
+   "pin_age_days": 139.0
+  },
+  {
+   "name": "alloydb",
+   "kind": "url",
+   "repo": "gemini-cli-extensions/alloydb",
+   "sha": "f9b3280bdcfe8910451f00b2a40eb32685766cd1",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-27T20:36:57Z",
+   "behind": 17,
+   "pin_age_days": 31.6
+  },
+  {
+   "name": "alloydb-omni",
+   "kind": "url",
+   "repo": "gemini-cli-extensions/alloydb-omni",
+   "sha": "37101e3f9aaf0bd4d0acaeee540a0da2fd773d00",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-23T16:56:02Z",
+   "behind": 1,
+   "pin_age_days": 65.8
+  },
+  {
+   "name": "altimate-code",
+   "kind": "git-subdir",
+   "repo": "AltimateAI/altimate-claude-plugin",
+   "sha": "b7c8f68b3dfd303ab3ccf2f43934098811dfe2aa",
+   "path": "plugins/altimate-code",
+   "ref": "main",
+   "pin_date": "2026-07-23T22:55:28Z",
+   "behind": 750,
+   "pin_age_days": 127.5
+  },
+  {
+   "name": "amazon-location-service",
+   "kind": "git-subdir",
+   "repo": "awslabs/agent-plugins",
+   "sha": "097fe8ad56d8a1d5e2c81d7880adf145553cf244",
+   "path": "plugins/amazon-location-service",
+   "ref": "main",
+   "pin_date": "2026-09-14T20:50:29Z",
+   "behind": 0,
+   "pin_age_days": 74.6
+  },
+  {
+   "name": "amd-skills",
+   "kind": "git-subdir",
+   "repo": "amd/skills",
+   "sha": "d4417422312c82d4761d3255b69bfcd411147cf3",
+   "path": "skills",
+   "ref": "main",
+   "pin_date": "2026-11-12T22:46:37Z",
+   "behind": 9,
+   "pin_age_days": 15.5
+  },
+  {
+   "name": "amplitude",
+   "kind": "git-subdir",
+   "repo": "amplitude/mcp-marketplace",
+   "sha": "c4bcb5feff54cf3332290ee0071a2def2b1f149d",
+   "path": "plugins/amplitude",
+   "ref": "main",
+   "pin_date": "2026-10-15T17:58:28Z",
+   "behind": 12,
+   "pin_age_days": 43.7
+  },
+  {
+   "name": "apollo",
+   "kind": "url",
+   "repo": "apolloio/apollo-mcp-plugin",
+   "sha": "bd0513c961f02105492fcff0d7d29c9cccf1ed23",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-16T16:45:19Z",
+   "behind": 1,
+   "pin_age_days": 72.8
+  },
+  {
+   "name": "apollo-skills",
+   "kind": "url",
+   "repo": "apollographql/skills",
+   "sha": "c288eb80629dd2309eed81f23d693f66a452d043",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-07-29T20:58:41Z",
+   "behind": 59,
+   "pin_age_days": 121.6
+  },
+  {
+   "name": "appwrite",
+   "kind": "url",
+   "repo": "appwrite/claude-plugin",
+   "sha": "ab3c90b37c95b7068f0c064dc562cf21958e8e19",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-08-19T06:59:52Z",
+   "behind": 10,
+   "pin_age_days": 101.2
+  },
+  {
+   "name": "asana",
+   "kind": "local"
+  },
+  {
+   "name": "astronomer-data-agents",
+   "kind": "url",
+   "repo": "astronomer/agents",
+   "sha": "35b9610bb2710c37ca11326c4cbf7818b6725fec",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-29T16:46:44Z",
+   "behind": 5,
+   "pin_age_days": 29.8
+  },
+  {
+   "name": "atlan",
+   "kind": "url",
+   "repo": "atlanhq/agent-toolkit",
+   "sha": "17b7ae3b4852a24a9271a55eb339dea0b38f1f60",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-28T17:50:20Z",
+   "behind": 0,
+   "pin_age_days": 60.7
+  },
+  {
+   "name": "atlassian",
+   "kind": "url",
+   "repo": "atlassian/atlassian-mcp-server",
+   "sha": "b74220d41142fae52b4f680c805b2ab81050991a",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-07T18:28:41Z",
+   "behind": 14,
+   "pin_age_days": 51.7
+  },
+  {
+   "name": "atlassian-twg-cli",
+   "kind": "url",
+   "repo": "atlassian-labs/twg-plugins",
+   "sha": "b3336ef63d45e2636ff411a922ed602244e0f3db",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-17T06:11:29Z",
+   "behind": 6,
+   "pin_age_days": 72.2
+  },
+  {
+   "name": "atomic-agents",
+   "kind": "url",
+   "repo": "BrainBlend-AI/atomic-agents",
+   "sha": "33d2ec94f42d4a65393a336e35edf21ee5700303",
+   "path": "claude-plugin/atomic-agents",
+   "ref": null,
+   "pin_date": "2026-08-24T12:20:06Z",
+   "behind": 4,
+   "pin_age_days": 95.9
+  },
+  {
+   "name": "auth0",
+   "kind": "git-subdir",
+   "repo": "auth0/agent-skills",
+   "sha": "7b3821d533430eef35fd7406a87b7b8d02302bdf",
+   "path": "plugins/auth0",
+   "ref": "main",
+   "pin_date": "2026-10-15T15:57:43Z",
+   "behind": 11,
+   "pin_age_days": 43.8
+  },
+  {
+   "name": "aws-agents",
+   "kind": "git-subdir",
+   "repo": "aws/agent-toolkit-for-aws",
+   "sha": "0d6167ad2e6dfb858098c4162fe74d04c975532f",
+   "path": "plugins/aws-agents",
+   "ref": "main",
+   "pin_date": "2026-10-01T16:53:07Z",
+   "behind": 1,
+   "pin_age_days": 57.8
+  },
+  {
+   "name": "aws-agents-for-devsecops",
+   "kind": "git-subdir",
+   "repo": "aws/agent-toolkit-for-aws",
+   "sha": "7bde20faede49dd5764c02b54f5e306849f7e3ca",
+   "path": "plugins/aws-agents-for-devsecops",
+   "ref": "main",
+   "pin_date": "2026-09-22T09:47:31Z",
+   "behind": 5,
+   "pin_age_days": 67.1
+  },
+  {
+   "name": "aws-amplify",
+   "kind": "git-subdir",
+   "repo": "awslabs/agent-plugins",
+   "sha": "097fe8ad56d8a1d5e2c81d7880adf145553cf244",
+   "path": "plugins/aws-amplify",
+   "ref": "main",
+   "pin_date": "2026-09-14T20:50:29Z",
+   "behind": 0,
+   "pin_age_days": 74.6
+  },
+  {
+   "name": "aws-core",
+   "kind": "git-subdir",
+   "repo": "aws/agent-toolkit-for-aws",
+   "sha": "34b3eccfd8b619ea0cb4ba04a9be9dfefebd94e7",
+   "path": "plugins/aws-core",
+   "ref": "main",
+   "pin_date": "2026-10-02T07:27:20Z",
+   "behind": 38,
+   "pin_age_days": 57.2
+  },
+  {
+   "name": "aws-data-analytics",
+   "kind": "git-subdir",
+   "repo": "aws/agent-toolkit-for-aws",
+   "sha": "0d6167ad2e6dfb858098c4162fe74d04c975532f",
+   "path": "plugins/aws-data-analytics",
+   "ref": "main",
+   "pin_date": "2026-10-01T16:53:07Z",
+   "behind": 14,
+   "pin_age_days": 57.8
+  },
+  {
+   "name": "aws-serverless",
+   "kind": "git-subdir",
+   "repo": "awslabs/agent-plugins",
+   "sha": "097fe8ad56d8a1d5e2c81d7880adf145553cf244",
+   "path": "plugins/aws-serverless",
+   "ref": "main",
+   "pin_date": "2026-09-14T20:50:29Z",
+   "behind": 0,
+   "pin_age_days": 74.6
+  },
+  {
+   "name": "aws-startup-advisor",
+   "kind": "git-subdir",
+   "repo": "aws/agent-toolkit-for-aws",
+   "sha": "b310d1c46b4ced6423a737542c92a3a22cfe9e96",
+   "path": "plugins/aws-startup-advisor",
+   "ref": "main",
+   "pin_date": "2026-10-20T16:04:27Z",
+   "behind": 136,
+   "pin_age_days": 38.8
+  },
+  {
+   "name": "aws-transform",
+   "kind": "git-subdir",
+   "repo": "awslabs/agent-plugins",
+   "sha": "097fe8ad56d8a1d5e2c81d7880adf145553cf244",
+   "path": "plugins/aws-transform",
+   "ref": "main",
+   "pin_date": "2026-09-14T20:50:29Z",
+   "behind": 1,
+   "pin_age_days": 74.6
+  },
+  {
+   "name": "azure",
+   "kind": "url",
+   "repo": "microsoft/azure-skills",
+   "sha": "5b4f0c0778079a2f568581107f23349ce9a0a9b2",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-21T17:43:32Z",
+   "behind": 50,
+   "pin_age_days": 67.7
+  },
+  {
+   "name": "azure-cosmos-db-assistant",
+   "kind": "url",
+   "repo": "AzureCosmosDB/cosmosdb-claude-code-plugin",
+   "sha": "f1e0498579a9251e5f3179b92d25d6ce3409bae5",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-04-28T10:59:57Z",
+   "behind": 0,
+   "pin_age_days": 214.0
+  },
+  {
+   "name": "azure-sql-developer",
+   "kind": "url",
+   "repo": "microsoft/azure-sql-database-container",
+   "sha": "c1e8167e4c1d5979d7fc4a6ea11a6ce885a9398b",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-20T04:30:36Z",
+   "behind": 27,
+   "pin_age_days": 69.3
+  },
+  {
+   "name": "base44",
+   "kind": "url",
+   "repo": "base44/skills",
+   "sha": "8548a482f606751c55dcdb1365398fbec2fcb64d",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-22T07:10:12Z",
+   "behind": 21,
+   "pin_age_days": 67.2
+  },
+  {
+   "name": "bigdata-com",
+   "kind": "git-subdir",
+   "repo": "Bigdata-com/bigdata-plugins-marketplace",
+   "sha": "43777fbdb9298ea8f5cbc001d18144e95346df93",
+   "path": "plugins/bigdata-com",
+   "ref": "main",
+   "pin_date": "2026-10-07T15:52:32Z",
+   "behind": 37,
+   "pin_age_days": 51.8
+  },
+  {
+   "name": "bigquery-data-analytics",
+   "kind": "url",
+   "repo": "GoogleCloudPlatform/bigquery-data-analytics-plugin",
+   "sha": "93e87e9c8145a4c728d44c2959d4eba596f81e92",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-11-24T03:04:10Z",
+   "behind": 0,
+   "pin_age_days": 4.3
+  },
+  {
+   "name": "boltz",
+   "kind": "git-subdir",
+   "repo": "boltz-bio/boltz-api-skills",
+   "sha": "beafb3c16236347ab10fb54f78a5da49cbf7c7bb",
+   "path": "plugins/boltz",
+   "ref": "main",
+   "pin_date": "2026-09-07T14:05:22Z",
+   "behind": 0,
+   "pin_age_days": 81.9
+  },
+  {
+   "name": "blackrock-advisor-center-plugin",
+   "kind": "url",
+   "repo": "blackrock/advisor-center-agent-skills",
+   "sha": "736344f85fd43d5038f35170abd034f8fd0e1684",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-11-12T16:17:11Z",
+   "behind": 0,
+   "pin_age_days": 15.8
+  },
+  {
+   "name": "box",
+   "kind": "url",
+   "repo": "box/skills",
+   "sha": "84320fd8984b95cab430335cd341d8314c14bbcb",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-13T23:37:10Z",
+   "behind": 3,
+   "pin_age_days": 45.5
+  },
+  {
+   "name": "brightdata-plugin",
+   "kind": "url",
+   "repo": "brightdata/skills",
+   "sha": "37503c1ba31056370323a9d5ba88dd003a280008",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-15T08:53:02Z",
+   "behind": 96,
+   "pin_age_days": 44.1
+  },
+  {
+   "name": "browser-use",
+   "kind": "git-subdir",
+   "repo": "browser-use/plugins",
+   "sha": "4749bcbfe456e5384b98281a8a66119352197f59",
+   "path": "browser-use",
+   "ref": "main",
+   "pin_date": "2026-07-30T02:55:23Z",
+   "behind": 0,
+   "pin_age_days": 121.3
+  },
+  {
+   "name": "buildkite",
+   "kind": "url",
+   "repo": "buildkite/skills",
+   "sha": "d29b846ecbb64817642fd3bd62c3cf53c703423e",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-13T08:03:09Z",
+   "behind": 2,
+   "pin_age_days": 46.1
+  },
+  {
+   "name": "canva",
+   "kind": "git-subdir",
+   "repo": "canva-sdks/canva-skills",
+   "sha": "bfcbc681560f6031e9949ea52f81e20beb87e39e",
+   "path": "plugins/canva",
+   "ref": "main",
+   "pin_date": "2026-10-15T17:47:41Z",
+   "behind": 26,
+   "pin_age_days": 43.7
+  },
+  {
+   "name": "carbone-skill",
+   "kind": "url",
+   "repo": "carboneio/carbone-skill",
+   "sha": "25207b3f52b97872312eab997ee5c62cc5c9542d",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-08-19T10:33:43Z",
+   "behind": 18,
+   "pin_age_days": 101.0
+  },
+  {
+   "name": "carta-cap-table",
+   "kind": "git-subdir",
+   "repo": "carta/plugins",
+   "sha": "ea7fe1d4db0f0f273799ec4b40070c3c6b00fdcc",
+   "path": "plugins/carta-cap-table",
+   "ref": "main",
+   "pin_date": "2026-10-10T15:11:48Z",
+   "behind": 187,
+   "pin_age_days": 48.8
+  },
+  {
+   "name": "carta-crm",
+   "kind": "git-subdir",
+   "repo": "carta/plugins",
+   "sha": "ea7fe1d4db0f0f273799ec4b40070c3c6b00fdcc",
+   "path": "plugins/carta-crm",
+   "ref": "main",
+   "pin_date": "2026-10-10T15:11:48Z",
+   "behind": 59,
+   "pin_age_days": 48.8
+  },
+  {
+   "name": "carta-investors",
+   "kind": "git-subdir",
+   "repo": "carta/plugins",
+   "sha": "ea7fe1d4db0f0f273799ec4b40070c3c6b00fdcc",
+   "path": "plugins/carta-investors",
+   "ref": "main",
+   "pin_date": "2026-10-10T15:11:48Z",
+   "behind": 587,
+   "pin_age_days": 48.8
+  },
+  {
+   "name": "catalyst-by-zoho",
+   "kind": "url",
+   "repo": "catalystbyzoho/claude-plugin",
+   "sha": "9670b79d72fe4923cc845ca0414d009ef3684ccb",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-07-31T09:27:11Z",
+   "behind": 0,
+   "pin_age_days": 120.1
+  },
+  {
+   "name": "cds-mcp",
+   "kind": "url",
+   "repo": "cap-js/mcp-server",
+   "sha": "52ca3304342db99c27a3f2a0cd765af42980b955",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-14T14:17:54Z",
+   "behind": 19,
+   "pin_age_days": 44.9
+  },
+  {
+   "name": "champion-kit",
+   "kind": "local"
+  },
+  {
+   "name": "chrome-devtools-mcp",
+   "kind": "url",
+   "repo": "ChromeDevTools/chrome-devtools-mcp",
+   "sha": "a878bcad39584337e055778353246820deafa7c0",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-15T14:01:19Z",
+   "behind": 318,
+   "pin_age_days": 43.9
+  },
+  {
+   "name": "chronograph-gp",
+   "kind": "url",
+   "repo": "chronograph-pe/chronograph-gp-claude-plugin",
+   "sha": "35cb3d12cf4e24823c0efca4abe6f13c2fd0e5f5",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-11T19:21:45Z",
+   "behind": 0,
+   "pin_age_days": 77.7
+  },
+  {
+   "name": "chronograph-lp",
+   "kind": "url",
+   "repo": "chronograph-pe/chronograph-lp-claude-plugin",
+   "sha": "322b2d3fbd4db0a2eeed117e3b3c31522408ae6f",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-11T19:21:48Z",
+   "behind": 0,
+   "pin_age_days": 77.7
+  },
+  {
+   "name": "circle-skills",
+   "kind": "git-subdir",
+   "repo": "circlefin/skills",
+   "sha": "58ab8648bb1ae9d037a3bf5197ad3bb01262f5b1",
+   "path": "plugins/circle",
+   "ref": "master",
+   "pin_date": "2026-09-16T01:02:17Z",
+   "behind": 7,
+   "pin_age_days": 73.4
+  },
+  {
+   "name": "circleback",
+   "kind": "url",
+   "repo": "circlebackai/claude-code-plugin",
+   "sha": "a610634c95ab310accf20a0cabdf0fa7ab784fa3",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-07-10T00:22:38Z",
+   "behind": 0,
+   "pin_age_days": 141.4
+  },
+  {
+   "name": "ckeditor",
+   "kind": "url",
+   "repo": "ckeditor/skills",
+   "sha": "261766a0d70fe88c34d34336acbd293c69048a62",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-22T09:31:57Z",
+   "behind": 90,
+   "pin_age_days": 67.1
+  },
+  {
+   "name": "clangd-lsp",
+   "kind": "local"
+  },
+  {
+   "name": "claude-code-setup",
+   "kind": "local"
+  },
+  {
+   "name": "claude-md-management",
+   "kind": "local"
+  },
+  {
+   "name": "claude-security",
+   "kind": "local"
+  },
+  {
+   "name": "clay",
+   "kind": "git-subdir",
+   "repo": "clay-run/agent-plugins",
+   "sha": "769514a3a23683fcc7cbbf32067538d17e465381",
+   "path": "clay",
+   "ref": "main",
+   "pin_date": "2026-09-21T22:07:57Z",
+   "behind": 15,
+   "pin_age_days": 67.5
+  },
+  {
+   "name": "clickhouse",
+   "kind": "url",
+   "repo": "ClickHouse/clickhouse-claude-code-plugin",
+   "sha": "652664c8924c5a9454d9a7a5f6191944b4adfb11",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-05T06:29:08Z",
+   "behind": 3,
+   "pin_age_days": 54.2
+  },
+  {
+   "name": "clickhouse-best-practices",
+   "kind": "url",
+   "repo": "ClickHouse/agent-skills",
+   "sha": "356a8c1b9a7392adb389a132f5ad3fec38532a03",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-29T00:09:23Z",
+   "behind": 5,
+   "pin_age_days": 60.5
+  },
+  {
+   "name": "cloud-sql-mysql",
+   "kind": "url",
+   "repo": "gemini-cli-extensions/cloud-sql-mysql",
+   "sha": "51aa269094a89b5eca705792705a3b507486b2d7",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-23T16:26:21Z",
+   "behind": 1,
+   "pin_age_days": 65.8
+  },
+  {
+   "name": "cloud-sql-postgresql",
+   "kind": "url",
+   "repo": "gemini-cli-extensions/cloud-sql-postgresql",
+   "sha": "1d758bb34795a37a29f543e78910eb7414927ac8",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-23T16:24:52Z",
+   "behind": 1,
+   "pin_age_days": 65.8
+  },
+  {
+   "name": "cloud-sql-sqlserver",
+   "kind": "url",
+   "repo": "gemini-cli-extensions/cloud-sql-sqlserver",
+   "sha": "7efeaaf026b3ad8cabb973eded693428dae81179",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-23T16:26:33Z",
+   "behind": 1,
+   "pin_age_days": 65.8
+  },
+  {
+   "name": "cloudflare",
+   "kind": "url",
+   "repo": "cloudflare/skills",
+   "sha": "cbf893b954222276bf1af57e5f23379231e0efb9",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-11-10T11:41:33Z",
+   "behind": 4,
+   "pin_age_days": 18.0
+  },
+  {
+   "name": "cloudinary",
+   "kind": "url",
+   "repo": "cloudinary-devs/cloudinary-plugin",
+   "sha": "86be53409e3fb1c465cd5ff4d1dc937a2860f45c",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-08-24T09:48:27Z",
+   "behind": 4,
+   "pin_age_days": 96.1
+  },
+  {
+   "name": "cockroachdb",
+   "kind": "url",
+   "repo": "cockroachdb/claude-plugin",
+   "sha": "6c96c6394a61f366e8ec1b7cec2281e97507cbff",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-07-22T16:48:36Z",
+   "behind": 2,
+   "pin_age_days": 128.8
+  },
+  {
+   "name": "code-modernization",
+   "kind": "local"
+  },
+  {
+   "name": "code-review",
+   "kind": "local"
+  },
+  {
+   "name": "code-simplifier",
+   "kind": "local"
+  },
+  {
+   "name": "coderabbit",
+   "kind": "url",
+   "repo": "coderabbitai/skills",
+   "sha": "45bd1ae2c471cd861b8b6903f7dcab7c57aa0e59",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-11-12T11:39:40Z",
+   "behind": 12,
+   "pin_age_days": 16.0
+  },
+  {
+   "name": "codspeed",
+   "kind": "url",
+   "repo": "CodSpeedHQ/codspeed",
+   "sha": "59cfc90540bb3717d8acf4ad03f7b5531c8e1a3d",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-21T12:19:44Z",
+   "behind": 143,
+   "pin_age_days": 67.9
+  },
+  {
+   "name": "commit-commands",
+   "kind": "local"
+  },
+  {
+   "name": "confidence",
+   "kind": "url",
+   "repo": "spotify/confidence-ai-plugins",
+   "sha": "f416826fde819978ab90f1d7ae27513667aa5d0f",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-15T10:48:50Z",
+   "behind": 3,
+   "pin_age_days": 74.0
+  },
+  {
+   "name": "context7",
+   "kind": "local"
+  },
+  {
+   "name": "convex",
+   "kind": "url",
+   "repo": "get-convex/convex-backend-skill",
+   "sha": "6ca54f6e2e7582812187b8a5a4783fb4dff52692",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-08-28T19:59:21Z",
+   "behind": 16,
+   "pin_age_days": 91.6
+  },
+  {
+   "name": "crowdsec",
+   "kind": "url",
+   "repo": "crowdsecurity/crowdsec-skill",
+   "sha": "9bca8a76de2cbf5e6b70a8b2cfeadeffe53512da",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-28T08:45:53Z",
+   "behind": 2,
+   "pin_age_days": 31.1
+  },
+  {
+   "name": "crowdstrike-falcon-foundry",
+   "kind": "url",
+   "repo": "CrowdStrike/foundry-skills",
+   "sha": "90082f829c6c2c4192b1459a01488863a1e82d1e",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-11-10T16:00:10Z",
+   "behind": 10,
+   "pin_age_days": 17.8
+  },
+  {
+   "name": "crowdstrike-falcon-fusion",
+   "kind": "url",
+   "repo": "CrowdStrike/fusion-skills",
+   "sha": "d4e2abf93b1f0900fcc67fe040e98d086fa1fb0c",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-30T19:39:16Z",
+   "behind": 11,
+   "pin_age_days": 28.6
+  },
+  {
+   "name": "csharp-lsp",
+   "kind": "local"
+  },
+  {
+   "name": "cwc-makers",
+   "kind": "local"
+  },
+  {
+   "name": "dash0",
+   "kind": "url",
+   "repo": "dash0hq/dash0-agent-plugin",
+   "sha": "72a84179e6c64871ad5b6fceb09e00f502de415a",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-08T11:43:04Z",
+   "behind": 60,
+   "pin_age_days": 81.0
+  },
+  {
+   "name": "data",
+   "kind": "url",
+   "repo": "astronomer/agents",
+   "sha": "35b9610bb2710c37ca11326c4cbf7818b6725fec",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-29T16:46:44Z",
+   "behind": 5,
+   "pin_age_days": 29.8
+  },
+  {
+   "name": "data-agent-kit",
+   "kind": "url",
+   "repo": "GoogleCloudPlatform/data-agent-kit-plugin",
+   "sha": "83c53b5f129cdeecabe149ff4ba82645d3e51745",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-29T21:25:40Z",
+   "behind": 67,
+   "pin_age_days": 59.6
+  },
+  {
+   "name": "data-engineering",
+   "kind": "url",
+   "repo": "astronomer/agents",
+   "sha": "35b9610bb2710c37ca11326c4cbf7818b6725fec",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-29T16:46:44Z",
+   "behind": 5,
+   "pin_age_days": 29.8
+  },
+  {
+   "name": "databases-on-aws",
+   "kind": "git-subdir",
+   "repo": "awslabs/agent-plugins",
+   "sha": "fbefb3764e67558fe10ac834dd85db49734aa9b6",
+   "path": "plugins/databases-on-aws",
+   "ref": "main",
+   "pin_date": "2026-10-09T20:59:12Z",
+   "behind": 1,
+   "pin_age_days": 49.6
+  },
+  {
+   "name": "databricks",
+   "kind": "git-subdir",
+   "repo": "databricks/databricks-agent-skills",
+   "sha": "c1964266c7aa6063d89036691d0594420ffa0129",
+   "path": "plugins/databricks/claude",
+   "ref": "main",
+   "pin_date": "2026-10-10T04:44:01Z",
+   "behind": 59,
+   "pin_age_days": 49.3
+  },
+  {
+   "name": "datadog",
+   "kind": "url",
+   "repo": "datadog-labs/claude-code-plugin",
+   "sha": "a1603119c813f528b2d925a0ccadd73bf930550b",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-11-02T17:05:28Z",
+   "behind": 1,
+   "pin_age_days": 25.8
+  },
+  {
+   "name": "datahub-skills",
+   "kind": "url",
+   "repo": "datahub-project/datahub-skills",
+   "sha": "a27f8e7bb514591a3ccecd7598e4056989c0db9b",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-29T23:11:50Z",
+   "behind": 0,
+   "pin_age_days": 59.5
+  },
+  {
+   "name": "dataproc",
+   "kind": "url",
+   "repo": "gemini-cli-extensions/dataproc",
+   "sha": "18534a9bfe0d03801643d5b7d28c0cec08bb7ba5",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-23T16:26:44Z",
+   "behind": 3,
+   "pin_age_days": 65.8
+  },
+  {
+   "name": "datarobot-agent-skills",
+   "kind": "url",
+   "repo": "datarobot-oss/datarobot-agent-skills",
+   "sha": "53a4dacc6b55f4fe3ab4840829ebf2d1ea1477dc",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-15T19:58:39Z",
+   "behind": 62,
+   "pin_age_days": 43.6
+  },
+  {
+   "name": "dataverse",
+   "kind": "git-subdir",
+   "repo": "microsoft/Dataverse-skills",
+   "sha": "669e71519886d4602753c34bff3db787d616d761",
+   "path": ".github/plugins/dataverse",
+   "ref": "main",
+   "pin_date": "2026-09-18T20:14:36Z",
+   "behind": 7,
+   "pin_age_days": 70.6
+  },
+  {
+   "name": "deepeval",
+   "kind": "url",
+   "repo": "confident-ai/deepeval",
+   "sha": "da9b2c969f8a15e8aa4ef67c372157ce060cd63e",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-22T14:55:13Z",
+   "behind": 469,
+   "pin_age_days": 66.8
+  },
+  {
+   "name": "deploy-on-aws",
+   "kind": "git-subdir",
+   "repo": "awslabs/agent-plugins",
+   "sha": "fbefb3764e67558fe10ac834dd85db49734aa9b6",
+   "path": "plugins/deploy-on-aws",
+   "ref": "main",
+   "pin_date": "2026-10-09T20:59:12Z",
+   "behind": 1,
+   "pin_age_days": 49.6
+  },
+  {
+   "name": "desktop-commander",
+   "kind": "git-subdir",
+   "repo": "wonderwhy-er/DesktopCommanderMCP",
+   "sha": "75048278f4866f0d8bde26f6f9aa3b8d39dca870",
+   "path": "plugins/claude",
+   "ref": "main",
+   "pin_date": "2026-09-22T14:06:19Z",
+   "behind": 0,
+   "pin_age_days": 66.9
+  },
+  {
+   "name": "discord",
+   "kind": "local"
+  },
+  {
+   "name": "dominodatalab",
+   "kind": "url",
+   "repo": "dominodatalab/domino-claude-plugin",
+   "sha": "7949e3ac470cf2f3b1c97a790c571032c844a5a3",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-15T16:06:02Z",
+   "behind": 2,
+   "pin_age_days": 43.8
+  },
+  {
+   "name": "dropbox",
+   "kind": "git-subdir",
+   "repo": "dropbox/dropbox-ai-plugins",
+   "sha": "078f0ca36df40f054829b58731a5f86a561d9668",
+   "path": "claude",
+   "ref": "main",
+   "pin_date": "2026-10-23T17:49:09Z",
+   "behind": 0,
+   "pin_age_days": 35.7
+  },
+  {
+   "name": "duckdb-skills",
+   "kind": "url",
+   "repo": "duckdb/duckdb-skills",
+   "sha": "7feda8e01e22bc0886c86123f3884947e36d8c69",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-04-14T08:00:34Z",
+   "behind": 6,
+   "pin_age_days": 228.1
+  },
+  {
+   "name": "duende-skills",
+   "kind": "url",
+   "repo": "DuendeSoftware/duende-skills",
+   "sha": "fb32edc51982bf1c600e21ba91df32c903098a9c",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-08T10:53:52Z",
+   "behind": 7,
+   "pin_age_days": 81.0
+  },
+  {
+   "name": "exa",
+   "kind": "url",
+   "repo": "exa-labs/exa-mcp-server",
+   "sha": "15ffb50519e719dc791cdc750ce5ed1934c0a1ed",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-08-21T04:44:50Z",
+   "behind": 19,
+   "pin_age_days": 99.3
+  },
+  {
+   "name": "explanatory-output-style",
+   "kind": "local"
+  },
+  {
+   "name": "expo",
+   "kind": "git-subdir",
+   "repo": "expo/skills",
+   "sha": "d4f484024fec15196bfd3c272e953e3f983972cf",
+   "path": "plugins/expo",
+   "ref": "main",
+   "pin_date": "2026-10-05T17:42:22Z",
+   "behind": 24,
+   "pin_age_days": 53.7
+  },
+  {
+   "name": "fakechat",
+   "kind": "local"
+  },
+  {
+   "name": "fastly-agent-toolkit",
+   "kind": "url",
+   "repo": "fastly/fastly-agent-toolkit",
+   "sha": "6db70eaf54ba885d56091861224987d6cf06c429",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-07T10:21:57Z",
+   "behind": 14,
+   "pin_age_days": 52.0
+  },
+  {
+   "name": "feature-dev",
+   "kind": "local"
+  },
+  {
+   "name": "fiftyone",
+   "kind": "url",
+   "repo": "voxel51/fiftyone-skills",
+   "sha": "8b87befcce6cfb86e73b4ccc1f692a0a2b6a4218",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-09T21:59:25Z",
+   "behind": 17,
+   "pin_age_days": 49.5
+  },
+  {
+   "name": "figma",
+   "kind": "url",
+   "repo": "figma/mcp-server-guide",
+   "sha": "43a06ff1738935ad5c3d9b0437b5373aaf45cdc3",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-11-18T09:00:36Z",
+   "behind": 1,
+   "pin_age_days": 10.1
+  },
+  {
+   "name": "firebase",
+   "kind": "local"
+  },
+  {
+   "name": "firecrawl",
+   "kind": "url",
+   "repo": "firecrawl/firecrawl-claude-plugin",
+   "sha": "3e1fb0c319d71b067906b8b602208dded3932cdb",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-14T07:51:31Z",
+   "behind": 10,
+   "pin_age_days": 45.1
+  },
+  {
+   "name": "firestore-native",
+   "kind": "url",
+   "repo": "gemini-cli-extensions/firestore-native",
+   "sha": "6e6a841c2173b1fa1f95a9743f589bdbaa275caf",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-23T16:25:36Z",
+   "behind": 3,
+   "pin_age_days": 65.8
+  },
+  {
+   "name": "forge-skills",
+   "kind": "url",
+   "repo": "atlassian/forge-skills",
+   "sha": "4f04ae02879435f23808a4798da28f75d3ab74c3",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-08T00:20:45Z",
+   "behind": 15,
+   "pin_age_days": 81.4
+  },
+  {
+   "name": "frontend-design",
+   "kind": "local"
+  },
+  {
+   "name": "fullstory",
+   "kind": "url",
+   "repo": "fullstorydev/fullstory-skills",
+   "sha": "ca872d97f5c35dc41ee2eecfc6e392a5895ac171",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-05T15:21:51Z",
+   "behind": 7,
+   "pin_age_days": 53.8
+  },
+  {
+   "name": "gc-ai",
+   "kind": "url",
+   "repo": "GC-AI-Inc/gc-ai-claude-plugin",
+   "sha": "efda779972c7b7162e79234e164bc2f359a8a518",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-07-31T21:10:10Z",
+   "behind": 0,
+   "pin_age_days": 119.6
+  },
+  {
+   "name": "github",
+   "kind": "local"
+  },
+  {
+   "name": "gitkraken",
+   "kind": "url",
+   "repo": "gitkraken/claude-plugin",
+   "sha": "f7a53b2cd138c22eccb977b9d93494ea6d423d12",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-07-31T19:51:41Z",
+   "behind": 0,
+   "pin_age_days": 119.6
+  },
+  {
+   "name": "gitlab",
+   "kind": "local"
+  },
+  {
+   "name": "google-cloud-storage",
+   "kind": "url",
+   "repo": "gemini-cli-extensions/google-cloud-storage",
+   "sha": "c7e3eeefa14ac0492a024458061d662e8b04c891",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-16T04:48:31Z",
+   "behind": 45,
+   "pin_age_days": 73.3
+  },
+  {
+   "name": "gopls-lsp",
+   "kind": "local"
+  },
+  {
+   "name": "govtribe",
+   "kind": "url",
+   "repo": "GovTribe/claude-plugin",
+   "sha": "41cb943db7f96e33f0255f46c882742cb92cb909",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-06T19:11:11Z",
+   "behind": 10,
+   "pin_age_days": 52.7
+  },
+  {
+   "name": "grafana-assistant",
+   "kind": "git-subdir",
+   "repo": "grafana/ai-marketplace",
+   "sha": "12be5634a492f73c189d466c5449d09b853ad7a4",
+   "path": "plugins/grafana-assistant",
+   "ref": "main",
+   "pin_date": "2026-07-20T19:00:26Z",
+   "behind": 7,
+   "pin_age_days": 130.7
+  },
+  {
+   "name": "grafana-cloud-mcp",
+   "kind": "git-subdir",
+   "repo": "grafana/ai-marketplace",
+   "sha": "6c28ba1961d502d82301cbd64d2322e6e960477c",
+   "path": "plugins/grafana-cloud-mcp",
+   "ref": "main",
+   "pin_date": "2026-10-08T15:37:39Z",
+   "behind": 10,
+   "pin_age_days": 50.8
+  },
+  {
+   "name": "grafana-mcp",
+   "kind": "git-subdir",
+   "repo": "grafana/ai-marketplace",
+   "sha": "6c28ba1961d502d82301cbd64d2322e6e960477c",
+   "path": "plugins/grafana-mcp",
+   "ref": "main",
+   "pin_date": "2026-10-08T15:37:39Z",
+   "behind": 11,
+   "pin_age_days": 50.8
+  },
+  {
+   "name": "greptile",
+   "kind": "git-subdir",
+   "repo": "greptileai/skills",
+   "sha": "4a13eb124ab175d018869fe7cc4d203e374571dc",
+   "path": "plugins/greptile",
+   "ref": "greptile--v1.3.1",
+   "pin_date": "2026-10-26T23:22:10Z",
+   "behind": 1,
+   "pin_age_days": 32.5
+  },
+  {
+   "name": "growthbook",
+   "kind": "url",
+   "repo": "growthbook/skills",
+   "sha": "7a84f338fe217b20641cdc5c01b5b37f0b950527",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-30T13:12:12Z",
+   "behind": 5,
+   "pin_age_days": 58.9
+  },
+  {
+   "name": "honeycomb",
+   "kind": "git-subdir",
+   "repo": "honeycombio/agent-skill",
+   "sha": "6bb09279fc3fb69abf113228be939dbb929e34f1",
+   "path": "honeycomb",
+   "ref": "main",
+   "pin_date": "2026-10-09T22:47:47Z",
+   "behind": 1,
+   "pin_age_days": 49.5
+  },
+  {
+   "name": "hookify",
+   "kind": "local"
+  },
+  {
+   "name": "hostinger",
+   "kind": "url",
+   "repo": "hostinger/claude-plugin",
+   "sha": "569880c60681a7068b3ca8ca84e2fe7ab6cfa7ff",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-08-20T06:38:29Z",
+   "behind": 17,
+   "pin_age_days": 100.2
+  },
+  {
+   "name": "huggingface-skills",
+   "kind": "url",
+   "repo": "huggingface/skills",
+   "sha": "c3ff942be3e07116b475253f0a8fc4f54682c1a8",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-08T15:30:05Z",
+   "behind": 7,
+   "pin_age_days": 50.8
+  },
+  {
+   "name": "hunter",
+   "kind": "url",
+   "repo": "hunter-io/claude-plugin",
+   "sha": "44f0f5689d2d5cc2de2470550225a16447cb9a80",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-18T18:49:08Z",
+   "behind": 70,
+   "pin_age_days": 70.7
+  },
+  {
+   "name": "hyperframes",
+   "kind": "url",
+   "repo": "heygen-com/hyperframes",
+   "sha": "8d2b6e7bdc1c2c26d1abf64ef075c00a1bb230a2",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-22T15:42:28Z",
+   "behind": 3640,
+   "pin_age_days": 66.8
+  },
+  {
+   "name": "idmp-plugin",
+   "kind": "git-subdir",
+   "repo": "taosdata/agent-skills",
+   "sha": "bf5197716bacc38908cf8025e594d15be9e00b8c",
+   "path": "plugins/idmp-plugin",
+   "ref": "main",
+   "pin_date": "2026-09-07T01:01:51Z",
+   "behind": 1,
+   "pin_age_days": 82.4
+  },
+  {
+   "name": "imessage",
+   "kind": "local"
+  },
+  {
+   "name": "incident-io",
+   "kind": "git-subdir",
+   "repo": "incident-io/skills",
+   "sha": "00f7d1dc80892deb1656f1cf577dd073a4a2de10",
+   "path": "plugins/incident-io",
+   "ref": "main",
+   "pin_date": "2026-10-15T11:12:10Z",
+   "behind": 34,
+   "pin_age_days": 44.0
+  },
+  {
+   "name": "informatica-for-claude-platform",
+   "kind": "git-subdir",
+   "repo": "forcedotcom/informatica-claude-plugins",
+   "sha": "554d02e0f7f2adafeaeeedbde04435b7bd310a47",
+   "path": "informatica-for-claude-platform",
+   "ref": "main",
+   "pin_date": "2026-09-15T17:51:05Z",
+   "behind": 0,
+   "pin_age_days": 73.7
+  },
+  {
+   "name": "intercom",
+   "kind": "url",
+   "repo": "intercom/claude-plugin-external",
+   "sha": "62773a7d4b8aac31545d6888fe6479be3bc53804",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-04-27T18:08:01Z",
+   "behind": 2,
+   "pin_age_days": 214.7
+  },
+  {
+   "name": "intuit-quickbooks",
+   "kind": "url",
+   "repo": "intuit/quickbooks-claude-plugin",
+   "sha": "c8daa17a64d4d0fdeabdf0516524f72549b6ad19",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-16T19:26:05Z",
+   "behind": 0,
+   "pin_age_days": 72.7
+  },
+  {
+   "name": "jdtls-lsp",
+   "kind": "local"
+  },
+  {
+   "name": "jfrog",
+   "kind": "url",
+   "repo": "jfrog/claude-plugin",
+   "sha": "9b1f8f6c883522a87502e5155abd593a8befe3c5",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-27T14:54:18Z",
+   "behind": 20,
+   "pin_age_days": 61.8
+  },
+  {
+   "name": "knowledge-catalog",
+   "kind": "url",
+   "repo": "gemini-cli-extensions/knowledge-catalog",
+   "sha": "630397520359ca4594d9133c147c6e25f8b52125",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-22T11:40:03Z",
+   "behind": 1,
+   "pin_age_days": 67.0
+  },
+  {
+   "name": "kotlin-lsp",
+   "kind": "local"
+  },
+  {
+   "name": "langfuse-observability",
+   "kind": "url",
+   "repo": "langfuse/claude-observability-plugin",
+   "sha": "b5211009698fdfe79c6bbe90d6901ad255ea65d3",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-15T11:42:34Z",
+   "behind": 6,
+   "pin_age_days": 74.0
+  },
+  {
+   "name": "laravel-boost",
+   "kind": "local"
+  },
+  {
+   "name": "leadfeeder",
+   "kind": "url",
+   "repo": "Leadfeeder/leadfeeder-mcp-plugin",
+   "sha": "cddf27f0771393b01a9a91335b8972e44f48cf45",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-17T14:12:02Z",
+   "behind": 2,
+   "pin_age_days": 71.9
+  },
+  {
+   "name": "learn-with-coursera",
+   "kind": "git-subdir",
+   "repo": "coursera/skills",
+   "sha": "ac28fd6ebf8584e3ee196159bd6d4514fa07de0f",
+   "path": "skills",
+   "ref": "main",
+   "pin_date": "2026-05-18T22:13:50Z",
+   "behind": 0,
+   "pin_age_days": 193.5
+  },
+  {
+   "name": "learning-output-style",
+   "kind": "local"
+  },
+  {
+   "name": "legalzoom",
+   "kind": "git-subdir",
+   "repo": "legalzoom/claude-plugins",
+   "sha": "f9fd8a0ca6e1421bc1aacb113a109663a7a6f6d8",
+   "path": "plugins/legalzoom",
+   "ref": "main",
+   "pin_date": "2026-02-20T22:56:04Z",
+   "behind": 0,
+   "pin_age_days": 280.5
+  },
+  {
+   "name": "linear",
+   "kind": "local"
+  },
+  {
+   "name": "linq-alpha",
+   "kind": "git-subdir",
+   "repo": "linq-lab/linq-alpha-plugin",
+   "sha": "bfb594b7ccca28dfdcbdb0a64673dfe2e819fd87",
+   "path": "plugins/linq-alpha",
+   "ref": "main",
+   "pin_date": "2026-09-29T15:25:05Z",
+   "behind": 0,
+   "pin_age_days": 59.8
+  },
+  {
+   "name": "liquid-lsp",
+   "kind": "git-subdir",
+   "repo": "Shopify/liquid-skills",
+   "sha": "ae3e4cc3f454923e388bbd841fd931f0c7bf5be4",
+   "path": "plugins/liquid-lsp",
+   "ref": "main",
+   "pin_date": "2026-03-18T16:09:09Z",
+   "behind": 0,
+   "pin_age_days": 254.8
+  },
+  {
+   "name": "liquid-skills",
+   "kind": "git-subdir",
+   "repo": "Shopify/liquid-skills",
+   "sha": "ae3e4cc3f454923e388bbd841fd931f0c7bf5be4",
+   "path": "plugins/liquid-skills",
+   "ref": "main",
+   "pin_date": "2026-03-18T16:09:09Z",
+   "behind": 0,
+   "pin_age_days": 254.8
+  },
+  {
+   "name": "logfire",
+   "kind": "git-subdir",
+   "repo": "pydantic/skills",
+   "sha": "238d97102650c1caa51f35027aee13c469c59542",
+   "path": "plugins/logfire",
+   "ref": "main",
+   "pin_date": "2026-09-19T03:25:40Z",
+   "behind": 9,
+   "pin_age_days": 70.3
+  },
+  {
+   "name": "logrocket",
+   "kind": "git-subdir",
+   "repo": "LogRocket/logrocket-claude-plugin",
+   "sha": "2e44dbb47faf9bb54e3405a8ae2714e7c5ce9791",
+   "path": "plugins/logrocket",
+   "ref": "main",
+   "pin_date": "2026-08-14T14:21:26Z",
+   "behind": 0,
+   "pin_age_days": 105.9
+  },
+  {
+   "name": "looker",
+   "kind": "url",
+   "repo": "gemini-cli-extensions/looker",
+   "sha": "13ed738a97a13efae7a408439dea3d43cff6f224",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-23T16:25:47Z",
+   "behind": 3,
+   "pin_age_days": 65.8
+  },
+  {
+   "name": "lovable",
+   "kind": "url",
+   "repo": "lovablelabs/mcp",
+   "sha": "0336e6db8026b0f02cb89d1451cc48ea3f469791",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-07-13T06:26:00Z",
+   "behind": 24,
+   "pin_age_days": 138.2
+  },
+  {
+   "name": "lua-lsp",
+   "kind": "local"
+  },
+  {
+   "name": "lumen",
+   "kind": "url",
+   "repo": "ory/lumen",
+   "sha": "f60f9ecee41723b42f3758e9a9409141881ac7d5",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-08-11T16:14:17Z",
+   "behind": 0,
+   "pin_age_days": 108.8
+  },
+  {
+   "name": "lusha",
+   "kind": "url",
+   "repo": "lusha-oss/lusha-mcp-plugin",
+   "sha": "4bcf5c743d5799d7c02727dd991585208f7a47b1",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-21T09:18:58Z",
+   "behind": 2,
+   "pin_age_days": 38.1
+  },
+  {
+   "name": "mapbox",
+   "kind": "url",
+   "repo": "mapbox/mapbox-agent-skills",
+   "sha": "f71cd72b8d8937b06db440538bd65559eb792c49",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-01T14:57:43Z",
+   "behind": 48,
+   "pin_age_days": 57.8
+  },
+  {
+   "name": "math-olympiad",
+   "kind": "local"
+  },
+  {
+   "name": "math-proof",
+   "kind": "local"
+  },
+  {
+   "name": "mattpocock-skills",
+   "kind": "url",
+   "repo": "mattpocock/skills",
+   "sha": "49dd158d1076134a641b33efb035946536778336",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-09T10:56:49Z",
+   "behind": 24,
+   "pin_age_days": 50.0
+  },
+  {
+   "name": "mcp-apps",
+   "kind": "git-subdir",
+   "repo": "modelcontextprotocol/ext-apps",
+   "sha": "6d9bdc7babf275b759225aa722cbf5510c4c6021",
+   "path": "plugins/mcp-apps",
+   "ref": "main",
+   "pin_date": "2026-09-09T09:39:35Z",
+   "behind": 0,
+   "pin_age_days": 80.1
+  },
+  {
+   "name": "mcp-server-dev",
+   "kind": "local"
+  },
+  {
+   "name": "mcp-tunnels",
+   "kind": "local"
+  },
+  {
+   "name": "mercadopago",
+   "kind": "git-subdir",
+   "repo": "mercadopago/mercadopago-claude-marketplace",
+   "sha": "755d33740af23351b4ca7043c51077ce67ebf4d1",
+   "path": "plugins/mercadopago",
+   "ref": "main",
+   "pin_date": "2026-09-18T11:30:44Z",
+   "behind": 1,
+   "pin_age_days": 71.0
+  },
+  {
+   "name": "mergify",
+   "kind": "url",
+   "repo": "mergifyio/mergify-cli",
+   "sha": "6307ed10e8628c6fefe408e398ea48af16c94cfd",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-08T16:13:42Z",
+   "behind": 37,
+   "pin_age_days": 50.8
+  },
+  {
+   "name": "microsoft-docs",
+   "kind": "url",
+   "repo": "MicrosoftDocs/mcp",
+   "sha": "f0a9478a954c9b3a7c6525a5183466902ca60731",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-30T04:02:36Z",
+   "behind": 0,
+   "pin_age_days": 29.3
+  },
+  {
+   "name": "migration-to-aws",
+   "kind": "git-subdir",
+   "repo": "awslabs/startups",
+   "sha": "ec681ba5d49b039dbf1ef9d87d3304205b824f3d",
+   "path": "migrate/plugins/migration-to-aws",
+   "ref": "main",
+   "pin_date": "2026-09-21T20:56:36Z",
+   "behind": 50,
+   "pin_age_days": 67.6
+  },
+  {
+   "name": "mintlify",
+   "kind": "url",
+   "repo": "mintlify/mintlify-claude-plugin",
+   "sha": "c1c1700d405dc375c2d90a1d4f8b283e6422b7ec",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-11-05T16:49:07Z",
+   "behind": 8,
+   "pin_age_days": 22.8
+  },
+  {
+   "name": "miro",
+   "kind": "git-subdir",
+   "repo": "miroapp/miro-ai",
+   "sha": "b6408e1bdfe0c842f209d40b52e92caf118a4d39",
+   "path": "claude-plugins/miro",
+   "ref": "main",
+   "pin_date": "2026-09-17T14:36:56Z",
+   "behind": 0,
+   "pin_age_days": 71.9
+  },
+  {
+   "name": "modern-web-guidance",
+   "kind": "url",
+   "repo": "GoogleChrome/modern-web-guidance",
+   "sha": "b31dc0a43ff5d19bcf386a3476a216f3b39a6f55",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-12T20:16:22Z",
+   "behind": 6,
+   "pin_age_days": 46.6
+  },
+  {
+   "name": "mlflow",
+   "kind": "url",
+   "repo": "mlflow/skills",
+   "sha": "51a42ea2b07fadb45fb34c7cecf0c87edbe05686",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-09T16:36:55Z",
+   "behind": 8,
+   "pin_age_days": 49.8
+  },
+  {
+   "name": "monday-crm",
+   "kind": "git-subdir",
+   "repo": "mondaycom/mcp",
+   "sha": "8fdc0b4af07a4b7e1059ca3f8320d64968737b8e",
+   "path": "plugins/monday-crm",
+   "ref": "master",
+   "pin_date": "2026-09-22T07:04:19Z",
+   "behind": 3,
+   "pin_age_days": 67.2
+  },
+  {
+   "name": "mongodb",
+   "kind": "git-subdir",
+   "repo": "mongodb/agent-skills",
+   "sha": "c370a63b27075008a92134686b24af3817edeb00",
+   "path": "plugins/mongodb",
+   "ref": "main",
+   "pin_date": "2026-10-08T16:23:56Z",
+   "behind": 10,
+   "pin_age_days": 50.8
+  },
+  {
+   "name": "mongodb-atlas",
+   "kind": "git-subdir",
+   "repo": "mongodb/agent-skills",
+   "sha": "c370a63b27075008a92134686b24af3817edeb00",
+   "path": "plugins/mongodb-atlas",
+   "ref": "main",
+   "pin_date": "2026-10-08T16:23:56Z",
+   "behind": 8,
+   "pin_age_days": 50.8
+  },
+  {
+   "name": "neon",
+   "kind": "git-subdir",
+   "repo": "neondatabase/agent-skills",
+   "sha": "827249744ed96416d799b68fb6bf033f4068b18a",
+   "path": "plugins/neon-postgres",
+   "ref": "main",
+   "pin_date": "2026-09-22T13:32:49Z",
+   "behind": 70,
+   "pin_age_days": 66.9
+  },
+  {
+   "name": "netlify-skills",
+   "kind": "url",
+   "repo": "netlify/context-and-tools",
+   "sha": "dc9ebf1b994420a4791e9d5d7cd68f62e07a0a41",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-14T18:49:45Z",
+   "behind": 20,
+   "pin_age_days": 44.7
+  },
+  {
+   "name": "netsuite-ai-companion",
+   "kind": "git-subdir",
+   "repo": "oracle/netsuite-suitecloud-sdk",
+   "sha": "23793a10a9bb557c684c5cb8a97f926eb3463f12",
+   "path": "anthropic/netsuite-ai-companion",
+   "ref": "ai-plugins-dist",
+   "pin_date": "2026-08-12T12:33:16Z",
+   "behind": 0,
+   "pin_age_days": 107.9
+  },
+  {
+   "name": "netsuite-finance-analyst",
+   "kind": "git-subdir",
+   "repo": "oracle/netsuite-suitecloud-sdk",
+   "sha": "23793a10a9bb557c684c5cb8a97f926eb3463f12",
+   "path": "anthropic/netsuite-finance-analyst",
+   "ref": "ai-plugins-dist",
+   "pin_date": "2026-08-12T12:33:16Z",
+   "behind": 0,
+   "pin_age_days": 107.9
+  },
+  {
+   "name": "netsuite-suitecloud",
+   "kind": "git-subdir",
+   "repo": "oracle/netsuite-suitecloud-sdk",
+   "sha": "23793a10a9bb557c684c5cb8a97f926eb3463f12",
+   "path": "anthropic/netsuite-suitecloud",
+   "ref": "ai-plugins-dist",
+   "pin_date": "2026-08-12T12:33:16Z",
+   "behind": 0,
+   "pin_age_days": 107.9
+  },
+  {
+   "name": "newrelic",
+   "kind": "url",
+   "repo": "newrelic/claude-code-plugin",
+   "sha": "f8e5f8b62139072a22153ec92de1c0cc1af2f56a",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-06-16T21:41:00Z",
+   "behind": 4,
+   "pin_age_days": 164.6
+  },
+  {
+   "name": "nightvision",
+   "kind": "url",
+   "repo": "nvsecurity/nightvision-skills",
+   "sha": "957db6bb934839275c0f643042101bbb675ddbf7",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-07-30T16:18:49Z",
+   "behind": 41,
+   "pin_age_days": 120.8
+  },
+  {
+   "name": "nimble",
+   "kind": "url",
+   "repo": "Nimbleway/agent-skills",
+   "sha": "fdb077c7220ae19bddfc2a35cf6eb70cbf4577ef",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-08T18:44:45Z",
+   "behind": 62,
+   "pin_age_days": 50.7
+  },
+  {
+   "name": "noibu",
+   "kind": "git-subdir",
+   "repo": "Noibu/ai-plugin",
+   "sha": "9fa2eddc3a86937b7956dedfaab32fac6cabf868",
+   "path": "src",
+   "ref": "main",
+   "pin_date": "2026-09-17T18:53:26Z",
+   "behind": 14,
+   "pin_age_days": 71.7
+  },
+  {
+   "name": "notion",
+   "kind": "url",
+   "repo": "makenotion/claude-code-notion-plugin",
+   "sha": "9847f2aa1a15f25df35ed1fb7b4557dbb60cd651",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-01-22T19:21:32Z",
+   "behind": 5,
+   "pin_age_days": 309.7
+  },
+  {
+   "name": "nvidia-skills",
+   "kind": "git-subdir",
+   "repo": "NVIDIA/skills",
+   "sha": "029363a2023c0b24b1a75ddbeac11cd286d74afb",
+   "path": "plugins/nvidia-skills",
+   "ref": "main",
+   "pin_date": "2026-10-15T20:49:33Z",
+   "behind": 15,
+   "pin_age_days": 43.6
+  },
+  {
+   "name": "oracle-ai-data-platform-workbench-databricks-migrator",
+   "kind": "git-subdir",
+   "repo": "oracle-samples/oracle-aidp-samples",
+   "sha": "a7225cbdd935ad47ed9a17ee8f1533e324f42623",
+   "path": "ai/claude-code-plugins/oracle-ai-data-platform-workbench-databricks-migrator",
+   "ref": "main",
+   "pin_date": "2026-10-14T19:55:00Z",
+   "behind": 4,
+   "pin_age_days": 44.6
+  },
+  {
+   "name": "oracle-ai-data-platform-workbench-engineer-agent",
+   "kind": "git-subdir",
+   "repo": "oracle-samples/oracle-aidp-samples",
+   "sha": "a7225cbdd935ad47ed9a17ee8f1533e324f42623",
+   "path": "ai/claude-code-plugins/oracle-ai-data-platform-workbench-engineer-agent",
+   "ref": "main",
+   "pin_date": "2026-10-14T19:55:00Z",
+   "behind": 0,
+   "pin_age_days": 44.6
+  },
+  {
+   "name": "oracle-ai-data-platform-workbench-spark-connectors",
+   "kind": "git-subdir",
+   "repo": "oracle-samples/oracle-aidp-samples",
+   "sha": "a7225cbdd935ad47ed9a17ee8f1533e324f42623",
+   "path": "ai/claude-code-plugins/oracle-ai-data-platform-workbench-spark-connectors",
+   "ref": "main",
+   "pin_date": "2026-10-14T19:55:00Z",
+   "behind": 1,
+   "pin_age_days": 44.6
+  },
+  {
+   "name": "oracledb",
+   "kind": "url",
+   "repo": "gemini-cli-extensions/oracledb",
+   "sha": "8d24bdc3185c1bc8e0d81bb9fb2618e6e124c060",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-23T16:25:59Z",
+   "behind": 1,
+   "pin_age_days": 65.8
+  },
+  {
+   "name": "outputai",
+   "kind": "git-subdir",
+   "repo": "growthxai/output",
+   "sha": "2032ff617a62840ae786f0721ebb2941c5e2bd00",
+   "path": "coding_assistants/claude/plugins/outputai",
+   "ref": "main",
+   "pin_date": "2026-10-14T20:41:38Z",
+   "behind": 5,
+   "pin_age_days": 44.6
+  },
+  {
+   "name": "pagerduty",
+   "kind": "url",
+   "repo": "PagerDuty/claude-code-plugins",
+   "sha": "761cba75bd50fd561405c3b173ecf36084432089",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-05-14T14:00:51Z",
+   "behind": 4,
+   "pin_age_days": 197.9
+  },
+  {
+   "name": "paypal",
+   "kind": "url",
+   "repo": "paypal/AI-Toolkit",
+   "sha": "5dce83d8243f87eb37ac7cbd6711bc090fe042f8",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-07T21:25:09Z",
+   "behind": 3,
+   "pin_age_days": 51.6
+  },
+  {
+   "name": "pendo-analytics",
+   "kind": "git-subdir",
+   "repo": "pendo-io/claude-pendo-plugin",
+   "sha": "a0f85260c61b93c4511f59545612323a41c3f845",
+   "path": "plugins/pendo-analytics",
+   "ref": "main",
+   "pin_date": "2026-09-30T18:44:46Z",
+   "behind": 0,
+   "pin_age_days": 58.7
+  },
+  {
+   "name": "pendo-guides",
+   "kind": "git-subdir",
+   "repo": "pendo-io/claude-pendo-plugin",
+   "sha": "340d503c23eed487be83693aa4c1837df4a7dcd4",
+   "path": "plugins/pendo-guides",
+   "ref": "main",
+   "pin_date": "2026-09-21T14:34:26Z",
+   "behind": 3,
+   "pin_age_days": 67.9
+  },
+  {
+   "name": "pendo-orchestrate",
+   "kind": "git-subdir",
+   "repo": "pendo-io/claude-pendo-plugin",
+   "sha": "a0f85260c61b93c4511f59545612323a41c3f845",
+   "path": "plugins/pendo-orchestrate",
+   "ref": "main",
+   "pin_date": "2026-09-30T18:44:46Z",
+   "behind": 12,
+   "pin_age_days": 58.7
+  },
+  {
+   "name": "php-lsp",
+   "kind": "local"
+  },
+  {
+   "name": "pigment",
+   "kind": "url",
+   "repo": "gopigment/ai-plugins",
+   "sha": "8a2c2d734f945c8450521c55dafd7f83f033fe53",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-12T08:30:11Z",
+   "behind": 10,
+   "pin_age_days": 47.1
+  },
+  {
+   "name": "pinecone",
+   "kind": "url",
+   "repo": "pinecone-io/pinecone-claude-code-plugin",
+   "sha": "c383d38b5cc3c5ec219f2e68026e47ffbf46524a",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-09T22:28:38Z",
+   "behind": 3,
+   "pin_age_days": 79.5
+  },
+  {
+   "name": "pixeltable",
+   "kind": "url",
+   "repo": "pixeltable/pixeltable-skill",
+   "sha": "c471dbb262b6bc135e903fefd36c6f354101c6b8",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-11T00:06:56Z",
+   "behind": 20,
+   "pin_age_days": 48.5
+  },
+  {
+   "name": "planetscale",
+   "kind": "url",
+   "repo": "planetscale/claude-plugin",
+   "sha": "95c80f9f391be9b1b6172bf82d4191e1ec11b637",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-08-24T15:38:00Z",
+   "behind": 0,
+   "pin_age_days": 95.8
+  },
+  {
+   "name": "playground",
+   "kind": "local"
+  },
+  {
+   "name": "playwright",
+   "kind": "local"
+  },
+  {
+   "name": "plugin-dev",
+   "kind": "local"
+  },
+  {
+   "name": "posthog",
+   "kind": "url",
+   "repo": "PostHog/ai-plugin",
+   "sha": "e0fbf5e742fb4242c4ea509b395b2e343642f0b7",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-05T12:50:10Z",
+   "behind": 68,
+   "pin_age_days": 53.9
+  },
+  {
+   "name": "postiz",
+   "kind": "url",
+   "repo": "gitroomhq/postiz-agent",
+   "sha": "86e02524377cc60a6cd6ef67fd10a3caeade8d2c",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-15T10:22:20Z",
+   "behind": 18,
+   "pin_age_days": 44.0
+  },
+  {
+   "name": "postman",
+   "kind": "url",
+   "repo": "postmanlabs/postman-plugin",
+   "sha": "d1f1cb9d0fba1c7442469fa68e14846ec966daf0",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-11-18T18:04:26Z",
+   "behind": 8,
+   "pin_age_days": 9.7
+  },
+  {
+   "name": "pr-review-toolkit",
+   "kind": "local"
+  },
+  {
+   "name": "preset-cli-skills",
+   "kind": "git-subdir",
+   "repo": "preset-io/agent-skills",
+   "sha": "838f0a408dc1a50adc94175b387550c81371554e",
+   "path": "plugins/preset-cli-skills",
+   "ref": "master",
+   "pin_date": "2026-10-09T06:02:14Z",
+   "behind": 0,
+   "pin_age_days": 50.2
+  },
+  {
+   "name": "prisma",
+   "kind": "url",
+   "repo": "prisma/claude-plugin",
+   "sha": "82edd74d81892bcccf7294cbbf76752d76391da5",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-26T14:43:47Z",
+   "behind": 0,
+   "pin_age_days": 32.8
+  },
+  {
+   "name": "project-artifact",
+   "kind": "local"
+  },
+  {
+   "name": "pydantic-ai",
+   "kind": "git-subdir",
+   "repo": "pydantic/skills",
+   "sha": "238d97102650c1caa51f35027aee13c469c59542",
+   "path": "plugins/ai",
+   "ref": "main",
+   "pin_date": "2026-09-19T03:25:40Z",
+   "behind": 2,
+   "pin_age_days": 70.3
+  },
+  {
+   "name": "pyright-lsp",
+   "kind": "local"
+  },
+  {
+   "name": "qdrant-skills",
+   "kind": "url",
+   "repo": "qdrant/skills",
+   "sha": "d2127f6e1b9c6611fff10fe939c6fb17761aaec2",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-15T09:05:03Z",
+   "behind": 97,
+   "pin_age_days": 44.1
+  },
+  {
+   "name": "qodo",
+   "kind": "git-subdir",
+   "repo": "qodo-ai/qodo-skills",
+   "sha": "588e413a73b466ec4fe9cec79a34051d13f06ab3",
+   "path": "packages/qodo",
+   "ref": "main",
+   "pin_date": "2026-11-11T18:38:17Z",
+   "behind": 5,
+   "pin_age_days": 16.7
+  },
+  {
+   "name": "qodo-standards",
+   "kind": "git-subdir",
+   "repo": "qodo-ai/qodo-skills",
+   "sha": "b8c21854199c538b1c35c981c12a93bab4839ef2",
+   "path": "packages/qodo-standards",
+   "ref": "main",
+   "pin_date": "2026-10-14T19:04:35Z",
+   "behind": 16,
+   "pin_age_days": 44.7
+  },
+  {
+   "name": "qt-development-skills",
+   "kind": "url",
+   "repo": "TheQtCompanyRnD/agent-skills",
+   "sha": "a784c48445e34f126760f17ba0600a25f2d19968",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-08T10:42:14Z",
+   "behind": 31,
+   "pin_age_days": 51.0
+  },
+  {
+   "name": "quarkus-agent",
+   "kind": "url",
+   "repo": "quarkusio/quarkus-agent-mcp",
+   "sha": "73cef3b2564d8debf787c3c05bee28b8539ae657",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-12T07:31:07Z",
+   "behind": 62,
+   "pin_age_days": 47.1
+  },
+  {
+   "name": "railway",
+   "kind": "git-subdir",
+   "repo": "railwayapp/railway-skills",
+   "sha": "a100f93e482c5153774fed74d0b3fb8f8ca63342",
+   "path": "plugins/railway",
+   "ref": "main",
+   "pin_date": "2026-09-22T15:29:50Z",
+   "behind": 9,
+   "pin_age_days": 66.8
+  },
+  {
+   "name": "ralph-loop",
+   "kind": "local"
+  },
+  {
+   "name": "rc",
+   "kind": "url",
+   "repo": "RevenueCat/rc-claude-code-plugin",
+   "sha": "ccfc038185ec457b2ac9077f3bbf1ba947a44dbb",
+   "path": "revenuecat",
+   "ref": null,
+   "pin_date": "2026-09-25T17:15:07Z",
+   "behind": 20,
+   "pin_age_days": 63.7
+  },
+  {
+   "name": "receipts",
+   "kind": "local"
+  },
+  {
+   "name": "redis-development",
+   "kind": "git-subdir",
+   "repo": "redis/agent-skills",
+   "sha": "a84871d065f398fed55e1633f66b66f731eb4e2b",
+   "path": "plugins/redis-development",
+   "ref": "main",
+   "pin_date": "2026-09-08T10:56:41Z",
+   "behind": 15,
+   "pin_age_days": 81.0
+  },
+  {
+   "name": "remember",
+   "kind": "url",
+   "repo": "Digital-Process-Tools/claude-remember",
+   "sha": "ccd45061ee4b0dcf0a8245ca1d344ab61d4e110b",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-11T22:30:43Z",
+   "behind": 45,
+   "pin_age_days": 47.5
+  },
+  {
+   "name": "render",
+   "kind": "url",
+   "repo": "render-oss/render-plugin-claude-code",
+   "sha": "d7ecf826c5971eb7dfdb5aed79fa838a8d67ff46",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-08T21:32:55Z",
+   "behind": 8,
+   "pin_age_days": 50.6
+  },
+  {
+   "name": "resend",
+   "kind": "url",
+   "repo": "resend/resend-skills",
+   "sha": "fd14937dba5a99de5dba902808f70fa575513cc5",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-15T19:51:36Z",
+   "behind": 14,
+   "pin_age_days": 43.6
+  },
+  {
+   "name": "revenuecat",
+   "kind": "url",
+   "repo": "RevenueCat/rc-claude-code-plugin",
+   "sha": "ccfc038185ec457b2ac9077f3bbf1ba947a44dbb",
+   "path": "revenuecat",
+   "ref": null,
+   "pin_date": "2026-09-25T17:15:07Z",
+   "behind": 20,
+   "pin_age_days": 63.7
+  },
+  {
+   "name": "rill",
+   "kind": "url",
+   "repo": "rilldata/agent-skills",
+   "sha": "adfce5762be435c026f4731f72e388520cb133cc",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-14T08:01:15Z",
+   "behind": 21,
+   "pin_age_days": 45.1
+  },
+  {
+   "name": "rootly",
+   "kind": "url",
+   "repo": "Rootly-AI-Labs/rootly-claude-plugin",
+   "sha": "65832aa6ff7a7b39c6bd64899a7a64646e3948ed",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-05-20T19:08:26Z",
+   "behind": 1,
+   "pin_age_days": 191.7
+  },
+  {
+   "name": "ruby-lsp",
+   "kind": "local"
+  },
+  {
+   "name": "runway-api",
+   "kind": "git-subdir",
+   "repo": "runwayml/skills",
+   "sha": "6e98d3f3540705331acd748d75427f4bd7c90ce1",
+   "path": "claude",
+   "ref": "main",
+   "pin_date": "2026-10-30T17:52:07Z",
+   "behind": 0,
+   "pin_age_days": 28.7
+  },
+  {
+   "name": "rust-analyzer-lsp",
+   "kind": "local"
+  },
+  {
+   "name": "sagemaker-ai",
+   "kind": "git-subdir",
+   "repo": "awslabs/agent-plugins",
+   "sha": "097fe8ad56d8a1d5e2c81d7880adf145553cf244",
+   "path": "plugins/sagemaker-ai",
+   "ref": "main",
+   "pin_date": "2026-09-14T20:50:29Z",
+   "behind": 0,
+   "pin_age_days": 74.6
+  },
+  {
+   "name": "salesforce-development",
+   "kind": "git-subdir",
+   "repo": "forcedotcom/sf-skills",
+   "sha": "d3088edf8776a3c23f55aadead587eb3903be2d3",
+   "path": "plugins/builder/salesforce-development",
+   "ref": "main",
+   "pin_date": "2026-10-23T11:30:14Z",
+   "behind": 11,
+   "pin_age_days": 36.0
+  },
+  {
+   "name": "sanity",
+   "kind": "url",
+   "repo": "sanity-io/agent-toolkit",
+   "sha": "88d6cdfa7cb06c99edd5f376efa4dac21ae3f877",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-16T18:54:35Z",
+   "behind": 12,
+   "pin_age_days": 72.7
+  },
+  {
+   "name": "sap-cds-mcp",
+   "kind": "url",
+   "repo": "cap-js/mcp-server",
+   "sha": "52ca3304342db99c27a3f2a0cd765af42980b955",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-14T14:17:54Z",
+   "behind": 19,
+   "pin_age_days": 44.9
+  },
+  {
+   "name": "sap-ux-fiori-tools",
+   "kind": "git-subdir",
+   "repo": "SAP/open-ux-tools",
+   "sha": "08afc41ddb24c1be3142c4fe609971c7f3501ca1",
+   "path": "plugins-coding-agents/fiori",
+   "ref": "main",
+   "pin_date": "2026-11-13T15:47:08Z",
+   "behind": 15,
+   "pin_age_days": 14.8
+  },
+  {
+   "name": "sap-hana-cli",
+   "kind": "url",
+   "repo": "SAP-samples/hana-cli-claude-plugin",
+   "sha": "abadd0aba32792b6378ed784e9f6d3e5b25dfc2a",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-06-01T13:37:15Z",
+   "behind": 0,
+   "pin_age_days": 179.9
+  },
+  {
+   "name": "sap-mdk-server",
+   "kind": "url",
+   "repo": "SAP/mdk-mcp-server",
+   "sha": "ce65cbf22089787599370938f43ca4b9f4567027",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-21T03:54:36Z",
+   "behind": 48,
+   "pin_age_days": 68.3
+  },
+  {
+   "name": "save-to-spotify",
+   "kind": "git-subdir",
+   "repo": "spotify/save-to-spotify",
+   "sha": "9d05c8cd8c8559552f84e27fe30f46b7693ce69a",
+   "path": "plugin",
+   "ref": "main",
+   "pin_date": "2026-07-20T09:05:56Z",
+   "behind": 1,
+   "pin_age_days": 131.1
+  },
+  {
+   "name": "scandit-sdk",
+   "kind": "url",
+   "repo": "Scandit/skills",
+   "sha": "2f0731a090eb9c23a64b6dcd9559cf113df3313f",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-08-20T12:59:57Z",
+   "error": "compare 404",
+   "pin_age_days": 99.9
+  },
+  {
+   "name": "security-guidance",
+   "kind": "local"
+  },
+  {
+   "name": "semgrep",
+   "kind": "git-subdir",
+   "repo": "semgrep/mcp-marketplace",
+   "sha": "b58f407c6ac0f5fe47dee8301602f2e290a8ecfb",
+   "path": "plugin",
+   "ref": null,
+   "pin_date": "2026-10-09T21:17:01Z",
+   "behind": 5,
+   "pin_age_days": 49.6
+  },
+  {
+   "name": "sentry",
+   "kind": "url",
+   "repo": "getsentry/plugin-claude",
+   "sha": "73e53541d7af21672e27428c7067f4264b8a3d65",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-08-27T16:25:44Z",
+   "behind": 6,
+   "pin_age_days": 92.8
+  },
+  {
+   "name": "sentry-cli",
+   "kind": "git-subdir",
+   "repo": "getsentry/cli",
+   "sha": "3567c3c937b5cc06667d5b023bda0b2d3f472c54",
+   "path": "packages/cli/plugins/sentry-cli",
+   "ref": "main",
+   "pin_date": "2026-10-09T13:21:01Z",
+   "behind": 0,
+   "pin_age_days": 49.9
+  },
+  {
+   "name": "serena",
+   "kind": "local"
+  },
+  {
+   "name": "servicenow-sdk",
+   "kind": "git-subdir",
+   "repo": "ServiceNow/sdk",
+   "sha": "6f01c0e26cbe597b8a129de0bd2706ec1c0e327c",
+   "path": "providers/claude/plugin",
+   "ref": "master",
+   "pin_date": "2026-09-10T20:41:07Z",
+   "behind": 1,
+   "pin_age_days": 78.6
+  },
+  {
+   "name": "session-report",
+   "kind": "local"
+  },
+  {
+   "name": "setup-agent-analytics",
+   "kind": "git-subdir",
+   "repo": "pendo-io/claude-pendo-plugin",
+   "sha": "340d503c23eed487be83693aa4c1837df4a7dcd4",
+   "path": "plugins/setup-agent-analytics",
+   "ref": "main",
+   "pin_date": "2026-09-21T14:34:26Z",
+   "behind": 2,
+   "pin_age_days": 67.9
+  },
+  {
+   "name": "setup-mcp-agent-analytics",
+   "kind": "git-subdir",
+   "repo": "pendo-io/claude-pendo-plugin",
+   "sha": "a0f85260c61b93c4511f59545612323a41c3f845",
+   "path": "plugins/setup-mcp-agent-analytics",
+   "ref": "main",
+   "pin_date": "2026-09-30T18:44:46Z",
+   "behind": 3,
+   "pin_age_days": 58.7
+  },
+  {
+   "name": "shippo",
+   "kind": "git-subdir",
+   "repo": "goshippo/ai",
+   "sha": "cf8e96532f243883ff84f6d4035e72884b46d132",
+   "path": "providers/claude/plugin",
+   "ref": "main",
+   "pin_date": "2026-07-24T02:05:59Z",
+   "behind": 0,
+   "pin_age_days": 127.4
+  },
+  {
+   "name": "shopify-ai-toolkit",
+   "kind": "url",
+   "repo": "Shopify/Shopify-AI-Toolkit",
+   "sha": "3c32168c6e4cb73f0b46243c82586176ca58bb48",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-14T21:00:00Z",
+   "behind": 8,
+   "pin_age_days": 44.6
+  },
+  {
+   "name": "skill-creator",
+   "kind": "local"
+  },
+  {
+   "name": "slack",
+   "kind": "url",
+   "repo": "slackapi/slack-mcp-plugin",
+   "sha": "ad6be88096678812c448b0279390b4d25bce0164",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-15T14:56:16Z",
+   "behind": 51,
+   "pin_age_days": 43.8
+  },
+  {
+   "name": "snowflake-cortex-code",
+   "kind": "git-subdir",
+   "repo": "Snowflake-Labs/snowflake-ai-kit",
+   "sha": "e2a3cbb45a9a62b5648266c5777c1b2edb3f8579",
+   "path": "plugins/cortex-code",
+   "ref": "main",
+   "pin_date": "2026-09-30T18:21:38Z",
+   "behind": 23,
+   "pin_age_days": 58.7
+  },
+  {
+   "name": "sonarqube",
+   "kind": "url",
+   "repo": "SonarSource/sonarqube-agent-plugins",
+   "sha": "5a9356d957db063e4d2cf87511b44cc1ba88dc99",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-15T10:05:29Z",
+   "behind": 17,
+   "pin_age_days": 44.0
+  },
+  {
+   "name": "sonatype-guide",
+   "kind": "url",
+   "repo": "sonatype/sonatype-guide-claude-plugin",
+   "sha": "1dae73980f591d3196f5532ac72186513563d028",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-04-02T20:52:32Z",
+   "behind": 0,
+   "pin_age_days": 239.6
+  },
+  {
+   "name": "sourcegraph",
+   "kind": "url",
+   "repo": "sourcegraph-community/sourcegraph-claudecode-plugin",
+   "sha": "674a05e2e28677fc3fdce7491063459455ded573",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-14T18:42:01Z",
+   "behind": 0,
+   "pin_age_days": 74.7
+  },
+  {
+   "name": "spanner",
+   "kind": "url",
+   "repo": "gemini-cli-extensions/spanner",
+   "sha": "d4db42a2708045d66e70f52610a6d27889e457bc",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-30T23:10:09Z",
+   "behind": 1,
+   "pin_age_days": 58.5
+  },
+  {
+   "name": "spotify-ads-api",
+   "kind": "url",
+   "repo": "spotify/ads-claude-plugin",
+   "sha": "532b47af3d2eb10708b38733d07a5b1433c17e82",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-22T14:43:01Z",
+   "behind": 96,
+   "pin_age_days": 66.8
+  },
+  {
+   "name": "stackhawk-hawkscan",
+   "kind": "git-subdir",
+   "repo": "stackhawk/agent-skills",
+   "sha": "66cac9baa5883a1007575faf1b22855a1124834a",
+   "path": "plugins/hawkscan",
+   "ref": "main",
+   "pin_date": "2026-09-16T21:49:04Z",
+   "behind": 11,
+   "pin_age_days": 72.6
+  },
+  {
+   "name": "stackhawk-api",
+   "kind": "git-subdir",
+   "repo": "stackhawk/agent-skills",
+   "sha": "d0eea864c42f7c2e872334bb3df424daa1fbaadc",
+   "path": "plugins/api",
+   "ref": "main",
+   "pin_date": "2026-10-09T22:36:36Z",
+   "behind": 4,
+   "pin_age_days": 49.5
+  },
+  {
+   "name": "streaming-skills-plugin",
+   "kind": "url",
+   "repo": "confluentinc/agent-skills",
+   "sha": "204b36f10e9be41819557988e8f5291711fda986",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-27T05:08:13Z",
+   "behind": 1,
+   "pin_age_days": 32.2
+  },
+  {
+   "name": "stripe",
+   "kind": "git-subdir",
+   "repo": "stripe/ai",
+   "sha": "deae744bc0cbf6034b4b6f22f51c690b71a4e779",
+   "path": "providers/claude/plugin",
+   "ref": "main",
+   "pin_date": "2026-10-13T00:56:32Z",
+   "behind": 54,
+   "pin_age_days": 46.4
+  },
+  {
+   "name": "sumup",
+   "kind": "url",
+   "repo": "sumup/sumup-skills",
+   "sha": "6922c7052ae9d0be834f27361b785bd80e0829cc",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-07T21:36:45Z",
+   "behind": 7,
+   "pin_age_days": 51.6
+  },
+  {
+   "name": "supabase",
+   "kind": "url",
+   "repo": "supabase-community/supabase-plugin",
+   "sha": "2c6d02d4565babe784103ee4d446a93ae9b24151",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-28T09:47:35Z",
+   "behind": 8,
+   "pin_age_days": 61.1
+  },
+  {
+   "name": "superdesign",
+   "kind": "url",
+   "repo": "superdesigndev/superdesign-skill",
+   "sha": "f9f05cd988c247dce6c072eaf9ac6b162f2ffc4b",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-08-21T05:23:23Z",
+   "behind": 0,
+   "pin_age_days": 99.2
+  },
+  {
+   "name": "superpowers",
+   "kind": "url",
+   "repo": "obra/superpowers",
+   "sha": "22f0b463e7a5e579904dd6211a520321035526f7",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-11-03T22:17:07Z",
+   "behind": 0,
+   "pin_age_days": 24.5
+  },
+  {
+   "name": "swift-lsp",
+   "kind": "local"
+  },
+  {
+   "name": "synthflow",
+   "kind": "git-subdir",
+   "repo": "SynthFlowAI/AnthropicPlugin",
+   "sha": "205871ee83508502d2c982ee1bb7e65a2a29190b",
+   "path": "plugins/synthflow",
+   "ref": "main",
+   "pin_date": "2026-07-30T07:56:33Z",
+   "behind": 3,
+   "pin_age_days": 121.1
+  },
+  {
+   "name": "tavily",
+   "kind": "url",
+   "repo": "tavily-ai/skills",
+   "sha": "778122e5f9c680f541eeceda5a5b36405eb7980c",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-04T15:16:06Z",
+   "behind": 62,
+   "pin_age_days": 84.8
+  },
+  {
+   "name": "teamcity-cli",
+   "kind": "url",
+   "repo": "JetBrains/teamcity-cli",
+   "sha": "ac6c1fd83300b2e42df48fcfff365ba03f73bb92",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-10T17:26:57Z",
+   "behind": 56,
+   "pin_age_days": 78.7
+  },
+  {
+   "name": "telegram",
+   "kind": "local"
+  },
+  {
+   "name": "terraform",
+   "kind": "local"
+  },
+  {
+   "name": "theme-examples",
+   "kind": "local"
+  },
+  {
+   "name": "togetherai-skills",
+   "kind": "url",
+   "repo": "togethercomputer/skills",
+   "sha": "644d38225bbdef0318462fe222f6f9883c8addcd",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-08-18T18:05:33Z",
+   "behind": 35,
+   "pin_age_days": 101.7
+  },
+  {
+   "name": "twilio-developer-kit",
+   "kind": "url",
+   "repo": "twilio/ai",
+   "sha": "803790a281f0ef11d2928ffb41bc8422237fb434",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-22T22:50:54Z",
+   "behind": 2,
+   "pin_age_days": 36.5
+  },
+  {
+   "name": "typescript-lsp",
+   "kind": "local"
+  },
+  {
+   "name": "ui-theme-designer",
+   "kind": "git-subdir",
+   "repo": "SAP/ui-theme-designer-plugins-for-coding-agents",
+   "sha": "3eff5832700d85e550b28a3ae58c1763382e405a",
+   "path": "plugins/ui-theme-designer",
+   "ref": "main",
+   "pin_date": "2026-10-14T01:26:58Z",
+   "behind": 13,
+   "pin_age_days": 45.4
+  },
+  {
+   "name": "ui5",
+   "kind": "git-subdir",
+   "repo": "UI5/plugins-coding-agents",
+   "sha": "a99b882ce364ef4b9f52fb4054f5f410c1636563",
+   "path": "plugins/ui5",
+   "ref": "main",
+   "pin_date": "2026-09-08T07:11:56Z",
+   "behind": 4,
+   "pin_age_days": 81.2
+  },
+  {
+   "name": "ui5-modernization",
+   "kind": "git-subdir",
+   "repo": "UI5/plugins-coding-agents",
+   "sha": "2b8c4a944e39609214bce7aef3b05260985f0e91",
+   "path": "plugins/ui5-modernization",
+   "ref": "main",
+   "pin_date": "2026-08-03T14:13:59Z",
+   "behind": 1,
+   "pin_age_days": 116.9
+  },
+  {
+   "name": "ui5-typescript-conversion",
+   "kind": "git-subdir",
+   "repo": "UI5/plugins-coding-agents",
+   "sha": "2b8c4a944e39609214bce7aef3b05260985f0e91",
+   "path": "plugins/ui5-typescript-conversion",
+   "ref": "main",
+   "pin_date": "2026-08-03T14:13:59Z",
+   "behind": 1,
+   "pin_age_days": 116.9
+  },
+  {
+   "name": "unity",
+   "kind": "url",
+   "repo": "Unity-Technologies/unity-agent-plugin",
+   "sha": "81b6079e465246dbca42987469e80b71c2cca9d2",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-11-04T19:19:11Z",
+   "behind": 12,
+   "pin_age_days": 23.7
+  },
+  {
+   "name": "unreal-engine-skills-for-claude-code",
+   "kind": "url",
+   "repo": "EpicGames/unreal-engine-skills-for-claude-code-plugin",
+   "sha": "0e27bde2b55c5d3f6948532f4296aaa3654d8f4b",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-23T17:54:46Z",
+   "behind": 0,
+   "pin_age_days": 35.7
+  },
+  {
+   "name": "valtown",
+   "kind": "git-subdir",
+   "repo": "val-town/plugins",
+   "sha": "555ff7492c9c70ada2c4e9b66d7dea9367d7ce71",
+   "path": "plugin",
+   "ref": "main",
+   "pin_date": "2026-09-24T17:00:36Z",
+   "behind": 0,
+   "pin_age_days": 64.8
+  },
+  {
+   "name": "vanguard-advisor-tools",
+   "kind": "url",
+   "repo": "Vanguard-oss/vanguard-advisor-tools",
+   "sha": "328fe9f61fe7a375b87a6492e265b4a5a955b0ce",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-16T14:01:25Z",
+   "behind": 0,
+   "pin_age_days": 72.9
+  },
+  {
+   "name": "vanta",
+   "kind": "url",
+   "repo": "VantaInc/vanta-mcp-plugin",
+   "sha": "345d86b55faa649e955b7ea5569cf52d8425c2d5",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-05-13T14:06:22Z",
+   "behind": 0,
+   "pin_age_days": 198.9
+  },
+  {
+   "name": "vanta-mcp-plugin",
+   "kind": "url",
+   "repo": "VantaInc/vanta-mcp-plugin",
+   "sha": "345d86b55faa649e955b7ea5569cf52d8425c2d5",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-05-13T14:06:22Z",
+   "behind": 0,
+   "pin_age_days": 198.9
+  },
+  {
+   "name": "vercel",
+   "kind": "url",
+   "repo": "vercel/vercel-plugin",
+   "sha": "50af4780eed8b2f69bc2290d20c670744f1e739c",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-11-23T13:07:50Z",
+   "behind": 19,
+   "pin_age_days": 4.9
+  },
+  {
+   "name": "vibe-prospecting",
+   "kind": "url",
+   "repo": "explorium-ai/vibeprospecting-plugin",
+   "sha": "ca43f6d92395462d8915dc31364bbce6a83e4006",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-11T07:33:11Z",
+   "behind": 9,
+   "pin_age_days": 48.1
+  },
+  {
+   "name": "vsql-extension-builder",
+   "kind": "url",
+   "repo": "villagesql/villagesql-skills",
+   "sha": "18f7d68673e2bd5d400b4ee91298e5a4b9e8d24e",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-16T18:14:48Z",
+   "behind": 14,
+   "pin_age_days": 72.7
+  },
+  {
+   "name": "windsor-ai",
+   "kind": "url",
+   "repo": "windsor-ai/claude-windsor-ai-plugin",
+   "sha": "d7ba1cb036c7ca765536355fb85f13a3237ea3f9",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-08-13T04:35:07Z",
+   "behind": 26,
+   "pin_age_days": 107.3
+  },
+  {
+   "name": "wix",
+   "kind": "url",
+   "repo": "wix/skills",
+   "sha": "e2bc48ebb04d355aaa413cfdd55574ed6d0df969",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-11-19T16:16:05Z",
+   "behind": 21,
+   "pin_age_days": 8.8
+  },
+  {
+   "name": "build-with-wordpress",
+   "kind": "url",
+   "repo": "Automattic/claude-code-wordpress.com",
+   "sha": "052ca970df2c577d7c651e784935186ff93e6779",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-04-20T23:21:14Z",
+   "behind": 0,
+   "pin_age_days": 221.5
+  },
+  {
+   "name": "workos",
+   "kind": "git-subdir",
+   "repo": "workos/skills",
+   "sha": "e25141bae047a7c837d93817347f95977598720f",
+   "path": "plugins/workos",
+   "ref": "main",
+   "pin_date": "2026-09-18T21:46:01Z",
+   "behind": 15,
+   "pin_age_days": 70.6
+  },
+  {
+   "name": "xcode",
+   "kind": "command"
+  },
+  {
+   "name": "youdotcom-agent-skills",
+   "kind": "url",
+   "repo": "youdotcom-oss/agent-skills",
+   "sha": "a692b6f34fac566c72bc7fcc6cafbd7c0f7889c1",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-18T17:20:52Z",
+   "behind": 47,
+   "pin_age_days": 70.7
+  },
+  {
+   "name": "zapier",
+   "kind": "git-subdir",
+   "repo": "zapier/zapier-mcp",
+   "sha": "54a12277a12c60df51ec16cf4e4ef0b27b166649",
+   "path": "plugins/zapier",
+   "ref": "main",
+   "pin_date": "2026-10-22T23:28:17Z",
+   "behind": 6,
+   "pin_age_days": 36.5
+  },
+  {
+   "name": "zilliz",
+   "kind": "url",
+   "repo": "zilliztech/zilliz-plugin",
+   "sha": "35c86c000c91abb35f3eeed5cca15ebd69cba4d5",
+   "path": "plugins/zilliz",
+   "ref": null,
+   "pin_date": "2026-09-03T09:09:44Z",
+   "behind": 9,
+   "pin_age_days": 86.1
+  },
+  {
+   "name": "zocks-advisor",
+   "kind": "url",
+   "repo": "zocks-communications/zocks-agent-plugins",
+   "sha": "a3e445c139665055c2f22f25c9a9f8721a7c6355",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-15T15:24:34Z",
+   "behind": 0,
+   "pin_age_days": 73.8
+  },
+  {
+   "name": "zoom-plugin",
+   "kind": "url",
+   "repo": "zoom/zoom-plugin",
+   "sha": "86e2592334f5fb563ed273e26035844004e66165",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-29T07:45:09Z",
+   "behind": 1,
+   "pin_age_days": 60.1
+  },
+  {
+   "name": "zoominfo",
+   "kind": "url",
+   "repo": "Zoominfo/zoominfo-mcp-plugin",
+   "sha": "31a1ec506078e0aaf4e14e098e39865f32777d8a",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-30T07:47:31Z",
+   "behind": 10,
+   "pin_age_days": 59.1
+  },
+  {
+   "name": "zscaler",
+   "kind": "url",
+   "repo": "zscaler/zscaler-mcp-server",
+   "sha": "6340cd24087a5681bc9ca2ba1c477748fbcc7bcb",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-08-19T15:03:45Z",
+   "behind": 0,
+   "pin_age_days": 100.8
+  },
+  {
+   "name": "langfuse",
+   "kind": "url",
+   "repo": "langfuse/skills",
+   "sha": "b86532b77f16f1e27c7cffa32bb632aa3cd9a352",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-01T11:12:06Z",
+   "behind": 25,
+   "pin_age_days": 58.0
+  },
+  {
+   "name": "zyte-web-data",
+   "kind": "url",
+   "repo": "zytedata/claude-skills",
+   "sha": "d03e241729ebc3bf397e4303d654e8189b9e8185",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-22T15:59:14Z",
+   "behind": 2,
+   "pin_age_days": 66.8
+  },
+  {
+   "name": "activecampaign",
+   "kind": "url",
+   "repo": "ActiveCampaign/activecampaign-plugin",
+   "sha": "0ff858728bc52aee335d5475b0d4eb5f3a9589b0",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-08-31T18:56:05Z",
+   "behind": 16,
+   "pin_age_days": 88.7
+  },
+  {
+   "name": "hubspot-sales",
+   "kind": "git-subdir",
+   "repo": "HubSpot/hubspot-mcp-plugins",
+   "sha": "a0c59600fc1ddcf03ceca71aebf0c28aa55f49e3",
+   "path": "HubSpot-Sales",
+   "ref": "main",
+   "pin_date": "2026-09-11T15:58:33Z",
+   "behind": 0,
+   "pin_age_days": 77.8
+  },
+  {
+   "name": "dynatrace",
+   "kind": "url",
+   "repo": "Dynatrace/dynatrace-for-ai",
+   "sha": "4f9aa71f9802aa6db0a4069ae5619eb3392ff411",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-10-01T11:49:29Z",
+   "behind": 11,
+   "pin_age_days": 58.0
+  },
+  {
+   "name": "wingspan",
+   "kind": "url",
+   "repo": "wingspanHQ/mcp-claude-plugin",
+   "sha": "7f99cb3d1789a91390fa7abf1571328736b5e0a6",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-23T09:29:08Z",
+   "behind": 2,
+   "pin_age_days": 66.1
+  },
+  {
+   "name": "amazon-selling-partner",
+   "kind": "url",
+   "repo": "amzn/selling-partner-agentic-toolkit",
+   "sha": "10573bac239b7062a476667eaa574d400335c70e",
+   "path": null,
+   "ref": null,
+   "pin_date": "2026-09-23T15:44:14Z",
+   "behind": 6,
+   "pin_age_days": 65.8
+  }
+ ],
+ "open_bump_prs_total": 192,
+ "open_bump_prs": [
+  {
+   "number": 7233,
+   "title": "bump(mercadopago): 755d3374 \u2192 7b639909",
+   "created_at": "2026-11-28T07:28:47Z",
+   "age_days": 0.2
+  },
+  {
+   "number": 7232,
+   "title": "bump(crowdsec): 9bca8a76 \u2192 4d0f577c",
+   "created_at": "2026-11-28T07:28:40Z",
+   "age_days": 0.2
+  },
+  {
+   "number": 7221,
+   "title": "bump(vercel): 50af4780 \u2192 5e43a50c",
+   "created_at": "2026-11-25T07:33:01Z",
+   "age_days": 3.1
+  },
+  {
+   "number": 7220,
+   "title": "bump(figma): 43a06ff1 \u2192 5e479084",
+   "created_at": "2026-11-25T07:32:52Z",
+   "age_days": 3.1
+  },
+  {
+   "number": 7202,
+   "title": "bump(apollo): bd0513c9 \u2192 2fee9ace",
+   "created_at": "2026-11-23T07:31:40Z",
+   "age_days": 5.1
+  },
+  {
+   "number": 7196,
+   "title": "bump(mapbox): f71cd72b \u2192 84d991e3",
+   "created_at": "2026-11-21T07:27:50Z",
+   "age_days": 7.2
+  },
+  {
+   "number": 7195,
+   "title": "bump(honeycomb): 6bb09279 \u2192 bfeca3a3",
+   "created_at": "2026-11-21T07:27:45Z",
+   "age_days": 7.2
+  },
+  {
+   "number": 7194,
+   "title": "bump(datadog): a1603119 \u2192 8f82237a",
+   "created_at": "2026-11-21T07:27:40Z",
+   "age_days": 7.2
+  },
+  {
+   "number": 7185,
+   "title": "bump(wingspan): 7f99cb3d \u2192 53914ce8",
+   "created_at": "2026-11-20T07:30:20Z",
+   "age_days": 8.1
+  },
+  {
+   "number": 7184,
+   "title": "bump(postman): d1f1cb9d \u2192 50da85af",
+   "created_at": "2026-11-20T07:30:13Z",
+   "age_days": 8.1
+  },
+  {
+   "number": 7181,
+   "title": "bump(data): 35b9610b \u2192 f38c5584",
+   "created_at": "2026-11-20T07:29:54Z",
+   "age_days": 8.2
+  },
+  {
+   "number": 7179,
+   "title": "bump(databricks): c1964266 \u2192 9c2e13fb",
+   "created_at": "2026-11-20T00:30:28Z",
+   "age_days": 8.4
+  },
+  {
+   "number": 7175,
+   "title": "bump(neon): 82724974 \u2192 d3601d9e",
+   "created_at": "2026-11-19T18:25:29Z",
+   "age_days": 8.7
+  },
+  {
+   "number": 7171,
+   "title": "bump(coderabbit): 45bd1ae2 \u2192 bb71cd4c",
+   "created_at": "2026-11-19T07:30:38Z",
+   "age_days": 9.1
+  },
+  {
+   "number": 7234,
+   "title": "bump(zoom-plugin): 86e25923 \u2192 8bb4ec2d",
+   "created_at": "2026-11-28T07:28:54Z",
+   "age_days": 0.2
+  },
+  {
+   "number": 7169,
+   "title": "bump(posthog): e0fbf5e7 \u2192 dcec83c6",
+   "created_at": "2026-11-18T23:34:08Z",
+   "age_days": 9.5
+  },
+  {
+   "number": 7159,
+   "title": "bump(newrelic): f8e5f8b6 \u2192 2831aeff",
+   "created_at": "2026-11-18T07:30:58Z",
+   "age_days": 10.1
+  },
+  {
+   "number": 7160,
+   "title": "bump(zapier): 54a12277 \u2192 1e2872bd",
+   "created_at": "2026-11-18T07:31:05Z",
+   "age_days": 10.1
+  },
+  {
+   "number": 7157,
+   "title": "bump(cloudflare): cbf893b9 \u2192 5108325e",
+   "created_at": "2026-11-18T07:30:46Z",
+   "age_days": 10.1
+  },
+  {
+   "number": 7146,
+   "title": "bump(lovable): 0336e6db \u2192 d999d198",
+   "created_at": "2026-11-17T07:29:58Z",
+   "age_days": 11.1
+  },
+  {
+   "number": 7144,
+   "title": "bump(buildkite): d29b846e \u2192 818920d4",
+   "created_at": "2026-11-17T07:29:46Z",
+   "age_days": 11.2
+  },
+  {
+   "number": 7226,
+   "title": "bump(servicenow-sdk): 6f01c0e2 \u2192 e90a6f95",
+   "created_at": "2026-11-26T07:31:30Z",
+   "age_days": 2.1
+  },
+  {
+   "number": 7122,
+   "title": "bump(qodo): 588e413a \u2192 80240e3f",
+   "created_at": "2026-11-14T07:27:30Z",
+   "age_days": 14.2
+  },
+  {
+   "number": 7119,
+   "title": "bump(semgrep): b58f407c \u2192 5e0bb471",
+   "created_at": "2026-11-13T23:00:20Z",
+   "age_days": 14.5
+  },
+  {
+   "number": 7111,
+   "title": "bump(pinecone): c383d38b \u2192 30c5c793",
+   "created_at": "2026-11-13T07:30:11Z",
+   "age_days": 15.1
+  },
+  {
+   "number": 7110,
+   "title": "bump(govtribe): 41cb943d \u2192 34f2ba5d",
+   "created_at": "2026-11-13T07:30:04Z",
+   "age_days": 15.1
+  },
+  {
+   "number": 7109,
+   "title": "bump(box): 84320fd8 \u2192 83c405c4",
+   "created_at": "2026-11-13T07:29:56Z",
+   "age_days": 15.2
+  },
+  {
+   "number": 7090,
+   "title": "bump(rootly): 65832aa6 \u2192 11a05511",
+   "created_at": "2026-11-12T07:28:57Z",
+   "age_days": 16.2
+  },
+  {
+   "number": 7089,
+   "title": "bump(growthbook): 7a84f338 \u2192 ed586cd4",
+   "created_at": "2026-11-12T07:28:52Z",
+   "age_days": 16.2
+  },
+  {
+   "number": 7088,
+   "title": "bump(cloudinary): 86be5340 \u2192 0ad67a22",
+   "created_at": "2026-11-12T07:28:45Z",
+   "age_days": 16.2
+  },
+  {
+   "number": 7193,
+   "title": "bump(aws-transform): 097fe8ad \u2192 c829ec19",
+   "created_at": "2026-11-21T07:27:34Z",
+   "age_days": 7.2
+  },
+  {
+   "number": 7182,
+   "title": "bump(data-engineering): 35b9610b \u2192 f38c5584",
+   "created_at": "2026-11-20T07:30:00Z",
+   "age_days": 8.1
+  },
+  {
+   "number": 7067,
+   "title": "bump(zoominfo): 31a1ec50 \u2192 e3b6ec97",
+   "created_at": "2026-11-10T07:29:09Z",
+   "age_days": 18.2
+  },
+  {
+   "number": 7066,
+   "title": "bump(synthflow): 205871ee \u2192 e2b375d9",
+   "created_at": "2026-11-10T07:29:03Z",
+   "age_days": 18.2
+  },
+  {
+   "number": 7065,
+   "title": "bump(spanner): d4db42a2 \u2192 e2b1ad4f",
+   "created_at": "2026-11-10T07:28:58Z",
+   "age_days": 18.2
+  },
+  {
+   "number": 7064,
+   "title": "bump(oracledb): 8d24bdc3 \u2192 74fe39a7",
+   "created_at": "2026-11-10T07:28:51Z",
+   "age_days": 18.2
+  },
+  {
+   "number": 7063,
+   "title": "bump(looker): 13ed738a \u2192 44a4b7db",
+   "created_at": "2026-11-10T07:28:45Z",
+   "age_days": 18.2
+  },
+  {
+   "number": 7173,
+   "title": "bump(monday-crm): 8fdc0b4a \u2192 1261f96c",
+   "created_at": "2026-11-19T12:15:14Z",
+   "age_days": 9.0
+  },
+  {
+   "number": 7041,
+   "title": "bump(mintlify): c1c1700d \u2192 a4f4310a",
+   "created_at": "2026-11-08T07:28:28Z",
+   "age_days": 20.2
+  },
+  {
+   "number": 7158,
+   "title": "bump(duckdb-skills): 7feda8e0 \u2192 44dfbbb4",
+   "created_at": "2026-11-18T07:30:52Z",
+   "age_days": 10.1
+  },
+  {
+   "number": 7036,
+   "title": "bump(dominodatalab): 7949e3ac \u2192 6e5879f8",
+   "created_at": "2026-11-07T07:28:23Z",
+   "age_days": 21.2
+  },
+  {
+   "number": 7150,
+   "title": "bump(amd-skills): d4417422 \u2192 3e41c083",
+   "created_at": "2026-11-17T16:53:40Z",
+   "age_days": 10.8
+  },
+  {
+   "number": 7225,
+   "title": "bump(deploy-on-aws): fbefb376 \u2192 75bc1808",
+   "created_at": "2026-11-26T07:31:23Z",
+   "age_days": 2.1
+  },
+  {
+   "number": 7035,
+   "title": "bump(dataproc): 18534a9b \u2192 00acabf6",
+   "created_at": "2026-11-07T07:28:17Z",
+   "age_days": 21.2
+  },
+  {
+   "number": 7021,
+   "title": "bump(unity): 81b6079e \u2192 33506559",
+   "created_at": "2026-11-06T07:27:36Z",
+   "age_days": 22.2
+  },
+  {
+   "number": 7019,
+   "title": "bump(leadfeeder): cddf27f0 \u2192 bbc712d7",
+   "created_at": "2026-11-06T07:27:23Z",
+   "age_days": 22.2
+  },
+  {
+   "number": 7006,
+   "title": "bump(notion): 9847f2aa \u2192 016c74ff",
+   "created_at": "2026-11-05T07:28:36Z",
+   "age_days": 23.2
+  },
+  {
+   "number": 6990,
+   "title": "bump(lusha): 4bcf5c74 \u2192 fde6072d",
+   "created_at": "2026-11-04T07:29:37Z",
+   "age_days": 24.2
+  },
+  {
+   "number": 6988,
+   "title": "bump(alloydb): f9b3280b \u2192 1c877774",
+   "created_at": "2026-11-04T07:29:23Z",
+   "age_days": 24.2
+  },
+  {
+   "number": 6976,
+   "title": "bump(sumup): 6922c705 \u2192 7ab7e65c",
+   "created_at": "2026-11-02T07:29:09Z",
+   "age_days": 26.2
+  },
+  {
+   "number": 7186,
+   "title": "bump(modern-web-guidance): b31dc0a4 \u2192 64a6d708",
+   "created_at": "2026-11-20T15:38:02Z",
+   "age_days": 7.8
+  },
+  {
+   "number": 7180,
+   "title": "bump(astronomer-data-agents): 35b9610b \u2192 f38c5584",
+   "created_at": "2026-11-20T07:29:48Z",
+   "age_days": 8.2
+  },
+  {
+   "number": 6962,
+   "title": "bump(tavily): 778122e5 \u2192 00a131a8",
+   "created_at": "2026-10-31T07:28:01Z",
+   "age_days": 28.2
+  },
+  {
+   "number": 6959,
+   "title": "bump(pagerduty): 761cba75 \u2192 1cda0c85",
+   "created_at": "2026-10-31T07:27:42Z",
+   "age_days": 28.2
+  },
+  {
+   "number": 7062,
+   "title": "bump(knowledge-catalog): 63039752 \u2192 18639aa8",
+   "created_at": "2026-11-10T07:28:39Z",
+   "age_days": 18.2
+  },
+  {
+   "number": 7061,
+   "title": "bump(firestore-native): 6e6a841c \u2192 aa1ee7c1",
+   "created_at": "2026-11-10T07:28:32Z",
+   "age_days": 18.2
+  },
+  {
+   "number": 7057,
+   "title": "bump(alloydb-omni): 37101e3f \u2192 d74da86e",
+   "created_at": "2026-11-10T07:28:06Z",
+   "age_days": 18.2
+  },
+  {
+   "number": 6945,
+   "title": "bump(atlassian): b74220d4 \u2192 37e57a78",
+   "created_at": "2026-10-30T07:32:11Z",
+   "age_days": 29.1
+  },
+  {
+   "number": 6941,
+   "title": "bump(dynatrace): 4f9aa71f \u2192 0c0375cb",
+   "created_at": "2026-10-29T07:31:06Z",
+   "age_days": 30.1
+  },
+  {
+   "number": 6925,
+   "title": "bump(render): d7ecf826 \u2192 2df0bc02",
+   "created_at": "2026-10-28T07:30:20Z",
+   "age_days": 31.1
+  },
+  {
+   "number": 6924,
+   "title": "bump(auth0): 7b3821d5 \u2192 b44a3791",
+   "created_at": "2026-10-28T07:30:13Z",
+   "age_days": 31.1
+  },
+  {
+   "number": 7148,
+   "title": "bump(setup-agent-analytics): 340d503c \u2192 10e21650",
+   "created_at": "2026-11-17T07:30:12Z",
+   "age_days": 11.1
+  },
+  {
+   "number": 7145,
+   "title": "bump(databases-on-aws): fbefb376 \u2192 48a6f48f",
+   "created_at": "2026-11-17T07:29:52Z",
+   "age_days": 11.2
+  },
+  {
+   "number": 6911,
+   "title": "bump(outputai): 2032ff61 \u2192 8ef04e25",
+   "created_at": "2026-10-27T07:44:24Z",
+   "age_days": 32.1
+  },
+  {
+   "number": 6910,
+   "title": "bump(nimble): fdb077c7 \u2192 1b98fc45",
+   "created_at": "2026-10-27T07:44:16Z",
+   "age_days": 32.1
+  },
+  {
+   "number": 6892,
+   "title": "bump(firecrawl): 3e1fb0c3 \u2192 e5d486a4",
+   "created_at": "2026-10-26T07:52:29Z",
+   "age_days": 33.1
+  },
+  {
+   "number": 6891,
+   "title": "bump(clickhouse): 652664c8 \u2192 0b66d6d7",
+   "created_at": "2026-10-26T07:52:22Z",
+   "age_days": 33.1
+  },
+  {
+   "number": 6889,
+   "title": "bump(fiftyone): 8b87befc \u2192 7617709d",
+   "created_at": "2026-10-25T07:34:43Z",
+   "age_days": 34.1
+  },
+  {
+   "number": 6884,
+   "title": "bump(zilliz): 35c86c00 \u2192 a7620d28",
+   "created_at": "2026-10-24T07:35:49Z",
+   "age_days": 35.1
+  },
+  {
+   "number": 6882,
+   "title": "bump(intercom): 62773a7d \u2192 18b3fc1e",
+   "created_at": "2026-10-24T07:35:37Z",
+   "age_days": 35.1
+  },
+  {
+   "number": 6991,
+   "title": "bump(redis-development): a84871d0 \u2192 0a2cec40",
+   "created_at": "2026-11-04T07:29:43Z",
+   "age_days": 24.2
+  },
+  {
+   "number": 6870,
+   "title": "bump(mergify): 6307ed10 \u2192 76d6e672",
+   "created_at": "2026-10-23T07:43:18Z",
+   "age_days": 36.1
+  },
+  {
+   "number": 6869,
+   "title": "bump(fullstory): ca872d97 \u2192 a809c71d",
+   "created_at": "2026-10-23T07:43:11Z",
+   "age_days": 36.1
+  },
+  {
+   "number": 6983,
+   "title": "bump(scandit-sdk): 2f0731a0 \u2192 3d024755",
+   "created_at": "2026-11-03T07:28:58Z",
+   "age_days": 25.2
+  },
+  {
+   "number": 6480,
+   "title": "bump(hostinger): 569880c6 \u2192 6ddee220",
+   "created_at": "2026-10-12T08:07:27Z",
+   "age_days": 47.1
+  },
+  {
+   "number": 7091,
+   "title": "bump(streaming-skills-plugin): 204b36f1 \u2192 e127e024",
+   "created_at": "2026-11-12T07:29:04Z",
+   "age_days": 16.2
+  },
+  {
+   "number": 6977,
+   "title": "bump(vibe-prospecting): ca43f6d9 \u2192 510710bb",
+   "created_at": "2026-11-02T07:29:15Z",
+   "age_days": 26.2
+  },
+  {
+   "number": 6846,
+   "title": "bump(stripe): deae744b \u2192 1bcd18aa",
+   "created_at": "2026-10-21T07:41:57Z",
+   "age_days": 38.1
+  },
+  {
+   "number": 6843,
+   "title": "bump(postiz): 86e02524 \u2192 29f2eefe",
+   "created_at": "2026-10-21T07:41:37Z",
+   "age_days": 38.1
+  },
+  {
+   "number": 7078,
+   "title": "bump(twilio-developer-kit): 803790a2 \u2192 bb61456b",
+   "created_at": "2026-11-11T07:28:59Z",
+   "age_days": 17.2
+  },
+  {
+   "number": 6829,
+   "title": "bump(sonarqube): 5a9356d9 \u2192 32ca0140",
+   "created_at": "2026-10-20T07:42:47Z",
+   "age_days": 39.1
+  },
+  {
+   "number": 6828,
+   "title": "bump(revenuecat): ccfc0381 \u2192 136d2df6",
+   "created_at": "2026-10-20T07:42:40Z",
+   "age_days": 39.1
+  },
+  {
+   "number": 6827,
+   "title": "bump(rc): ccfc0381 \u2192 136d2df6",
+   "created_at": "2026-10-20T07:42:33Z",
+   "age_days": 39.1
+  },
+  {
+   "number": 6823,
+   "title": "bump(mlflow): 51a42ea2 \u2192 3b0d56a3",
+   "created_at": "2026-10-20T07:42:06Z",
+   "age_days": 39.1
+  },
+  {
+   "number": 6802,
+   "title": "bump(remember): ccd45061 \u2192 1484b270",
+   "created_at": "2026-10-19T07:52:16Z",
+   "age_days": 40.1
+  },
+  {
+   "number": 6960,
+   "title": "bump(salesforce-development): d3088edf \u2192 a8a18ce1",
+   "created_at": "2026-10-31T07:27:49Z",
+   "age_days": 28.2
+  },
+  {
+   "number": 7060,
+   "title": "bump(cloud-sql-sqlserver): 7efeaaf0 \u2192 0ee8b730",
+   "created_at": "2026-11-10T07:28:26Z",
+   "age_days": 18.2
+  },
+  {
+   "number": 7059,
+   "title": "bump(cloud-sql-postgresql): 1d758bb3 \u2192 44d82cdb",
+   "created_at": "2026-11-10T07:28:18Z",
+   "age_days": 18.2
+  },
+  {
+   "number": 7058,
+   "title": "bump(cloud-sql-mysql): 51aa2690 \u2192 fe2b7811",
+   "created_at": "2026-11-10T07:28:12Z",
+   "age_days": 18.2
+  },
+  {
+   "number": 6748,
+   "title": "bump(ui5): a99b882c \u2192 9450c3ab",
+   "created_at": "2026-10-17T07:36:27Z",
+   "age_days": 42.1
+  },
+  {
+   "number": 6801,
+   "title": "bump(jfrog): 9b1f8f6c \u2192 b9511379",
+   "created_at": "2026-10-19T07:52:08Z",
+   "age_days": 40.1
+  },
+  {
+   "number": 6949,
+   "title": "bump(pendo-orchestrate): a0f85260 \u2192 d64f47dc",
+   "created_at": "2026-10-30T07:32:42Z",
+   "age_days": 29.1
+  },
+  {
+   "number": 6767,
+   "title": "bump(appwrite): ab3c90b3 \u2192 89881098",
+   "created_at": "2026-10-18T07:34:21Z",
+   "age_days": 41.1
+  },
+  {
+   "number": 6943,
+   "title": "bump(qodo-standards): b8c21854 \u2192 9af23a9c",
+   "created_at": "2026-10-29T16:41:09Z",
+   "age_days": 29.8
+  },
+  {
+   "number": 6751,
+   "title": "bump(langfuse): b86532b7 \u2192 127253d0",
+   "created_at": "2026-10-17T07:36:44Z",
+   "age_days": 42.1
+  },
+  {
+   "number": 6940,
+   "title": "bump(stackhawk-api): d0eea864 \u2192 27570360",
+   "created_at": "2026-10-29T07:30:59Z",
+   "age_days": 30.1
+  },
+  {
+   "number": 6939,
+   "title": "bump(nvidia-skills): 029363a2 \u2192 ca116d60",
+   "created_at": "2026-10-29T07:30:52Z",
+   "age_days": 30.1
+  },
+  {
+   "number": 6938,
+   "title": "bump(grafana-mcp): 6c28ba19 \u2192 77a6f1a2",
+   "created_at": "2026-10-29T07:30:45Z",
+   "age_days": 30.1
+  },
+  {
+   "number": 6747,
+   "title": "bump(supabase): 2c6d02d4 \u2192 016bf5b3",
+   "created_at": "2026-10-17T07:36:20Z",
+   "age_days": 42.1
+  },
+  {
+   "number": 6746,
+   "title": "bump(slack): ad6be880 \u2192 f984a6e3",
+   "created_at": "2026-10-17T07:36:13Z",
+   "age_days": 42.1
+  },
+  {
+   "number": 6742,
+   "title": "bump(rill): adfce576 \u2192 f8cde2aa",
+   "created_at": "2026-10-17T07:35:45Z",
+   "age_days": 42.1
+  },
+  {
+   "number": 6741,
+   "title": "bump(resend): fd14937d \u2192 247779a8",
+   "created_at": "2026-10-17T07:35:38Z",
+   "age_days": 42.1
+  },
+  {
+   "number": 6739,
+   "title": "bump(pixeltable): c471dbb2 \u2192 28e89fbd",
+   "created_at": "2026-10-17T07:35:26Z",
+   "age_days": 42.1
+  },
+  {
+   "number": 6737,
+   "title": "bump(mongodb): c370a63b \u2192 68be65bf",
+   "created_at": "2026-10-17T07:35:12Z",
+   "age_days": 42.1
+  },
+  {
+   "number": 6736,
+   "title": "bump(expo): d4f48402 \u2192 927dd7cc",
+   "created_at": "2026-10-17T07:35:05Z",
+   "age_days": 42.1
+  },
+  {
+   "number": 6732,
+   "title": "bump(canva): bfcbc681 \u2192 ac2cf106",
+   "created_at": "2026-10-17T07:34:38Z",
+   "age_days": 42.1
+  },
+  {
+   "number": 6730,
+   "title": "bump(amplitude): c4bcb5fe \u2192 5b688be4",
+   "created_at": "2026-10-17T07:34:23Z",
+   "age_days": 42.1
+  },
+  {
+   "number": 6716,
+   "title": "bump(pigment): 8a2c2d73 \u2192 a5add768",
+   "created_at": "2026-10-16T07:36:31Z",
+   "age_days": 43.1
+  },
+  {
+   "number": 6698,
+   "title": "bump(paypal): 5dce83d8 \u2192 1401791a",
+   "created_at": "2026-10-16T02:29:20Z",
+   "age_days": 43.4
+  },
+  {
+   "number": 7137,
+   "title": "bump(sap-ux-fiori-tools): 08afc41d \u2192 0b3a88c4",
+   "created_at": "2026-11-16T07:42:23Z",
+   "age_days": 12.1
+  },
+  {
+   "number": 6488,
+   "title": "bump(logfire): 238d9710 \u2192 585b93fc",
+   "created_at": "2026-10-12T08:08:21Z",
+   "age_days": 47.1
+  },
+  {
+   "number": 6447,
+   "title": "bump(convex): 6ca54f6e \u2192 4fdf6fc4",
+   "created_at": "2026-10-11T07:45:30Z",
+   "age_days": 48.1
+  },
+  {
+   "number": 6580,
+   "title": "bump(activecampaign): 0ff85872 \u2192 c00f8f72",
+   "created_at": "2026-10-13T07:57:14Z",
+   "age_days": 46.1
+  },
+  {
+   "number": 6574,
+   "title": "bump(workos): e25141ba \u2192 f1095c8d",
+   "created_at": "2026-10-13T07:56:26Z",
+   "age_days": 46.1
+  },
+  {
+   "number": 6573,
+   "title": "bump(wix): 8fc544d3 \u2192 a5c3a83a",
+   "created_at": "2026-10-13T07:56:17Z",
+   "age_days": 46.1
+  },
+  {
+   "number": 6888,
+   "title": "bump(atomic-agents): 33d2ec94 \u2192 14cf8eb6",
+   "created_at": "2026-10-25T07:34:38Z",
+   "age_days": 34.1
+  },
+  {
+   "number": 6533,
+   "title": "bump(sentry): 73e53541 \u2192 2ef2d3db",
+   "created_at": "2026-10-12T08:13:41Z",
+   "age_days": 47.1
+  },
+  {
+   "number": 6528,
+   "title": "bump(sanity): 88d6cdfa \u2192 3fe6c8a0",
+   "created_at": "2026-10-12T08:13:05Z",
+   "age_days": 47.1
+  },
+  {
+   "number": 6520,
+   "title": "bump(railway): a100f93e \u2192 dab1c2a5",
+   "created_at": "2026-10-12T08:12:07Z",
+   "age_days": 47.1
+  },
+  {
+   "number": 6502,
+   "title": "bump(noibu): 9fa2eddc \u2192 5efbd41e",
+   "created_at": "2026-10-12T08:09:59Z",
+   "age_days": 47.1
+  },
+  {
+   "number": 6500,
+   "title": "bump(nightvision): 957db6bb \u2192 d1b3da3c",
+   "created_at": "2026-10-12T08:09:46Z",
+   "age_days": 47.1
+  },
+  {
+   "number": 6483,
+   "title": "bump(hyperframes): 8d2b6e7b \u2192 bf881bf7",
+   "created_at": "2026-10-12T08:07:48Z",
+   "age_days": 47.1
+  },
+  {
+   "number": 6482,
+   "title": "bump(hunter): 44f0f568 \u2192 4470791d",
+   "created_at": "2026-10-12T08:07:41Z",
+   "age_days": 47.1
+  },
+  {
+   "number": 6821,
+   "title": "bump(mattpocock-skills): 49dd158d \u2192 5beb35b0",
+   "created_at": "2026-10-20T07:41:53Z",
+   "age_days": 39.1
+  },
+  {
+   "number": 6881,
+   "title": "bump(huggingface-skills): c3ff942b \u2192 fabc634a",
+   "created_at": "2026-10-24T07:35:31Z",
+   "age_days": 35.1
+  },
+  {
+   "number": 6462,
+   "title": "bump(exa): 15ffb505 \u2192 e9c3b012",
+   "created_at": "2026-10-11T07:47:06Z",
+   "age_days": 48.1
+  },
+  {
+   "number": 6458,
+   "title": "bump(dataverse): 669e7151 \u2192 3be592f6",
+   "created_at": "2026-10-11T07:46:44Z",
+   "age_days": 48.1
+  },
+  {
+   "number": 6449,
+   "title": "bump(dash0): 72a84179 \u2192 7753ecc0",
+   "created_at": "2026-10-11T07:45:43Z",
+   "age_days": 48.1
+  },
+  {
+   "number": 6446,
+   "title": "bump(confidence): f416826f \u2192 ba96f742",
+   "created_at": "2026-10-11T07:45:22Z",
+   "age_days": 48.1
+  },
+  {
+   "number": 6444,
+   "title": "bump(cockroachdb): 6c96c639 \u2192 df34a858",
+   "created_at": "2026-10-11T07:45:10Z",
+   "age_days": 48.1
+  },
+  {
+   "number": 6437,
+   "title": "bump(clay): 769514a3 \u2192 a8132584",
+   "created_at": "2026-10-11T07:44:24Z",
+   "age_days": 48.1
+  },
+  {
+   "number": 6436,
+   "title": "bump(ckeditor): 261766a0 \u2192 f87a99c1",
+   "created_at": "2026-10-11T07:44:18Z",
+   "age_days": 48.1
+  },
+  {
+   "number": 6427,
+   "title": "bump(base44): 8548a482 \u2192 ec2ae226",
+   "created_at": "2026-10-11T07:43:20Z",
+   "age_days": 48.1
+  },
+  {
+   "number": 6425,
+   "title": "bump(azure): 5b4f0c07 \u2192 0727d816",
+   "created_at": "2026-10-11T07:43:05Z",
+   "age_days": 48.1
+  },
+  {
+   "number": 6982,
+   "title": "bump(save-to-spotify): 9d05c8cd \u2192 d09b36fa",
+   "created_at": "2026-11-03T07:28:51Z",
+   "age_days": 25.2
+  },
+  {
+   "number": 6871,
+   "title": "bump(netlify-skills): dc9ebf1b \u2192 b9f53856",
+   "created_at": "2026-10-23T07:43:26Z",
+   "age_days": 36.1
+  },
+  {
+   "number": 6866,
+   "title": "bump(aws-agents): 0d6167ad \u2192 9ab50636",
+   "created_at": "2026-10-23T07:42:50Z",
+   "age_days": 36.1
+  },
+  {
+   "number": 6864,
+   "title": "bump(ai-plugins): 2de00883 \u2192 a8903c62",
+   "created_at": "2026-10-23T07:42:36Z",
+   "age_days": 36.1
+  },
+  {
+   "number": 6850,
+   "title": "bump(carbone-skill): 25207b3f \u2192 b367df6c",
+   "created_at": "2026-10-22T07:40:53Z",
+   "age_days": 37.1
+  },
+  {
+   "number": 6844,
+   "title": "bump(qdrant-skills): d2127f6e \u2192 5560a535",
+   "created_at": "2026-10-21T07:41:44Z",
+   "age_days": 38.1
+  },
+  {
+   "number": 6842,
+   "title": "bump(pendo-guides): 340d503c \u2192 c9bd9453",
+   "created_at": "2026-10-21T07:41:31Z",
+   "age_days": 38.1
+  },
+  {
+   "number": 6841,
+   "title": "bump(idmp-plugin): bf519771 \u2192 41f06edc",
+   "created_at": "2026-10-21T07:41:25Z",
+   "age_days": 38.1
+  },
+  {
+   "number": 6826,
+   "title": "bump(quarkus-agent): 73cef3b2 \u2192 7e44d60a",
+   "created_at": "2026-10-20T07:42:27Z",
+   "age_days": 39.1
+  },
+  {
+   "number": 6820,
+   "title": "bump(incident-io): 00f7d1dc \u2192 208e1760",
+   "created_at": "2026-10-20T07:41:46Z",
+   "age_days": 39.1
+  },
+  {
+   "number": 6817,
+   "title": "bump(altimate-code): b7c8f68b \u2192 790afdb4",
+   "created_at": "2026-10-20T07:41:26Z",
+   "age_days": 39.1
+  },
+  {
+   "number": 6749,
+   "title": "bump(ui5-modernization): 2b8c4a94 \u2192 9450c3ab",
+   "created_at": "2026-10-17T07:36:32Z",
+   "age_days": 42.1
+  },
+  {
+   "number": 6937,
+   "title": "bump(grafana-cloud-mcp): 6c28ba19 \u2192 77a6f1a2",
+   "created_at": "2026-10-29T07:30:38Z",
+   "age_days": 30.1
+  },
+  {
+   "number": 6738,
+   "title": "bump(mongodb-atlas): c370a63b \u2192 68be65bf",
+   "created_at": "2026-10-17T07:35:18Z",
+   "age_days": 42.1
+  },
+  {
+   "number": 6735,
+   "title": "bump(duende-skills): fb32edc5 \u2192 aa760867",
+   "created_at": "2026-10-17T07:34:59Z",
+   "age_days": 42.1
+  },
+  {
+   "number": 6733,
+   "title": "bump(cds-mcp): 52ca3304 \u2192 34852033",
+   "created_at": "2026-10-17T07:34:44Z",
+   "age_days": 42.1
+  },
+  {
+   "number": 6731,
+   "title": "bump(bigdata-com): 43777fbd \u2192 3e5c25e0",
+   "created_at": "2026-10-17T07:34:30Z",
+   "age_days": 42.1
+  },
+  {
+   "number": 6702,
+   "title": "bump(pydantic-ai): 238d9710 \u2192 390a5a07",
+   "created_at": "2026-10-16T02:29:48Z",
+   "age_days": 43.4
+  },
+  {
+   "number": 6683,
+   "title": "bump(carta-investors): ea7fe1d4 \u2192 18bccd5a",
+   "created_at": "2026-10-16T02:27:40Z",
+   "age_days": 43.4
+  },
+  {
+   "number": 6682,
+   "title": "bump(carta-crm): ea7fe1d4 \u2192 18bccd5a",
+   "created_at": "2026-10-16T02:27:33Z",
+   "age_days": 43.4
+  },
+  {
+   "number": 6601,
+   "title": "bump(togetherai-skills): 644d3822 \u2192 f59f28e7",
+   "created_at": "2026-10-14T07:40:21Z",
+   "age_days": 45.1
+  },
+  {
+   "number": 6451,
+   "title": "bump(data-agent-kit): 83c53b5f \u2192 0dd8034c",
+   "created_at": "2026-10-11T07:45:56Z",
+   "age_days": 48.1
+  },
+  {
+   "number": 6572,
+   "title": "bump(windsor-ai): d7ba1cb0 \u2192 c1d90dab",
+   "created_at": "2026-10-13T07:56:08Z",
+   "age_days": 46.1
+  },
+  {
+   "number": 6559,
+   "title": "bump(stackhawk-hawkscan): 66cac9ba \u2192 d0eea864",
+   "created_at": "2026-10-13T07:54:30Z",
+   "age_days": 46.1
+  },
+  {
+   "number": 6883,
+   "title": "bump(snowflake-cortex-code): e2a3cbb4 \u2192 6a9165f3",
+   "created_at": "2026-10-24T07:35:42Z",
+   "age_days": 35.1
+  },
+  {
+   "number": 6879,
+   "title": "bump(adobe-for-creativity): 0f487c9b \u2192 620c7130",
+   "created_at": "2026-10-24T07:35:18Z",
+   "age_days": 35.1
+  },
+  {
+   "number": 6486,
+   "title": "bump(langfuse-observability): b5211009 \u2192 b5b7cc36",
+   "created_at": "2026-10-12T08:08:07Z",
+   "age_days": 47.1
+  },
+  {
+   "number": 6867,
+   "title": "bump(chrome-devtools-mcp): a878bcad \u2192 af283441",
+   "created_at": "2026-10-23T07:42:58Z",
+   "age_days": 36.1
+  },
+  {
+   "number": 6865,
+   "title": "bump(atlassian-twg-cli): b3336ef6 \u2192 014ddfe1",
+   "created_at": "2026-10-23T07:42:43Z",
+   "age_days": 36.1
+  },
+  {
+   "number": 6423,
+   "title": "bump(aws-core): 34b3eccf \u2192 2cb0fa1c",
+   "created_at": "2026-10-11T07:42:51Z",
+   "age_days": 48.1
+  },
+  {
+   "number": 6418,
+   "title": "bump(apollo-skills): c288eb80 \u2192 5f02fcfc",
+   "created_at": "2026-10-11T07:42:16Z",
+   "age_days": 48.1
+  },
+  {
+   "number": 6851,
+   "title": "bump(fastly-agent-toolkit): 6db70eaf \u2192 ce82a851",
+   "created_at": "2026-10-22T07:41:00Z",
+   "age_days": 37.1
+  },
+  {
+   "number": 6845,
+   "title": "bump(qt-development-skills): a784c484 \u2192 6845f02d",
+   "created_at": "2026-10-21T07:41:51Z",
+   "age_days": 38.1
+  },
+  {
+   "number": 6840,
+   "title": "bump(aws-startup-advisor): b310d1c4 \u2192 658b852f",
+   "created_at": "2026-10-21T07:41:17Z",
+   "age_days": 38.1
+  },
+  {
+   "number": 6961,
+   "title": "bump(setup-mcp-agent-analytics): a0f85260 \u2192 608f41c6",
+   "created_at": "2026-10-31T07:27:55Z",
+   "age_days": 28.2
+  },
+  {
+   "number": 6830,
+   "title": "bump(ui-theme-designer): 3eff5832 \u2192 392ebc1b",
+   "created_at": "2026-10-20T07:42:54Z",
+   "age_days": 39.1
+  },
+  {
+   "number": 6818,
+   "title": "bump(clickhouse-best-practices): 356a8c1b \u2192 69a8354b",
+   "created_at": "2026-10-20T07:41:33Z",
+   "age_days": 39.1
+  },
+  {
+   "number": 6750,
+   "title": "bump(ui5-typescript-conversion): 2b8c4a94 \u2192 9450c3ab",
+   "created_at": "2026-10-17T07:36:38Z",
+   "age_days": 42.1
+  },
+  {
+   "number": 6745,
+   "title": "bump(shopify-ai-toolkit): 3c32168c \u2192 a788f6a8",
+   "created_at": "2026-10-17T07:36:06Z",
+   "age_days": 42.1
+  },
+  {
+   "number": 6744,
+   "title": "bump(sap-cds-mcp): 52ca3304 \u2192 34852033",
+   "created_at": "2026-10-17T07:35:59Z",
+   "age_days": 42.1
+  },
+  {
+   "number": 6734,
+   "title": "bump(datarobot-agent-skills): 53a4dacc \u2192 0474c0cd",
+   "created_at": "2026-10-17T07:34:52Z",
+   "age_days": 42.1
+  },
+  {
+   "number": 6709,
+   "title": "bump(sap-mdk-server): ce65cbf2 \u2192 6b91b2b4",
+   "created_at": "2026-10-16T02:30:33Z",
+   "age_days": 43.4
+  },
+  {
+   "number": 6681,
+   "title": "bump(carta-cap-table): ea7fe1d4 \u2192 18bccd5a",
+   "created_at": "2026-10-16T02:27:26Z",
+   "age_days": 43.4
+  },
+  {
+   "number": 6678,
+   "title": "bump(azure-sql-developer): c1e8167e \u2192 e3af4eac",
+   "created_at": "2026-10-16T02:27:04Z",
+   "age_days": 43.4
+  },
+  {
+   "number": 7183,
+   "title": "bump(oracle-ai-data-platform-workbench-databricks-migrator): a7225cbd \u2192 522da5f4",
+   "created_at": "2026-11-20T07:30:06Z",
+   "age_days": 8.1
+  },
+  {
+   "number": 6583,
+   "title": "bump(amazon-selling-partner): 10573bac \u2192 8d90d3b7",
+   "created_at": "2026-10-13T07:57:38Z",
+   "age_days": 46.1
+  },
+  {
+   "number": 6579,
+   "title": "bump(zyte-web-data): d03e2417 \u2192 2f27a214",
+   "created_at": "2026-10-13T07:57:07Z",
+   "age_days": 46.1
+  },
+  {
+   "number": 6575,
+   "title": "bump(youdotcom-agent-skills): a692b6f3 \u2192 294d78bd",
+   "created_at": "2026-10-13T07:56:35Z",
+   "age_days": 46.1
+  },
+  {
+   "number": 6571,
+   "title": "bump(vsql-extension-builder): 18f7d686 \u2192 cbffb7cb",
+   "created_at": "2026-10-13T07:56:01Z",
+   "age_days": 46.1
+  },
+  {
+   "number": 6558,
+   "title": "bump(spotify-ads-api): 532b47af \u2192 757fd5d4",
+   "created_at": "2026-10-13T07:54:23Z",
+   "age_days": 46.1
+  },
+  {
+   "number": 6552,
+   "title": "bump(aws-data-analytics): 0d6167ad \u2192 a8e8edb1",
+   "created_at": "2026-10-13T07:53:42Z",
+   "age_days": 46.1
+  },
+  {
+   "number": 6493,
+   "title": "bump(migration-to-aws): ec681ba5 \u2192 60e439ec",
+   "created_at": "2026-10-12T08:08:58Z",
+   "age_days": 47.1
+  },
+  {
+   "number": 6468,
+   "title": "bump(google-cloud-storage): c7e3eeef \u2192 701fcaee",
+   "created_at": "2026-10-11T07:47:45Z",
+   "age_days": 48.1
+  },
+  {
+   "number": 6362,
+   "title": "bump(aws-startup-advisor): 613dc216 \u2192 188af2f8",
+   "created_at": "2026-10-05T20:09:17Z",
+   "age_days": 53.6
+  },
+  {
+   "number": 6715,
+   "title": "bump(aws-agents-for-devsecops): 7bde20fa \u2192 44ba1a54",
+   "created_at": "2026-10-16T07:36:24Z",
+   "age_days": 43.1
+  },
+  {
+   "number": 6410,
+   "title": "bump(42crunch-api-security-testing): faf53053 \u2192 b1188262",
+   "created_at": "2026-10-11T07:41:24Z",
+   "age_days": 48.1
+  },
+  {
+   "number": 7205,
+   "title": "security-guidance: bump version to 2.0.22 (do not merge yet, lands last)",
+   "created_at": "2026-11-23T17:03:42Z",
+   "age_days": 4.8
+  },
+  {
+   "number": 6853,
+   "title": "bump(oracle-ai-data-platform-workbench-spark-connectors): a7225cbd \u2192 b7656ed4",
+   "created_at": "2026-10-22T07:41:15Z",
+   "age_days": 37.1
+  }
+ ],
+ "merged_bump_prs": [
+  {
+   "number": 6280,
+   "created_at": "2026-09-22T16:13:34Z",
+   "merged_at": "2026-09-22T16:50:52Z",
+   "hours": 0.62
+  },
+  {
+   "number": 6284,
+   "created_at": "2026-09-22T16:17:06Z",
+   "merged_at": "2026-09-22T16:51:33Z",
+   "hours": 0.57
+  },
+  {
+   "number": 6282,
+   "created_at": "2026-09-22T16:16:56Z",
+   "merged_at": "2026-09-22T16:51:06Z",
+   "hours": 0.57
+  },
+  {
+   "number": 6283,
+   "created_at": "2026-09-22T16:17:01Z",
+   "merged_at": "2026-09-22T16:50:55Z",
+   "hours": 0.56
+  },
+  {
+   "number": 6224,
+   "created_at": "2026-09-17T07:39:31Z",
+   "merged_at": "2026-09-17T14:54:39Z",
+   "hours": 7.25
+  },
+  {
+   "number": 6231,
+   "created_at": "2026-09-17T07:40:11Z",
+   "merged_at": "2026-09-17T14:53:45Z",
+   "hours": 7.23
+  },
+  {
+   "number": 6243,
+   "created_at": "2026-09-17T07:41:17Z",
+   "merged_at": "2026-09-17T14:52:30Z",
+   "hours": 7.19
+  },
+  {
+   "number": 6227,
+   "created_at": "2026-09-17T07:39:47Z",
+   "merged_at": "2026-09-17T14:54:07Z",
+   "hours": 7.24
+  },
+  {
+   "number": 6245,
+   "created_at": "2026-09-17T07:41:27Z",
+   "merged_at": "2026-09-17T14:52:11Z",
+   "hours": 7.18
+  },
+  {
+   "number": 6232,
+   "created_at": "2026-09-17T07:40:17Z",
+   "merged_at": "2026-09-17T14:53:28Z",
+   "hours": 7.22
+  },
+  {
+   "number": 6238,
+   "created_at": "2026-09-17T07:40:51Z",
+   "merged_at": "2026-09-17T14:52:51Z",
+   "hours": 7.2
+  },
+  {
+   "number": 6240,
+   "created_at": "2026-09-17T07:41:02Z",
+   "merged_at": "2026-09-17T14:52:37Z",
+   "hours": 7.19
+  },
+  {
+   "number": 6230,
+   "created_at": "2026-09-17T07:40:06Z",
+   "merged_at": "2026-09-17T14:53:35Z",
+   "hours": 7.22
+  },
+  {
+   "number": 6210,
+   "created_at": "2026-09-17T07:38:20Z",
+   "merged_at": "2026-09-17T14:55:25Z",
+   "hours": 7.28
+  },
+  {
+   "number": 6215,
+   "created_at": "2026-09-17T07:38:45Z",
+   "merged_at": "2026-09-17T14:54:57Z",
+   "hours": 7.27
+  },
+  {
+   "number": 6223,
+   "created_at": "2026-09-17T07:39:26Z",
+   "merged_at": "2026-09-17T14:54:10Z",
+   "hours": 7.25
+  },
+  {
+   "number": 6229,
+   "created_at": "2026-09-17T07:40:00Z",
+   "merged_at": "2026-09-17T14:53:31Z",
+   "hours": 7.23
+  },
+  {
+   "number": 6217,
+   "created_at": "2026-09-17T07:38:54Z",
+   "merged_at": "2026-09-17T14:54:43Z",
+   "hours": 7.26
+  },
+  {
+   "number": 6213,
+   "created_at": "2026-09-17T07:38:35Z",
+   "merged_at": "2026-09-17T14:55:05Z",
+   "hours": 7.28
+  },
+  {
+   "number": 6225,
+   "created_at": "2026-09-17T07:39:36Z",
+   "merged_at": "2026-09-17T14:53:56Z",
+   "hours": 7.24
+  },
+  {
+   "number": 6214,
+   "created_at": "2026-09-17T07:38:40Z",
+   "merged_at": "2026-09-17T14:54:52Z",
+   "hours": 7.27
+  },
+  {
+   "number": 6220,
+   "created_at": "2026-09-17T07:39:10Z",
+   "merged_at": "2026-09-17T14:54:18Z",
+   "hours": 7.25
+  },
+  {
+   "number": 6218,
+   "created_at": "2026-09-17T07:38:59Z",
+   "merged_at": "2026-09-17T14:54:28Z",
+   "hours": 7.26
+  },
+  {
+   "number": 6211,
+   "created_at": "2026-09-17T07:38:25Z",
+   "merged_at": "2026-09-17T14:55:01Z",
+   "hours": 7.28
+  },
+  {
+   "number": 6209,
+   "created_at": "2026-09-17T07:38:14Z",
+   "merged_at": "2026-09-17T14:55:13Z",
+   "hours": 7.28
+  },
+  {
+   "number": 6200,
+   "created_at": "2026-09-17T07:37:27Z",
+   "merged_at": "2026-09-17T14:56:02Z",
+   "hours": 7.31
+  },
+  {
+   "number": 6205,
+   "created_at": "2026-09-17T07:37:52Z",
+   "merged_at": "2026-09-17T14:55:35Z",
+   "hours": 7.3
+  },
+  {
+   "number": 6185,
+   "created_at": "2026-09-16T07:40:56Z",
+   "merged_at": "2026-09-16T17:20:09Z",
+   "hours": 9.65
+  },
+  {
+   "number": 6183,
+   "created_at": "2026-09-16T07:40:43Z",
+   "merged_at": "2026-09-16T17:20:13Z",
+   "hours": 9.66
+  },
+  {
+   "number": 6184,
+   "created_at": "2026-09-16T07:40:49Z",
+   "merged_at": "2026-09-16T17:20:03Z",
+   "hours": 9.65
+  },
+  {
+   "number": 6181,
+   "created_at": "2026-09-16T07:40:31Z",
+   "merged_at": "2026-09-16T17:20:18Z",
+   "hours": 9.66
+  },
+  {
+   "number": 6172,
+   "created_at": "2026-09-16T07:39:35Z",
+   "merged_at": "2026-09-16T17:21:13Z",
+   "hours": 9.69
+  },
+  {
+   "number": 6179,
+   "created_at": "2026-09-16T07:40:18Z",
+   "merged_at": "2026-09-16T17:20:22Z",
+   "hours": 9.67
+  },
+  {
+   "number": 6165,
+   "created_at": "2026-09-16T07:38:55Z",
+   "merged_at": "2026-09-16T17:21:52Z",
+   "hours": 9.72
+  },
+  {
+   "number": 6178,
+   "created_at": "2026-09-16T07:40:12Z",
+   "merged_at": "2026-09-16T17:20:26Z",
+   "hours": 9.67
+  },
+  {
+   "number": 6177,
+   "created_at": "2026-09-16T07:40:06Z",
+   "merged_at": "2026-09-16T17:20:30Z",
+   "hours": 9.67
+  },
+  {
+   "number": 6176,
+   "created_at": "2026-09-16T07:39:59Z",
+   "merged_at": "2026-09-16T17:20:34Z",
+   "hours": 9.68
+  },
+  {
+   "number": 6167,
+   "created_at": "2026-09-16T07:39:06Z",
+   "merged_at": "2026-09-16T17:21:27Z",
+   "hours": 9.71
+  },
+  {
+   "number": 6175,
+   "created_at": "2026-09-16T07:39:53Z",
+   "merged_at": "2026-09-16T17:20:38Z",
+   "hours": 9.68
+  },
+  {
+   "number": 6170,
+   "created_at": "2026-09-16T07:39:23Z",
+   "merged_at": "2026-09-16T17:20:59Z",
+   "hours": 9.69
+  },
+  {
+   "number": 6169,
+   "created_at": "2026-09-16T07:39:17Z",
+   "merged_at": "2026-09-16T17:20:56Z",
+   "hours": 9.69
+  },
+  {
+   "number": 6164,
+   "created_at": "2026-09-16T07:38:49Z",
+   "merged_at": "2026-09-16T17:21:24Z",
+   "hours": 9.71
+  },
+  {
+   "number": 6162,
+   "created_at": "2026-09-16T07:38:38Z",
+   "merged_at": "2026-09-16T17:21:31Z",
+   "hours": 9.71
+  },
+  {
+   "number": 6163,
+   "created_at": "2026-09-16T07:38:43Z",
+   "merged_at": "2026-09-16T17:21:09Z",
+   "hours": 9.71
+  },
+  {
+   "number": 6155,
+   "created_at": "2026-09-16T07:37:54Z",
+   "merged_at": "2026-09-16T17:21:39Z",
+   "hours": 9.73
+  },
+  {
+   "number": 6142,
+   "created_at": "2026-09-15T07:38:42Z",
+   "merged_at": "2026-09-15T16:39:41Z",
+   "hours": 9.02
+  },
+  {
+   "number": 6128,
+   "created_at": "2026-09-15T07:37:33Z",
+   "merged_at": "2026-09-15T16:39:45Z",
+   "hours": 9.04
+  },
+  {
+   "number": 6143,
+   "created_at": "2026-09-15T07:38:47Z",
+   "merged_at": "2026-09-15T16:22:29Z",
+   "hours": 8.73
+  },
+  {
+   "number": 6140,
+   "created_at": "2026-09-15T07:38:32Z",
+   "merged_at": "2026-09-15T16:19:18Z",
+   "hours": 8.68
+  },
+  {
+   "number": 6139,
+   "created_at": "2026-09-15T07:38:27Z",
+   "merged_at": "2026-09-15T16:18:37Z",
+   "hours": 8.67
+  },
+  {
+   "number": 6136,
+   "created_at": "2026-09-15T07:38:13Z",
+   "merged_at": "2026-09-15T16:16:37Z",
+   "hours": 8.64
+  },
+  {
+   "number": 6133,
+   "created_at": "2026-09-15T07:37:58Z",
+   "merged_at": "2026-09-15T16:12:31Z",
+   "hours": 8.58
+  },
+  {
+   "number": 6127,
+   "created_at": "2026-09-15T07:37:28Z",
+   "merged_at": "2026-09-15T16:05:12Z",
+   "hours": 8.46
+  },
+  {
+   "number": 6126,
+   "created_at": "2026-09-15T07:37:23Z",
+   "merged_at": "2026-09-15T16:04:30Z",
+   "hours": 8.45
+  },
+  {
+   "number": 6125,
+   "created_at": "2026-09-15T07:37:18Z",
+   "merged_at": "2026-09-15T16:03:47Z",
+   "hours": 8.44
+  },
+  {
+   "number": 6124,
+   "created_at": "2026-09-15T07:37:13Z",
+   "merged_at": "2026-09-15T16:03:07Z",
+   "hours": 8.43
+  },
+  {
+   "number": 6123,
+   "created_at": "2026-09-15T07:37:08Z",
+   "merged_at": "2026-09-15T16:02:26Z",
+   "hours": 8.42
+  },
+  {
+   "number": 6117,
+   "created_at": "2026-09-15T07:36:39Z",
+   "merged_at": "2026-09-15T15:56:16Z",
+   "hours": 8.33
+  },
+  {
+   "number": 6116,
+   "created_at": "2026-09-15T07:36:34Z",
+   "merged_at": "2026-09-15T15:55:36Z",
+   "hours": 8.32
+  },
+  {
+   "number": 6103,
+   "created_at": "2026-09-14T07:46:10Z",
+   "merged_at": "2026-09-14T17:17:44Z",
+   "hours": 9.53
+  },
+  {
+   "number": 6107,
+   "created_at": "2026-09-14T07:46:33Z",
+   "merged_at": "2026-09-14T17:20:25Z",
+   "hours": 9.56
+  },
+  {
+   "number": 6106,
+   "created_at": "2026-09-14T07:46:28Z",
+   "merged_at": "2026-09-14T17:19:43Z",
+   "hours": 9.55
+  },
+  {
+   "number": 6105,
+   "created_at": "2026-09-14T07:46:21Z",
+   "merged_at": "2026-09-14T17:19:02Z",
+   "hours": 9.54
+  },
+  {
+   "number": 6102,
+   "created_at": "2026-09-14T07:46:04Z",
+   "merged_at": "2026-09-14T17:17:05Z",
+   "hours": 9.52
+  },
+  {
+   "number": 6100,
+   "created_at": "2026-09-14T07:45:53Z",
+   "merged_at": "2026-09-14T17:15:03Z",
+   "hours": 9.49
+  },
+  {
+   "number": 6098,
+   "created_at": "2026-09-14T07:45:40Z",
+   "merged_at": "2026-09-14T17:13:08Z",
+   "hours": 9.46
+  },
+  {
+   "number": 6294,
+   "created_at": "2026-09-23T15:47:17Z",
+   "merged_at": "2026-09-23T15:49:37Z",
+   "hours": 0.04
+  },
+  {
+   "number": 6091,
+   "created_at": "2026-09-13T07:31:56Z",
+   "merged_at": "2026-09-13T13:29:48Z",
+   "hours": 5.96
+  },
+  {
+   "number": 6082,
+   "created_at": "2026-09-12T07:37:39Z",
+   "merged_at": "2026-09-13T13:29:26Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6081,
+   "created_at": "2026-09-12T07:37:34Z",
+   "merged_at": "2026-09-13T13:29:21Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6080,
+   "created_at": "2026-09-12T07:37:28Z",
+   "merged_at": "2026-09-13T13:29:16Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6077,
+   "created_at": "2026-09-12T07:37:11Z",
+   "merged_at": "2026-09-13T13:28:59Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6076,
+   "created_at": "2026-09-12T07:37:06Z",
+   "merged_at": "2026-09-13T13:28:55Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6073,
+   "created_at": "2026-09-12T07:36:49Z",
+   "merged_at": "2026-09-13T13:28:38Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6070,
+   "created_at": "2026-09-12T07:36:32Z",
+   "merged_at": "2026-09-13T13:28:21Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6069,
+   "created_at": "2026-09-12T07:36:27Z",
+   "merged_at": "2026-09-13T13:28:16Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6068,
+   "created_at": "2026-09-12T07:36:21Z",
+   "merged_at": "2026-09-13T13:28:10Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6067,
+   "created_at": "2026-09-12T07:36:15Z",
+   "merged_at": "2026-09-13T13:28:04Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6064,
+   "created_at": "2026-09-12T07:35:57Z",
+   "merged_at": "2026-09-13T13:27:49Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6061,
+   "created_at": "2026-09-12T07:35:41Z",
+   "merged_at": "2026-09-13T13:27:35Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6060,
+   "created_at": "2026-09-12T07:35:35Z",
+   "merged_at": "2026-09-13T13:27:30Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6059,
+   "created_at": "2026-09-12T07:35:30Z",
+   "merged_at": "2026-09-13T13:27:24Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6056,
+   "created_at": "2026-09-12T07:35:12Z",
+   "merged_at": "2026-09-13T13:27:09Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6055,
+   "created_at": "2026-09-12T07:35:06Z",
+   "merged_at": "2026-09-13T13:27:04Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6054,
+   "created_at": "2026-09-12T07:35:01Z",
+   "merged_at": "2026-09-13T13:26:59Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6053,
+   "created_at": "2026-09-12T07:34:55Z",
+   "merged_at": "2026-09-13T13:26:55Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6052,
+   "created_at": "2026-09-12T07:34:49Z",
+   "merged_at": "2026-09-13T13:26:50Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6051,
+   "created_at": "2026-09-12T07:34:43Z",
+   "merged_at": "2026-09-13T13:26:46Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6050,
+   "created_at": "2026-09-12T07:34:37Z",
+   "merged_at": "2026-09-13T13:26:41Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6049,
+   "created_at": "2026-09-12T07:34:31Z",
+   "merged_at": "2026-09-13T13:26:36Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6048,
+   "created_at": "2026-09-12T07:34:26Z",
+   "merged_at": "2026-09-13T13:26:32Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6045,
+   "created_at": "2026-09-12T07:34:09Z",
+   "merged_at": "2026-09-13T13:26:19Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6044,
+   "created_at": "2026-09-12T07:34:04Z",
+   "merged_at": "2026-09-13T13:26:14Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6039,
+   "created_at": "2026-09-12T07:33:34Z",
+   "merged_at": "2026-09-13T13:25:48Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6036,
+   "created_at": "2026-09-12T07:33:17Z",
+   "merged_at": "2026-09-13T13:25:31Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6035,
+   "created_at": "2026-09-12T07:33:11Z",
+   "merged_at": "2026-09-13T13:25:26Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6032,
+   "created_at": "2026-09-12T07:32:55Z",
+   "merged_at": "2026-09-13T13:25:12Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6212,
+   "created_at": "2026-09-17T07:38:30Z",
+   "merged_at": "2026-09-17T14:55:39Z",
+   "hours": 7.29
+  },
+  {
+   "number": 6237,
+   "created_at": "2026-09-17T07:40:45Z",
+   "merged_at": "2026-09-17T14:53:04Z",
+   "hours": 7.21
+  },
+  {
+   "number": 6235,
+   "created_at": "2026-09-17T07:40:34Z",
+   "merged_at": "2026-09-17T14:53:09Z",
+   "hours": 7.21
+  },
+  {
+   "number": 6236,
+   "created_at": "2026-09-17T07:40:40Z",
+   "merged_at": "2026-09-17T14:52:59Z",
+   "hours": 7.21
+  },
+  {
+   "number": 6228,
+   "created_at": "2026-09-17T07:39:53Z",
+   "merged_at": "2026-09-17T14:53:51Z",
+   "hours": 7.23
+  },
+  {
+   "number": 6226,
+   "created_at": "2026-09-17T07:39:41Z",
+   "merged_at": "2026-09-17T14:54:01Z",
+   "hours": 7.24
+  },
+  {
+   "number": 6222,
+   "created_at": "2026-09-17T07:39:20Z",
+   "merged_at": "2026-09-17T14:54:22Z",
+   "hours": 7.25
+  },
+  {
+   "number": 6216,
+   "created_at": "2026-09-17T07:38:50Z",
+   "merged_at": "2026-09-17T14:54:49Z",
+   "hours": 7.27
+  },
+  {
+   "number": 6221,
+   "created_at": "2026-09-17T07:39:15Z",
+   "merged_at": "2026-09-17T14:54:14Z",
+   "hours": 7.25
+  },
+  {
+   "number": 6207,
+   "created_at": "2026-09-17T07:38:03Z",
+   "merged_at": "2026-09-17T14:55:30Z",
+   "hours": 7.29
+  },
+  {
+   "number": 6208,
+   "created_at": "2026-09-17T07:38:09Z",
+   "merged_at": "2026-09-17T14:55:20Z",
+   "hours": 7.29
+  },
+  {
+   "number": 6203,
+   "created_at": "2026-09-17T07:37:42Z",
+   "merged_at": "2026-09-17T14:55:45Z",
+   "hours": 7.3
+  },
+  {
+   "number": 6159,
+   "created_at": "2026-09-16T07:38:20Z",
+   "merged_at": "2026-09-16T19:57:41Z",
+   "hours": 12.32
+  },
+  {
+   "number": 6173,
+   "created_at": "2026-09-16T07:39:41Z",
+   "merged_at": "2026-09-16T17:20:45Z",
+   "hours": 9.68
+  },
+  {
+   "number": 6171,
+   "created_at": "2026-09-16T07:39:29Z",
+   "merged_at": "2026-09-16T17:20:41Z",
+   "hours": 9.69
+  },
+  {
+   "number": 6161,
+   "created_at": "2026-09-16T07:38:32Z",
+   "merged_at": "2026-09-16T17:21:43Z",
+   "hours": 9.72
+  },
+  {
+   "number": 6156,
+   "created_at": "2026-09-16T07:38:01Z",
+   "merged_at": "2026-09-16T17:21:57Z",
+   "hours": 9.73
+  },
+  {
+   "number": 6160,
+   "created_at": "2026-09-16T07:38:26Z",
+   "merged_at": "2026-09-16T17:21:17Z",
+   "hours": 9.71
+  },
+  {
+   "number": 6021,
+   "created_at": "2026-09-11T07:34:51Z",
+   "merged_at": "2026-09-11T16:08:30Z",
+   "hours": 8.56
+  },
+  {
+   "number": 6019,
+   "created_at": "2026-09-11T07:34:42Z",
+   "merged_at": "2026-09-11T16:08:12Z",
+   "hours": 8.56
+  },
+  {
+   "number": 6018,
+   "created_at": "2026-09-11T07:34:36Z",
+   "merged_at": "2026-09-11T16:08:05Z",
+   "hours": 8.56
+  },
+  {
+   "number": 6015,
+   "created_at": "2026-09-11T07:34:17Z",
+   "merged_at": "2026-09-11T16:07:41Z",
+   "hours": 8.56
+  },
+  {
+   "number": 6014,
+   "created_at": "2026-09-11T07:34:12Z",
+   "merged_at": "2026-09-11T16:07:33Z",
+   "hours": 8.56
+  },
+  {
+   "number": 6012,
+   "created_at": "2026-09-11T07:34:01Z",
+   "merged_at": "2026-09-11T16:07:17Z",
+   "hours": 8.55
+  },
+  {
+   "number": 6009,
+   "created_at": "2026-09-11T07:33:47Z",
+   "merged_at": "2026-09-11T16:06:53Z",
+   "hours": 8.55
+  },
+  {
+   "number": 5974,
+   "created_at": "2026-09-09T07:38:40Z",
+   "merged_at": "2026-09-13T13:25:08Z",
+   "hours": 101.77
+  },
+  {
+   "number": 5999,
+   "created_at": "2026-09-10T07:35:21Z",
+   "merged_at": "2026-09-11T16:05:54Z",
+   "hours": 32.51
+  },
+  {
+   "number": 5998,
+   "created_at": "2026-09-10T07:35:15Z",
+   "merged_at": "2026-09-11T16:05:46Z",
+   "hours": 32.51
+  },
+  {
+   "number": 5997,
+   "created_at": "2026-09-10T07:35:09Z",
+   "merged_at": "2026-09-11T16:05:37Z",
+   "hours": 32.51
+  },
+  {
+   "number": 5996,
+   "created_at": "2026-09-10T07:35:03Z",
+   "merged_at": "2026-09-11T16:05:29Z",
+   "hours": 32.51
+  },
+  {
+   "number": 5994,
+   "created_at": "2026-09-10T07:34:53Z",
+   "merged_at": "2026-09-11T16:05:12Z",
+   "hours": 32.51
+  },
+  {
+   "number": 5993,
+   "created_at": "2026-09-10T07:34:49Z",
+   "merged_at": "2026-09-11T16:05:04Z",
+   "hours": 32.5
+  },
+  {
+   "number": 5990,
+   "created_at": "2026-09-10T07:34:34Z",
+   "merged_at": "2026-09-11T16:04:39Z",
+   "hours": 32.5
+  },
+  {
+   "number": 5989,
+   "created_at": "2026-09-10T07:34:29Z",
+   "merged_at": "2026-09-11T16:04:31Z",
+   "hours": 32.5
+  },
+  {
+   "number": 6134,
+   "created_at": "2026-09-15T07:38:03Z",
+   "merged_at": "2026-09-15T16:39:38Z",
+   "hours": 9.03
+  },
+  {
+   "number": 6120,
+   "created_at": "2026-09-15T07:36:54Z",
+   "merged_at": "2026-09-15T16:39:34Z",
+   "hours": 9.04
+  },
+  {
+   "number": 6138,
+   "created_at": "2026-09-15T07:38:23Z",
+   "merged_at": "2026-09-15T16:17:57Z",
+   "hours": 8.66
+  },
+  {
+   "number": 6135,
+   "created_at": "2026-09-15T07:38:08Z",
+   "merged_at": "2026-09-15T16:15:13Z",
+   "hours": 8.62
+  },
+  {
+   "number": 6132,
+   "created_at": "2026-09-15T07:37:52Z",
+   "merged_at": "2026-09-15T16:11:48Z",
+   "hours": 8.57
+  },
+  {
+   "number": 6129,
+   "created_at": "2026-09-15T07:37:37Z",
+   "merged_at": "2026-09-15T16:08:21Z",
+   "hours": 8.51
+  },
+  {
+   "number": 6121,
+   "created_at": "2026-09-15T07:36:59Z",
+   "merged_at": "2026-09-15T16:00:52Z",
+   "hours": 8.4
+  },
+  {
+   "number": 6114,
+   "created_at": "2026-09-15T07:36:23Z",
+   "merged_at": "2026-09-15T15:54:14Z",
+   "hours": 8.3
+  },
+  {
+   "number": 5979,
+   "created_at": "2026-09-09T07:39:06Z",
+   "merged_at": "2026-09-11T16:03:50Z",
+   "hours": 56.41
+  },
+  {
+   "number": 5978,
+   "created_at": "2026-09-09T07:39:00Z",
+   "merged_at": "2026-09-11T16:03:41Z",
+   "hours": 56.41
+  },
+  {
+   "number": 5976,
+   "created_at": "2026-09-09T07:38:50Z",
+   "merged_at": "2026-09-11T16:03:23Z",
+   "hours": 56.41
+  },
+  {
+   "number": 5975,
+   "created_at": "2026-09-09T07:38:45Z",
+   "merged_at": "2026-09-11T16:03:14Z",
+   "hours": 56.41
+  },
+  {
+   "number": 5972,
+   "created_at": "2026-09-09T07:38:30Z",
+   "merged_at": "2026-09-11T16:02:56Z",
+   "hours": 56.41
+  },
+  {
+   "number": 5971,
+   "created_at": "2026-09-09T07:38:25Z",
+   "merged_at": "2026-09-11T16:02:47Z",
+   "hours": 56.41
+  },
+  {
+   "number": 5965,
+   "created_at": "2026-09-09T07:37:50Z",
+   "merged_at": "2026-09-11T16:01:54Z",
+   "hours": 56.4
+  },
+  {
+   "number": 5963,
+   "created_at": "2026-09-09T07:37:38Z",
+   "merged_at": "2026-09-11T16:01:37Z",
+   "hours": 56.4
+  },
+  {
+   "number": 5962,
+   "created_at": "2026-09-09T07:37:32Z",
+   "merged_at": "2026-09-11T16:01:28Z",
+   "hours": 56.4
+  },
+  {
+   "number": 5961,
+   "created_at": "2026-09-09T07:37:26Z",
+   "merged_at": "2026-09-11T16:01:18Z",
+   "hours": 56.4
+  },
+  {
+   "number": 5959,
+   "created_at": "2026-09-09T07:37:16Z",
+   "merged_at": "2026-09-11T16:01:01Z",
+   "hours": 56.4
+  },
+  {
+   "number": 5958,
+   "created_at": "2026-09-09T07:37:11Z",
+   "merged_at": "2026-09-11T16:00:52Z",
+   "hours": 56.39
+  },
+  {
+   "number": 5957,
+   "created_at": "2026-09-09T07:37:05Z",
+   "merged_at": "2026-09-11T16:00:43Z",
+   "hours": 56.39
+  },
+  {
+   "number": 5955,
+   "created_at": "2026-09-09T07:36:53Z",
+   "merged_at": "2026-09-11T16:00:25Z",
+   "hours": 56.39
+  },
+  {
+   "number": 5953,
+   "created_at": "2026-09-09T07:36:41Z",
+   "merged_at": "2026-09-11T16:00:05Z",
+   "hours": 56.39
+  },
+  {
+   "number": 5952,
+   "created_at": "2026-09-09T07:36:35Z",
+   "merged_at": "2026-09-11T15:59:57Z",
+   "hours": 56.39
+  },
+  {
+   "number": 5950,
+   "created_at": "2026-09-09T07:36:25Z",
+   "merged_at": "2026-09-11T15:59:38Z",
+   "hours": 56.39
+  },
+  {
+   "number": 5949,
+   "created_at": "2026-09-09T07:36:20Z",
+   "merged_at": "2026-09-11T15:59:29Z",
+   "hours": 56.39
+  },
+  {
+   "number": 5943,
+   "created_at": "2026-09-09T07:35:47Z",
+   "merged_at": "2026-09-11T15:58:31Z",
+   "hours": 56.38
+  },
+  {
+   "number": 5941,
+   "created_at": "2026-09-09T07:35:35Z",
+   "merged_at": "2026-09-11T15:58:12Z",
+   "hours": 56.38
+  },
+  {
+   "number": 5939,
+   "created_at": "2026-09-09T07:35:23Z",
+   "merged_at": "2026-09-11T15:57:53Z",
+   "hours": 56.38
+  },
+  {
+   "number": 5937,
+   "created_at": "2026-09-09T07:35:11Z",
+   "merged_at": "2026-09-11T15:57:36Z",
+   "hours": 56.37
+  },
+  {
+   "number": 5936,
+   "created_at": "2026-09-09T07:35:05Z",
+   "merged_at": "2026-09-11T15:57:27Z",
+   "hours": 56.37
+  },
+  {
+   "number": 6101,
+   "created_at": "2026-09-14T07:45:58Z",
+   "merged_at": "2026-09-14T17:16:24Z",
+   "hours": 9.51
+  },
+  {
+   "number": 5929,
+   "created_at": "2026-09-08T14:33:06Z",
+   "merged_at": "2026-09-08T15:09:31Z",
+   "hours": 0.61
+  },
+  {
+   "number": 5924,
+   "created_at": "2026-09-08T07:34:05Z",
+   "merged_at": "2026-09-08T15:09:24Z",
+   "hours": 7.59
+  },
+  {
+   "number": 5922,
+   "created_at": "2026-09-08T07:33:56Z",
+   "merged_at": "2026-09-08T15:09:15Z",
+   "hours": 7.59
+  },
+  {
+   "number": 5918,
+   "created_at": "2026-09-08T07:33:37Z",
+   "merged_at": "2026-09-08T15:08:47Z",
+   "hours": 7.59
+  },
+  {
+   "number": 5917,
+   "created_at": "2026-09-08T07:33:33Z",
+   "merged_at": "2026-09-08T15:08:40Z",
+   "hours": 7.59
+  },
+  {
+   "number": 6090,
+   "created_at": "2026-09-13T07:31:50Z",
+   "merged_at": "2026-09-13T13:29:42Z",
+   "hours": 5.96
+  },
+  {
+   "number": 5912,
+   "created_at": "2026-09-07T07:42:46Z",
+   "merged_at": "2026-09-08T15:08:33Z",
+   "hours": 31.43
+  },
+  {
+   "number": 6084,
+   "created_at": "2026-09-12T07:37:50Z",
+   "merged_at": "2026-09-13T13:29:37Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6079,
+   "created_at": "2026-09-12T07:37:23Z",
+   "merged_at": "2026-09-13T13:29:10Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6074,
+   "created_at": "2026-09-12T07:36:54Z",
+   "merged_at": "2026-09-13T13:28:44Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6066,
+   "created_at": "2026-09-12T07:36:09Z",
+   "merged_at": "2026-09-13T13:27:59Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6065,
+   "created_at": "2026-09-12T07:36:03Z",
+   "merged_at": "2026-09-13T13:27:54Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6063,
+   "created_at": "2026-09-12T07:35:51Z",
+   "merged_at": "2026-09-13T13:27:45Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6062,
+   "created_at": "2026-09-12T07:35:46Z",
+   "merged_at": "2026-09-13T13:27:40Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6047,
+   "created_at": "2026-09-12T07:34:20Z",
+   "merged_at": "2026-09-13T13:26:28Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6043,
+   "created_at": "2026-09-12T07:33:59Z",
+   "merged_at": "2026-09-13T13:26:09Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6042,
+   "created_at": "2026-09-12T07:33:52Z",
+   "merged_at": "2026-09-13T13:26:04Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6037,
+   "created_at": "2026-09-12T07:33:23Z",
+   "merged_at": "2026-09-13T13:25:36Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6033,
+   "created_at": "2026-09-12T07:33:01Z",
+   "merged_at": "2026-09-13T13:25:17Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6242,
+   "created_at": "2026-09-17T07:41:12Z",
+   "merged_at": "2026-09-17T14:52:55Z",
+   "hours": 7.2
+  },
+  {
+   "number": 6244,
+   "created_at": "2026-09-17T07:41:22Z",
+   "merged_at": "2026-09-17T14:52:21Z",
+   "hours": 7.18
+  },
+  {
+   "number": 6239,
+   "created_at": "2026-09-17T07:40:56Z",
+   "merged_at": "2026-09-17T14:52:45Z",
+   "hours": 7.2
+  },
+  {
+   "number": 6233,
+   "created_at": "2026-09-17T07:40:23Z",
+   "merged_at": "2026-09-17T14:53:17Z",
+   "hours": 7.21
+  },
+  {
+   "number": 6206,
+   "created_at": "2026-09-17T07:37:58Z",
+   "merged_at": "2026-09-17T14:55:55Z",
+   "hours": 7.3
+  },
+  {
+   "number": 6219,
+   "created_at": "2026-09-17T07:39:05Z",
+   "merged_at": "2026-09-17T14:54:36Z",
+   "hours": 7.26
+  },
+  {
+   "number": 6204,
+   "created_at": "2026-09-17T07:37:47Z",
+   "merged_at": "2026-09-17T14:55:42Z",
+   "hours": 7.3
+  },
+  {
+   "number": 6201,
+   "created_at": "2026-09-17T07:37:32Z",
+   "merged_at": "2026-09-17T14:55:58Z",
+   "hours": 7.31
+  },
+  {
+   "number": 6202,
+   "created_at": "2026-09-17T07:37:37Z",
+   "merged_at": "2026-09-17T14:55:48Z",
+   "hours": 7.3
+  },
+  {
+   "number": 5891,
+   "created_at": "2026-09-05T07:33:08Z",
+   "merged_at": "2026-09-08T15:08:21Z",
+   "hours": 79.59
+  },
+  {
+   "number": 5889,
+   "created_at": "2026-09-05T07:32:59Z",
+   "merged_at": "2026-09-08T15:08:10Z",
+   "hours": 79.59
+  },
+  {
+   "number": 5888,
+   "created_at": "2026-09-05T07:32:53Z",
+   "merged_at": "2026-09-08T15:08:05Z",
+   "hours": 79.59
+  },
+  {
+   "number": 5887,
+   "created_at": "2026-09-05T07:32:48Z",
+   "merged_at": "2026-09-08T15:07:58Z",
+   "hours": 79.59
+  },
+  {
+   "number": 5886,
+   "created_at": "2026-09-05T07:32:43Z",
+   "merged_at": "2026-09-08T15:07:52Z",
+   "hours": 79.59
+  },
+  {
+   "number": 5884,
+   "created_at": "2026-09-05T07:32:36Z",
+   "merged_at": "2026-09-08T15:07:41Z",
+   "hours": 79.58
+  },
+  {
+   "number": 5882,
+   "created_at": "2026-09-05T07:32:27Z",
+   "merged_at": "2026-09-08T15:07:28Z",
+   "hours": 79.58
+  },
+  {
+   "number": 5881,
+   "created_at": "2026-09-05T07:32:22Z",
+   "merged_at": "2026-09-08T15:07:23Z",
+   "hours": 79.58
+  },
+  {
+   "number": 5871,
+   "created_at": "2026-09-05T07:31:38Z",
+   "merged_at": "2026-09-08T15:06:27Z",
+   "hours": 79.58
+  },
+  {
+   "number": 5869,
+   "created_at": "2026-09-05T07:31:27Z",
+   "merged_at": "2026-09-08T15:06:14Z",
+   "hours": 79.58
+  },
+  {
+   "number": 6180,
+   "created_at": "2026-09-16T07:40:24Z",
+   "merged_at": "2026-09-16T17:37:59Z",
+   "hours": 9.96
+  },
+  {
+   "number": 6182,
+   "created_at": "2026-09-16T07:40:37Z",
+   "merged_at": "2026-09-16T17:20:50Z",
+   "hours": 9.67
+  },
+  {
+   "number": 6174,
+   "created_at": "2026-09-16T07:39:47Z",
+   "merged_at": "2026-09-16T17:21:03Z",
+   "hours": 9.69
+  },
+  {
+   "number": 6166,
+   "created_at": "2026-09-16T07:39:01Z",
+   "merged_at": "2026-09-16T17:21:07Z",
+   "hours": 9.7
+  },
+  {
+   "number": 6168,
+   "created_at": "2026-09-16T07:39:12Z",
+   "merged_at": "2026-09-16T17:20:52Z",
+   "hours": 9.69
+  },
+  {
+   "number": 6157,
+   "created_at": "2026-09-16T07:38:07Z",
+   "merged_at": "2026-09-16T17:21:48Z",
+   "hours": 9.73
+  },
+  {
+   "number": 6158,
+   "created_at": "2026-09-16T07:38:14Z",
+   "merged_at": "2026-09-16T17:21:21Z",
+   "hours": 9.72
+  },
+  {
+   "number": 6154,
+   "created_at": "2026-09-16T07:37:48Z",
+   "merged_at": "2026-09-16T17:21:35Z",
+   "hours": 9.73
+  },
+  {
+   "number": 5861,
+   "created_at": "2026-09-04T20:52:53Z",
+   "merged_at": "2026-09-08T15:06:07Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5859,
+   "created_at": "2026-09-04T20:52:44Z",
+   "merged_at": "2026-09-08T15:05:56Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5858,
+   "created_at": "2026-09-04T20:52:40Z",
+   "merged_at": "2026-09-08T15:05:51Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5856,
+   "created_at": "2026-09-04T20:52:29Z",
+   "merged_at": "2026-09-08T15:05:42Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5855,
+   "created_at": "2026-09-04T20:52:25Z",
+   "merged_at": "2026-09-08T15:05:36Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5854,
+   "created_at": "2026-09-04T20:52:21Z",
+   "merged_at": "2026-09-08T15:05:30Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5851,
+   "created_at": "2026-09-04T20:52:06Z",
+   "merged_at": "2026-09-08T15:05:13Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5848,
+   "created_at": "2026-09-04T20:51:52Z",
+   "merged_at": "2026-09-08T15:04:55Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5844,
+   "created_at": "2026-09-04T20:51:32Z",
+   "merged_at": "2026-09-08T15:04:32Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5843,
+   "created_at": "2026-09-04T20:51:27Z",
+   "merged_at": "2026-09-08T15:04:26Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5841,
+   "created_at": "2026-09-04T20:51:16Z",
+   "merged_at": "2026-09-08T15:04:19Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5839,
+   "created_at": "2026-09-04T20:51:05Z",
+   "merged_at": "2026-09-08T15:04:07Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5837,
+   "created_at": "2026-09-04T20:50:55Z",
+   "merged_at": "2026-09-08T15:03:55Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5836,
+   "created_at": "2026-09-04T20:50:50Z",
+   "merged_at": "2026-09-08T15:03:50Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5835,
+   "created_at": "2026-09-04T20:50:43Z",
+   "merged_at": "2026-09-08T15:03:43Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5834,
+   "created_at": "2026-09-04T20:50:37Z",
+   "merged_at": "2026-09-08T15:03:38Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5833,
+   "created_at": "2026-09-04T20:50:31Z",
+   "merged_at": "2026-09-08T15:03:32Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5832,
+   "created_at": "2026-09-04T20:50:25Z",
+   "merged_at": "2026-09-08T15:03:26Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5829,
+   "created_at": "2026-09-04T20:50:04Z",
+   "merged_at": "2026-09-08T15:03:09Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5826,
+   "created_at": "2026-09-04T20:49:45Z",
+   "merged_at": "2026-09-08T15:02:50Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5825,
+   "created_at": "2026-09-04T20:49:39Z",
+   "merged_at": "2026-09-08T15:02:44Z",
+   "hours": 90.22
+  },
+  {
+   "number": 6017,
+   "created_at": "2026-09-11T07:34:30Z",
+   "merged_at": "2026-09-11T16:07:57Z",
+   "hours": 8.56
+  },
+  {
+   "number": 6016,
+   "created_at": "2026-09-11T07:34:23Z",
+   "merged_at": "2026-09-11T16:07:49Z",
+   "hours": 8.56
+  },
+  {
+   "number": 6011,
+   "created_at": "2026-09-11T07:33:56Z",
+   "merged_at": "2026-09-11T16:07:09Z",
+   "hours": 8.55
+  },
+  {
+   "number": 6007,
+   "created_at": "2026-09-11T07:33:37Z",
+   "merged_at": "2026-09-11T16:06:37Z",
+   "hours": 8.55
+  },
+  {
+   "number": 6300,
+   "created_at": "2026-09-24T14:54:49Z",
+   "merged_at": "2026-09-24T15:15:25Z",
+   "hours": 0.34
+  },
+  {
+   "number": 6002,
+   "created_at": "2026-09-10T07:35:35Z",
+   "merged_at": "2026-09-11T16:06:21Z",
+   "hours": 32.51
+  },
+  {
+   "number": 6001,
+   "created_at": "2026-09-10T07:35:30Z",
+   "merged_at": "2026-09-11T16:06:12Z",
+   "hours": 32.51
+  },
+  {
+   "number": 6000,
+   "created_at": "2026-09-10T07:35:25Z",
+   "merged_at": "2026-09-11T16:06:03Z",
+   "hours": 32.51
+  },
+  {
+   "number": 5995,
+   "created_at": "2026-09-10T07:34:58Z",
+   "merged_at": "2026-09-11T16:05:21Z",
+   "hours": 32.51
+  },
+  {
+   "number": 5992,
+   "created_at": "2026-09-10T07:34:44Z",
+   "merged_at": "2026-09-11T16:04:55Z",
+   "hours": 32.5
+  },
+  {
+   "number": 5991,
+   "created_at": "2026-09-10T07:34:39Z",
+   "merged_at": "2026-09-11T16:04:47Z",
+   "hours": 32.5
+  },
+  {
+   "number": 5985,
+   "created_at": "2026-09-10T07:34:10Z",
+   "merged_at": "2026-09-11T16:03:57Z",
+   "hours": 32.5
+  },
+  {
+   "number": 6141,
+   "created_at": "2026-09-15T07:38:37Z",
+   "merged_at": "2026-09-15T16:19:59Z",
+   "hours": 8.69
+  },
+  {
+   "number": 6137,
+   "created_at": "2026-09-15T07:38:18Z",
+   "merged_at": "2026-09-15T16:17:17Z",
+   "hours": 8.65
+  },
+  {
+   "number": 6131,
+   "created_at": "2026-09-15T07:37:47Z",
+   "merged_at": "2026-09-15T16:11:06Z",
+   "hours": 8.56
+  },
+  {
+   "number": 6130,
+   "created_at": "2026-09-15T07:37:42Z",
+   "merged_at": "2026-09-15T16:09:41Z",
+   "hours": 8.53
+  },
+  {
+   "number": 6122,
+   "created_at": "2026-09-15T07:37:04Z",
+   "merged_at": "2026-09-15T16:01:38Z",
+   "hours": 8.41
+  },
+  {
+   "number": 6119,
+   "created_at": "2026-09-15T07:36:49Z",
+   "merged_at": "2026-09-15T15:58:24Z",
+   "hours": 8.36
+  },
+  {
+   "number": 6118,
+   "created_at": "2026-09-15T07:36:44Z",
+   "merged_at": "2026-09-15T15:57:36Z",
+   "hours": 8.35
+  },
+  {
+   "number": 6115,
+   "created_at": "2026-09-15T07:36:29Z",
+   "merged_at": "2026-09-15T15:54:53Z",
+   "hours": 8.31
+  },
+  {
+   "number": 5970,
+   "created_at": "2026-09-09T07:38:19Z",
+   "merged_at": "2026-09-11T16:02:38Z",
+   "hours": 56.41
+  },
+  {
+   "number": 5966,
+   "created_at": "2026-09-09T07:37:56Z",
+   "merged_at": "2026-09-11T16:02:03Z",
+   "hours": 56.4
+  },
+  {
+   "number": 5964,
+   "created_at": "2026-09-09T07:37:44Z",
+   "merged_at": "2026-09-11T16:01:45Z",
+   "hours": 56.4
+  },
+  {
+   "number": 5960,
+   "created_at": "2026-09-09T07:37:21Z",
+   "merged_at": "2026-09-11T16:01:10Z",
+   "hours": 56.4
+  },
+  {
+   "number": 5954,
+   "created_at": "2026-09-09T07:36:47Z",
+   "merged_at": "2026-09-11T16:00:15Z",
+   "hours": 56.39
+  },
+  {
+   "number": 5947,
+   "created_at": "2026-09-09T07:36:09Z",
+   "merged_at": "2026-09-11T15:59:09Z",
+   "hours": 56.38
+  },
+  {
+   "number": 5946,
+   "created_at": "2026-09-09T07:36:04Z",
+   "merged_at": "2026-09-11T15:58:59Z",
+   "hours": 56.38
+  },
+  {
+   "number": 5945,
+   "created_at": "2026-09-09T07:35:58Z",
+   "merged_at": "2026-09-11T15:58:50Z",
+   "hours": 56.38
+  },
+  {
+   "number": 5940,
+   "created_at": "2026-09-09T07:35:29Z",
+   "merged_at": "2026-09-11T15:58:03Z",
+   "hours": 56.38
+  },
+  {
+   "number": 5935,
+   "created_at": "2026-09-09T07:35:00Z",
+   "merged_at": "2026-09-11T15:57:19Z",
+   "hours": 56.37
+  },
+  {
+   "number": 5821,
+   "created_at": "2026-09-04T20:05:23Z",
+   "merged_at": "2026-09-04T20:25:00Z",
+   "hours": 0.33
+  },
+  {
+   "number": 5820,
+   "created_at": "2026-09-04T20:04:37Z",
+   "merged_at": "2026-09-04T20:24:50Z",
+   "hours": 0.34
+  },
+  {
+   "number": 6104,
+   "created_at": "2026-09-14T07:46:15Z",
+   "merged_at": "2026-09-14T17:18:23Z",
+   "hours": 9.54
+  },
+  {
+   "number": 6099,
+   "created_at": "2026-09-14T07:45:47Z",
+   "merged_at": "2026-09-14T17:14:05Z",
+   "hours": 9.47
+  },
+  {
+   "number": 5816,
+   "created_at": "2026-09-04T07:37:37Z",
+   "merged_at": "2026-09-04T20:45:10Z",
+   "hours": 13.13
+  },
+  {
+   "number": 5814,
+   "created_at": "2026-09-04T07:37:24Z",
+   "merged_at": "2026-09-04T20:45:04Z",
+   "hours": 13.13
+  },
+  {
+   "number": 5812,
+   "created_at": "2026-09-04T07:37:12Z",
+   "merged_at": "2026-09-04T20:44:57Z",
+   "hours": 13.13
+  },
+  {
+   "number": 5809,
+   "created_at": "2026-09-04T07:36:52Z",
+   "merged_at": "2026-09-04T20:44:47Z",
+   "hours": 13.13
+  },
+  {
+   "number": 5808,
+   "created_at": "2026-09-04T07:36:46Z",
+   "merged_at": "2026-09-04T20:44:41Z",
+   "hours": 13.13
+  },
+  {
+   "number": 5807,
+   "created_at": "2026-09-04T07:36:39Z",
+   "merged_at": "2026-09-04T20:44:37Z",
+   "hours": 13.13
+  },
+  {
+   "number": 5806,
+   "created_at": "2026-09-04T07:36:32Z",
+   "merged_at": "2026-09-04T20:44:31Z",
+   "hours": 13.13
+  },
+  {
+   "number": 5801,
+   "created_at": "2026-09-04T07:36:03Z",
+   "merged_at": "2026-09-04T20:44:26Z",
+   "hours": 13.14
+  },
+  {
+   "number": 5799,
+   "created_at": "2026-09-04T07:35:51Z",
+   "merged_at": "2026-09-04T20:44:20Z",
+   "hours": 13.14
+  },
+  {
+   "number": 5815,
+   "created_at": "2026-09-04T07:37:31Z",
+   "merged_at": "2026-09-04T20:33:34Z",
+   "hours": 12.93
+  },
+  {
+   "number": 5804,
+   "created_at": "2026-09-04T07:36:21Z",
+   "merged_at": "2026-09-04T20:33:43Z",
+   "hours": 12.96
+  },
+  {
+   "number": 5805,
+   "created_at": "2026-09-04T07:36:27Z",
+   "merged_at": "2026-09-04T20:33:32Z",
+   "hours": 12.95
+  },
+  {
+   "number": 5803,
+   "created_at": "2026-09-04T07:36:15Z",
+   "merged_at": "2026-09-04T20:33:40Z",
+   "hours": 12.96
+  },
+  {
+   "number": 5813,
+   "created_at": "2026-09-04T07:37:17Z",
+   "merged_at": "2026-09-04T20:32:11Z",
+   "hours": 12.91
+  },
+  {
+   "number": 5810,
+   "created_at": "2026-09-04T07:36:58Z",
+   "merged_at": "2026-09-04T20:32:14Z",
+   "hours": 12.92
+  },
+  {
+   "number": 5795,
+   "created_at": "2026-09-04T07:35:26Z",
+   "merged_at": "2026-09-04T20:33:28Z",
+   "hours": 12.97
+  },
+  {
+   "number": 5792,
+   "created_at": "2026-09-04T07:35:08Z",
+   "merged_at": "2026-09-04T20:32:17Z",
+   "hours": 12.95
+  },
+  {
+   "number": 5780,
+   "created_at": "2026-09-03T07:35:51Z",
+   "merged_at": "2026-09-04T20:43:50Z",
+   "hours": 37.13
+  },
+  {
+   "number": 5773,
+   "created_at": "2026-09-03T07:35:17Z",
+   "merged_at": "2026-09-04T20:43:45Z",
+   "hours": 37.14
+  },
+  {
+   "number": 5772,
+   "created_at": "2026-09-03T07:35:12Z",
+   "merged_at": "2026-09-04T20:43:40Z",
+   "hours": 37.14
+  },
+  {
+   "number": 5765,
+   "created_at": "2026-09-03T07:34:39Z",
+   "merged_at": "2026-09-04T20:43:30Z",
+   "hours": 37.15
+  },
+  {
+   "number": 5764,
+   "created_at": "2026-09-03T07:34:34Z",
+   "merged_at": "2026-09-04T20:43:24Z",
+   "hours": 37.15
+  },
+  {
+   "number": 5758,
+   "created_at": "2026-09-03T07:34:04Z",
+   "merged_at": "2026-09-04T20:43:13Z",
+   "hours": 37.15
+  },
+  {
+   "number": 5776,
+   "created_at": "2026-09-03T07:35:32Z",
+   "merged_at": "2026-09-04T20:34:04Z",
+   "hours": 36.98
+  },
+  {
+   "number": 5778,
+   "created_at": "2026-09-03T07:35:41Z",
+   "merged_at": "2026-09-04T20:33:49Z",
+   "hours": 36.97
+  },
+  {
+   "number": 5779,
+   "created_at": "2026-09-03T07:35:46Z",
+   "merged_at": "2026-09-04T20:33:10Z",
+   "hours": 36.96
+  },
+  {
+   "number": 5774,
+   "created_at": "2026-09-03T07:35:23Z",
+   "merged_at": "2026-09-04T20:33:19Z",
+   "hours": 36.97
+  },
+  {
+   "number": 5770,
+   "created_at": "2026-09-03T07:35:03Z",
+   "merged_at": "2026-09-04T20:33:25Z",
+   "hours": 36.97
+  },
+  {
+   "number": 5767,
+   "created_at": "2026-09-03T07:34:49Z",
+   "merged_at": "2026-09-04T20:33:38Z",
+   "hours": 36.98
+  },
+  {
+   "number": 5766,
+   "created_at": "2026-09-03T07:34:45Z",
+   "merged_at": "2026-09-04T20:33:03Z",
+   "hours": 36.97
+  },
+  {
+   "number": 5752,
+   "created_at": "2026-09-03T07:33:35Z",
+   "merged_at": "2026-09-04T20:33:52Z",
+   "hours": 37.0
+  },
+  {
+   "number": 5759,
+   "created_at": "2026-09-03T07:34:09Z",
+   "merged_at": "2026-09-04T20:33:06Z",
+   "hours": 36.98
+  },
+  {
+   "number": 5754,
+   "created_at": "2026-09-03T07:33:45Z",
+   "merged_at": "2026-09-04T20:32:59Z",
+   "hours": 36.99
+  },
+  {
+   "number": 5923,
+   "created_at": "2026-09-08T07:34:01Z",
+   "merged_at": "2026-09-08T15:09:21Z",
+   "hours": 7.59
+  },
+  {
+   "number": 5920,
+   "created_at": "2026-09-08T07:33:47Z",
+   "merged_at": "2026-09-08T15:09:01Z",
+   "hours": 7.59
+  },
+  {
+   "number": 5919,
+   "created_at": "2026-09-08T07:33:42Z",
+   "merged_at": "2026-09-08T15:08:53Z",
+   "hours": 7.59
+  },
+  {
+   "number": 6234,
+   "created_at": "2026-09-17T07:40:29Z",
+   "merged_at": "2026-09-17T14:53:23Z",
+   "hours": 7.21
+  },
+  {
+   "number": 6083,
+   "created_at": "2026-09-12T07:37:45Z",
+   "merged_at": "2026-09-13T13:29:32Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6078,
+   "created_at": "2026-09-12T07:37:17Z",
+   "merged_at": "2026-09-13T13:29:05Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6075,
+   "created_at": "2026-09-12T07:37:00Z",
+   "merged_at": "2026-09-13T13:28:49Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6071,
+   "created_at": "2026-09-12T07:36:38Z",
+   "merged_at": "2026-09-13T13:28:26Z",
+   "hours": 29.86
+  },
+  {
+   "number": 6058,
+   "created_at": "2026-09-12T07:35:24Z",
+   "merged_at": "2026-09-13T13:27:19Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6057,
+   "created_at": "2026-09-12T07:35:18Z",
+   "merged_at": "2026-09-13T13:27:14Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6041,
+   "created_at": "2026-09-12T07:33:46Z",
+   "merged_at": "2026-09-13T13:25:59Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6040,
+   "created_at": "2026-09-12T07:33:41Z",
+   "merged_at": "2026-09-13T13:25:54Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6038,
+   "created_at": "2026-09-12T07:33:28Z",
+   "merged_at": "2026-09-13T13:25:42Z",
+   "hours": 29.87
+  },
+  {
+   "number": 6034,
+   "created_at": "2026-09-12T07:33:06Z",
+   "merged_at": "2026-09-13T13:25:22Z",
+   "hours": 29.87
+  },
+  {
+   "number": 5740,
+   "created_at": "2026-09-02T12:32:06Z",
+   "merged_at": "2026-09-02T12:39:04Z",
+   "hours": 0.12
+  },
+  {
+   "number": 5739,
+   "created_at": "2026-09-02T12:11:18Z",
+   "merged_at": "2026-09-02T12:21:26Z",
+   "hours": 0.17
+  },
+  {
+   "number": 5736,
+   "created_at": "2026-09-02T07:35:56Z",
+   "merged_at": "2026-09-02T11:43:38Z",
+   "hours": 4.13
+  },
+  {
+   "number": 5735,
+   "created_at": "2026-09-02T07:35:50Z",
+   "merged_at": "2026-09-02T11:43:18Z",
+   "hours": 4.12
+  },
+  {
+   "number": 5734,
+   "created_at": "2026-09-02T07:35:46Z",
+   "merged_at": "2026-09-02T11:42:58Z",
+   "hours": 4.12
+  },
+  {
+   "number": 5732,
+   "created_at": "2026-09-02T07:35:37Z",
+   "merged_at": "2026-09-02T11:42:19Z",
+   "hours": 4.11
+  },
+  {
+   "number": 5731,
+   "created_at": "2026-09-02T07:35:32Z",
+   "merged_at": "2026-09-02T11:42:01Z",
+   "hours": 4.11
+  },
+  {
+   "number": 5890,
+   "created_at": "2026-09-05T07:33:04Z",
+   "merged_at": "2026-09-08T15:08:16Z",
+   "hours": 79.59
+  },
+  {
+   "number": 5885,
+   "created_at": "2026-09-05T07:32:39Z",
+   "merged_at": "2026-09-08T15:07:47Z",
+   "hours": 79.59
+  },
+  {
+   "number": 5883,
+   "created_at": "2026-09-05T07:32:31Z",
+   "merged_at": "2026-09-08T15:07:34Z",
+   "hours": 79.58
+  },
+  {
+   "number": 5873,
+   "created_at": "2026-09-05T07:31:47Z",
+   "merged_at": "2026-09-08T15:06:39Z",
+   "hours": 79.58
+  },
+  {
+   "number": 5872,
+   "created_at": "2026-09-05T07:31:43Z",
+   "merged_at": "2026-09-08T15:06:33Z",
+   "hours": 79.58
+  },
+  {
+   "number": 5870,
+   "created_at": "2026-09-05T07:31:33Z",
+   "merged_at": "2026-09-08T15:06:20Z",
+   "hours": 79.58
+  },
+  {
+   "number": 6013,
+   "created_at": "2026-09-11T07:34:06Z",
+   "merged_at": "2026-09-11T16:07:25Z",
+   "hours": 8.56
+  },
+  {
+   "number": 6010,
+   "created_at": "2026-09-11T07:33:51Z",
+   "merged_at": "2026-09-11T16:07:01Z",
+   "hours": 8.55
+  },
+  {
+   "number": 5860,
+   "created_at": "2026-09-04T20:52:48Z",
+   "merged_at": "2026-09-08T15:06:02Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5849,
+   "created_at": "2026-09-04T20:51:57Z",
+   "merged_at": "2026-09-08T15:05:01Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5840,
+   "created_at": "2026-09-04T20:51:11Z",
+   "merged_at": "2026-09-08T15:04:13Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5838,
+   "created_at": "2026-09-04T20:51:00Z",
+   "merged_at": "2026-09-08T15:04:01Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5831,
+   "created_at": "2026-09-04T20:50:18Z",
+   "merged_at": "2026-09-08T15:03:21Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5830,
+   "created_at": "2026-09-04T20:50:11Z",
+   "merged_at": "2026-09-08T15:03:14Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5827,
+   "created_at": "2026-09-04T20:49:51Z",
+   "merged_at": "2026-09-08T15:02:56Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5722,
+   "created_at": "2026-09-01T07:36:03Z",
+   "merged_at": "2026-09-01T15:44:22Z",
+   "hours": 8.14
+  },
+  {
+   "number": 6003,
+   "created_at": "2026-09-10T07:35:40Z",
+   "merged_at": "2026-09-11T16:06:29Z",
+   "hours": 32.51
+  },
+  {
+   "number": 5987,
+   "created_at": "2026-09-10T07:34:19Z",
+   "merged_at": "2026-09-11T16:04:14Z",
+   "hours": 32.5
+  },
+  {
+   "number": 5986,
+   "created_at": "2026-09-10T07:34:14Z",
+   "merged_at": "2026-09-11T16:04:05Z",
+   "hours": 32.5
+  },
+  {
+   "number": 5977,
+   "created_at": "2026-09-09T07:38:54Z",
+   "merged_at": "2026-09-11T16:03:32Z",
+   "hours": 56.41
+  },
+  {
+   "number": 5973,
+   "created_at": "2026-09-09T07:38:35Z",
+   "merged_at": "2026-09-11T16:03:05Z",
+   "hours": 56.41
+  },
+  {
+   "number": 5969,
+   "created_at": "2026-09-09T07:38:13Z",
+   "merged_at": "2026-09-11T16:02:30Z",
+   "hours": 56.4
+  },
+  {
+   "number": 5967,
+   "created_at": "2026-09-09T07:38:02Z",
+   "merged_at": "2026-09-11T16:02:12Z",
+   "hours": 56.4
+  },
+  {
+   "number": 5956,
+   "created_at": "2026-09-09T07:36:59Z",
+   "merged_at": "2026-09-11T16:00:34Z",
+   "hours": 56.39
+  },
+  {
+   "number": 5951,
+   "created_at": "2026-09-09T07:36:29Z",
+   "merged_at": "2026-09-11T15:59:48Z",
+   "hours": 56.39
+  },
+  {
+   "number": 5948,
+   "created_at": "2026-09-09T07:36:15Z",
+   "merged_at": "2026-09-11T15:59:19Z",
+   "hours": 56.38
+  },
+  {
+   "number": 5944,
+   "created_at": "2026-09-09T07:35:53Z",
+   "merged_at": "2026-09-11T15:58:41Z",
+   "hours": 56.38
+  },
+  {
+   "number": 5942,
+   "created_at": "2026-09-09T07:35:41Z",
+   "merged_at": "2026-09-11T15:58:22Z",
+   "hours": 56.38
+  },
+  {
+   "number": 5938,
+   "created_at": "2026-09-09T07:35:17Z",
+   "merged_at": "2026-09-11T15:57:45Z",
+   "hours": 56.37
+  },
+  {
+   "number": 6096,
+   "created_at": "2026-09-13T23:06:04Z",
+   "merged_at": "2026-09-13T23:08:22Z",
+   "hours": 0.04
+  },
+  {
+   "number": 5811,
+   "created_at": "2026-09-04T07:37:05Z",
+   "merged_at": "2026-09-04T20:44:52Z",
+   "hours": 13.13
+  },
+  {
+   "number": 5794,
+   "created_at": "2026-09-04T07:35:20Z",
+   "merged_at": "2026-09-04T20:44:10Z",
+   "hours": 13.15
+  },
+  {
+   "number": 5793,
+   "created_at": "2026-09-04T07:35:14Z",
+   "merged_at": "2026-09-04T20:44:05Z",
+   "hours": 13.15
+  },
+  {
+   "number": 5790,
+   "created_at": "2026-09-04T07:34:55Z",
+   "merged_at": "2026-09-04T20:44:00Z",
+   "hours": 13.15
+  },
+  {
+   "number": 5817,
+   "created_at": "2026-09-04T07:37:44Z",
+   "merged_at": "2026-09-04T20:33:13Z",
+   "hours": 12.92
+  },
+  {
+   "number": 5796,
+   "created_at": "2026-09-04T07:35:32Z",
+   "merged_at": "2026-09-04T20:33:16Z",
+   "hours": 12.96
+  },
+  {
+   "number": 5800,
+   "created_at": "2026-09-04T07:35:56Z",
+   "merged_at": "2026-09-04T20:32:46Z",
+   "hours": 12.95
+  },
+  {
+   "number": 5802,
+   "created_at": "2026-09-04T07:36:09Z",
+   "merged_at": "2026-09-04T20:32:27Z",
+   "hours": 12.94
+  },
+  {
+   "number": 5791,
+   "created_at": "2026-09-04T07:35:01Z",
+   "merged_at": "2026-09-04T20:32:42Z",
+   "hours": 12.96
+  },
+  {
+   "number": 5751,
+   "created_at": "2026-09-03T07:33:30Z",
+   "merged_at": "2026-09-04T20:42:57Z",
+   "hours": 37.16
+  },
+  {
+   "number": 5756,
+   "created_at": "2026-09-03T07:33:55Z",
+   "merged_at": "2026-09-04T20:43:08Z",
+   "hours": 37.15
+  },
+  {
+   "number": 5771,
+   "created_at": "2026-09-03T07:35:08Z",
+   "merged_at": "2026-09-04T20:32:23Z",
+   "hours": 36.95
+  },
+  {
+   "number": 5755,
+   "created_at": "2026-09-03T07:33:50Z",
+   "merged_at": "2026-09-04T20:32:37Z",
+   "hours": 36.98
+  },
+  {
+   "number": 5785,
+   "created_at": "2026-09-03T23:09:47Z",
+   "merged_at": "2026-09-03T23:14:14Z",
+   "hours": 0.07
+  },
+  {
+   "number": 5784,
+   "created_at": "2026-09-03T23:02:50Z",
+   "merged_at": "2026-09-03T23:04:58Z",
+   "hours": 0.04
+  },
+  {
+   "number": 5921,
+   "created_at": "2026-09-08T07:33:51Z",
+   "merged_at": "2026-09-08T15:09:08Z",
+   "hours": 7.59
+  },
+  {
+   "number": 6072,
+   "created_at": "2026-09-12T07:36:44Z",
+   "merged_at": "2026-09-13T13:28:32Z",
+   "hours": 29.86
+  },
+  {
+   "number": 5763,
+   "created_at": "2026-09-03T07:34:30Z",
+   "merged_at": "2026-09-03T22:55:20Z",
+   "hours": 15.35
+  },
+  {
+   "number": 5762,
+   "created_at": "2026-09-03T07:34:25Z",
+   "merged_at": "2026-09-03T22:55:12Z",
+   "hours": 15.35
+  },
+  {
+   "number": 5911,
+   "created_at": "2026-09-07T07:42:41Z",
+   "merged_at": "2026-09-08T15:08:27Z",
+   "hours": 31.43
+  },
+  {
+   "number": 5741,
+   "created_at": "2026-09-02T12:43:20Z",
+   "merged_at": "2026-09-02T12:47:36Z",
+   "hours": 0.07
+  },
+  {
+   "number": 5737,
+   "created_at": "2026-09-02T07:36:01Z",
+   "merged_at": "2026-09-02T10:56:55Z",
+   "hours": 3.35
+  },
+  {
+   "number": 6008,
+   "created_at": "2026-09-11T07:33:42Z",
+   "merged_at": "2026-09-11T16:06:44Z",
+   "hours": 8.55
+  },
+  {
+   "number": 5879,
+   "created_at": "2026-09-05T07:32:14Z",
+   "merged_at": "2026-09-08T15:07:11Z",
+   "hours": 79.58
+  },
+  {
+   "number": 5878,
+   "created_at": "2026-09-05T07:32:10Z",
+   "merged_at": "2026-09-08T15:07:04Z",
+   "hours": 79.58
+  },
+  {
+   "number": 5877,
+   "created_at": "2026-09-05T07:32:06Z",
+   "merged_at": "2026-09-08T15:06:59Z",
+   "hours": 79.58
+  },
+  {
+   "number": 5876,
+   "created_at": "2026-09-05T07:32:02Z",
+   "merged_at": "2026-09-08T15:06:53Z",
+   "hours": 79.58
+  },
+  {
+   "number": 5875,
+   "created_at": "2026-09-05T07:31:56Z",
+   "merged_at": "2026-09-08T15:06:50Z",
+   "hours": 79.58
+  },
+  {
+   "number": 5874,
+   "created_at": "2026-09-05T07:31:52Z",
+   "merged_at": "2026-09-08T15:06:45Z",
+   "hours": 79.58
+  },
+  {
+   "number": 5857,
+   "created_at": "2026-09-04T20:52:34Z",
+   "merged_at": "2026-09-08T15:05:48Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5853,
+   "created_at": "2026-09-04T20:52:16Z",
+   "merged_at": "2026-09-08T15:05:25Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5852,
+   "created_at": "2026-09-04T20:52:11Z",
+   "merged_at": "2026-09-08T15:05:19Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5850,
+   "created_at": "2026-09-04T20:52:01Z",
+   "merged_at": "2026-09-08T15:05:07Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5847,
+   "created_at": "2026-09-04T20:51:47Z",
+   "merged_at": "2026-09-08T15:04:49Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5845,
+   "created_at": "2026-09-04T20:51:37Z",
+   "merged_at": "2026-09-08T15:04:38Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5828,
+   "created_at": "2026-09-04T20:49:57Z",
+   "merged_at": "2026-09-08T15:03:02Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5968,
+   "created_at": "2026-09-09T07:38:08Z",
+   "merged_at": "2026-09-11T16:02:21Z",
+   "hours": 56.4
+  },
+  {
+   "number": 6241,
+   "created_at": "2026-09-17T07:41:06Z",
+   "merged_at": "2026-09-17T14:52:42Z",
+   "hours": 7.19
+  },
+  {
+   "number": 5798,
+   "created_at": "2026-09-04T07:35:45Z",
+   "merged_at": "2026-09-04T20:44:15Z",
+   "hours": 13.14
+  },
+  {
+   "number": 5797,
+   "created_at": "2026-09-04T07:35:38Z",
+   "merged_at": "2026-09-04T20:32:55Z",
+   "hours": 12.95
+  },
+  {
+   "number": 5789,
+   "created_at": "2026-09-04T07:34:50Z",
+   "merged_at": "2026-09-04T20:32:20Z",
+   "hours": 12.96
+  },
+  {
+   "number": 6046,
+   "created_at": "2026-09-12T07:34:15Z",
+   "merged_at": "2026-09-13T13:26:23Z",
+   "hours": 29.87
+  },
+  {
+   "number": 5769,
+   "created_at": "2026-09-03T07:34:58Z",
+   "merged_at": "2026-09-04T20:43:35Z",
+   "hours": 37.14
+  },
+  {
+   "number": 5760,
+   "created_at": "2026-09-03T07:34:14Z",
+   "merged_at": "2026-09-04T20:43:19Z",
+   "hours": 37.15
+  },
+  {
+   "number": 5753,
+   "created_at": "2026-09-03T07:33:40Z",
+   "merged_at": "2026-09-04T20:43:02Z",
+   "hours": 37.16
+  },
+  {
+   "number": 5775,
+   "created_at": "2026-09-03T07:35:27Z",
+   "merged_at": "2026-09-04T20:34:00Z",
+   "hours": 36.98
+  },
+  {
+   "number": 5777,
+   "created_at": "2026-09-03T07:35:36Z",
+   "merged_at": "2026-09-04T20:33:23Z",
+   "hours": 36.96
+  },
+  {
+   "number": 5757,
+   "created_at": "2026-09-03T07:34:00Z",
+   "merged_at": "2026-09-04T20:32:32Z",
+   "hours": 36.98
+  },
+  {
+   "number": 5783,
+   "created_at": "2026-09-03T23:02:17Z",
+   "merged_at": "2026-09-03T23:06:55Z",
+   "hours": 0.08
+  },
+  {
+   "number": 5761,
+   "created_at": "2026-09-03T07:34:19Z",
+   "merged_at": "2026-09-03T22:55:06Z",
+   "hours": 15.35
+  },
+  {
+   "number": 5733,
+   "created_at": "2026-09-02T07:35:42Z",
+   "merged_at": "2026-09-02T11:42:38Z",
+   "hours": 4.12
+  },
+  {
+   "number": 5846,
+   "created_at": "2026-09-04T20:51:42Z",
+   "merged_at": "2026-09-08T15:04:43Z",
+   "hours": 90.22
+  },
+  {
+   "number": 5988,
+   "created_at": "2026-09-10T07:34:24Z",
+   "merged_at": "2026-09-11T16:04:22Z",
+   "hours": 32.5
+  },
+  {
+   "number": 5721,
+   "created_at": "2026-09-01T07:35:57Z",
+   "merged_at": "2026-09-02T11:41:41Z",
+   "hours": 28.1
+  },
+  {
+   "number": 5719,
+   "created_at": "2026-09-01T07:35:44Z",
+   "merged_at": "2026-09-02T11:40:59Z",
+   "hours": 28.09
+  },
+  {
+   "number": 5788,
+   "created_at": "2026-09-04T07:34:43Z",
+   "merged_at": "2026-09-04T20:43:55Z",
+   "hours": 13.15
+  },
+  {
+   "number": 6020,
+   "created_at": "2026-09-11T07:34:47Z",
+   "merged_at": "2026-09-11T16:08:21Z",
+   "hours": 8.56
+  },
+  {
+   "number": 5880,
+   "created_at": "2026-09-05T07:32:18Z",
+   "merged_at": "2026-09-08T15:07:17Z",
+   "hours": 79.58
+  },
+  {
+   "number": 5768,
+   "created_at": "2026-09-03T07:34:53Z",
+   "merged_at": "2026-09-04T20:32:50Z",
+   "hours": 36.97
+  },
+  {
+   "number": 5720,
+   "created_at": "2026-09-01T07:35:51Z",
+   "merged_at": "2026-09-02T11:41:21Z",
+   "hours": 28.09
+  },
+  {
+   "number": 5822,
+   "created_at": "2026-09-04T20:24:09Z",
+   "merged_at": "2026-09-04T20:54:48Z",
+   "hours": 0.51
+  },
+  {
+   "number": 6946,
+   "created_at": "2026-10-30T07:32:18Z",
+   "merged_at": "2026-11-03T16:54:44Z",
+   "hours": 105.37
+  },
+  {
+   "number": 6936,
+   "created_at": "2026-10-29T07:30:30Z",
+   "merged_at": "2026-11-04T02:40:49Z",
+   "hours": 139.17
+  },
+  {
+   "number": 6927,
+   "created_at": "2026-10-28T07:30:31Z",
+   "merged_at": "2026-11-03T16:53:44Z",
+   "hours": 153.39
+  },
+  {
+   "number": 6923,
+   "created_at": "2026-10-28T07:30:06Z",
+   "merged_at": "2026-11-03T16:54:08Z",
+   "hours": 153.4
+  },
+  {
+   "number": 6912,
+   "created_at": "2026-10-27T07:44:29Z",
+   "merged_at": "2026-11-04T02:41:08Z",
+   "hours": 186.94
+  },
+  {
+   "number": 6880,
+   "created_at": "2026-10-24T07:35:25Z",
+   "merged_at": "2026-11-04T02:40:58Z",
+   "hours": 259.09
+  },
+  {
+   "number": 6873,
+   "created_at": "2026-10-23T07:43:40Z",
+   "merged_at": "2026-11-04T02:41:18Z",
+   "hours": 282.96
+  },
+  {
+   "number": 6958,
+   "created_at": "2026-10-31T07:27:37Z",
+   "merged_at": "2026-11-13T15:52:28Z",
+   "hours": 320.41
+  },
+  {
+   "number": 6852,
+   "created_at": "2026-10-22T07:41:08Z",
+   "merged_at": "2026-11-03T16:55:34Z",
+   "hours": 297.24
+  },
+  {
+   "number": 6947,
+   "created_at": "2026-10-30T07:32:26Z",
+   "merged_at": "2026-11-03T16:54:56Z",
+   "hours": 105.38
+  },
+  {
+   "number": 6948,
+   "created_at": "2026-10-30T07:32:33Z",
+   "merged_at": "2026-11-03T16:54:20Z",
+   "hours": 105.36
+  },
+  {
+   "number": 6954,
+   "created_at": "2026-10-30T18:59:38Z",
+   "merged_at": "2026-10-30T19:04:13Z",
+   "hours": 0.08
+  },
+  {
+   "number": 6944,
+   "created_at": "2026-10-30T07:32:04Z",
+   "merged_at": "2026-11-03T16:54:32Z",
+   "hours": 105.37
+  },
+  {
+   "number": 6913,
+   "created_at": "2026-10-27T07:44:37Z",
+   "merged_at": "2026-11-03T16:55:09Z",
+   "hours": 177.18
+  },
+  {
+   "number": 6876,
+   "created_at": "2026-10-23T18:19:42Z",
+   "merged_at": "2026-10-23T18:21:27Z",
+   "hours": 0.03
+  },
+  {
+   "number": 6872,
+   "created_at": "2026-10-23T07:43:33Z",
+   "merged_at": "2026-11-03T16:55:47Z",
+   "hours": 273.2
+  },
+  {
+   "number": 6562,
+   "created_at": "2026-10-13T07:54:50Z",
+   "merged_at": "2026-10-20T19:24:16Z",
+   "hours": 179.49
+  },
+  {
+   "number": 6454,
+   "created_at": "2026-10-11T07:46:19Z",
+   "merged_at": "2026-10-22T21:09:04Z",
+   "hours": 277.38
+  },
+  {
+   "number": 6712,
+   "created_at": "2026-10-16T02:30:54Z",
+   "merged_at": "2026-10-16T02:40:00Z",
+   "hours": 0.15
+  },
+  {
+   "number": 6711,
+   "created_at": "2026-10-16T02:30:47Z",
+   "merged_at": "2026-10-16T02:39:56Z",
+   "hours": 0.15
+  },
+  {
+   "number": 6707,
+   "created_at": "2026-10-16T02:30:21Z",
+   "merged_at": "2026-10-16T02:39:52Z",
+   "hours": 0.16
+  },
+  {
+   "number": 6706,
+   "created_at": "2026-10-16T02:30:14Z",
+   "merged_at": "2026-10-16T02:39:48Z",
+   "hours": 0.16
+  },
+  {
+   "number": 6704,
+   "created_at": "2026-10-16T02:30:01Z",
+   "merged_at": "2026-10-16T02:39:43Z",
+   "hours": 0.16
+  },
+  {
+   "number": 6700,
+   "created_at": "2026-10-16T02:29:34Z",
+   "merged_at": "2026-10-16T02:39:28Z",
+   "hours": 0.17
+  },
+  {
+   "number": 6699,
+   "created_at": "2026-10-16T02:29:28Z",
+   "merged_at": "2026-10-16T02:39:24Z",
+   "hours": 0.17
+  },
+  {
+   "number": 6697,
+   "created_at": "2026-10-16T02:29:13Z",
+   "merged_at": "2026-10-16T02:39:19Z",
+   "hours": 0.17
+  },
+  {
+   "number": 6688,
+   "created_at": "2026-10-16T02:28:14Z",
+   "merged_at": "2026-10-16T02:40:17Z",
+   "hours": 0.2
+  },
+  {
+   "number": 6689,
+   "created_at": "2026-10-16T02:28:21Z",
+   "merged_at": "2026-10-16T02:38:51Z",
+   "hours": 0.17
+  },
+  {
+   "number": 6680,
+   "created_at": "2026-10-16T02:27:19Z",
+   "merged_at": "2026-10-16T02:40:13Z",
+   "hours": 0.21
+  },
+  {
+   "number": 6687,
+   "created_at": "2026-10-16T02:28:07Z",
+   "merged_at": "2026-10-16T02:38:47Z",
+   "hours": 0.18
+  },
+  {
+   "number": 6676,
+   "created_at": "2026-10-16T02:26:50Z",
+   "merged_at": "2026-10-16T02:40:09Z",
+   "hours": 0.22
+  },
+  {
+   "number": 6677,
+   "created_at": "2026-10-16T02:26:57Z",
+   "merged_at": "2026-10-16T02:38:23Z",
+   "hours": 0.19
+  },
+  {
+   "number": 6613,
+   "created_at": "2026-10-15T07:29:44Z",
+   "merged_at": "2026-10-15T07:33:43Z",
+   "hours": 0.07
+  },
+  {
+   "number": 6595,
+   "created_at": "2026-10-14T07:39:42Z",
+   "merged_at": "2026-10-16T01:19:08Z",
+   "hours": 41.66
+  },
+  {
+   "number": 6594,
+   "created_at": "2026-10-14T07:39:36Z",
+   "merged_at": "2026-10-16T01:19:01Z",
+   "hours": 41.66
+  },
+  {
+   "number": 6597,
+   "created_at": "2026-10-14T07:39:55Z",
+   "merged_at": "2026-10-16T01:12:30Z",
+   "hours": 41.54
+  },
+  {
+   "number": 6598,
+   "created_at": "2026-10-14T07:40:02Z",
+   "merged_at": "2026-10-15T07:39:16Z",
+   "hours": 23.99
+  },
+  {
+   "number": 6582,
+   "created_at": "2026-10-13T07:57:30Z",
+   "merged_at": "2026-10-16T01:30:29Z",
+   "hours": 65.55
+  },
+  {
+   "number": 6581,
+   "created_at": "2026-10-13T07:57:22Z",
+   "merged_at": "2026-10-16T01:30:00Z",
+   "hours": 65.54
+  },
+  {
+   "number": 6577,
+   "created_at": "2026-10-13T07:56:52Z",
+   "merged_at": "2026-10-16T01:30:38Z",
+   "hours": 65.56
+  },
+  {
+   "number": 6578,
+   "created_at": "2026-10-13T07:57:00Z",
+   "merged_at": "2026-10-16T01:30:07Z",
+   "hours": 65.55
+  },
+  {
+   "number": 6568,
+   "created_at": "2026-10-13T07:55:35Z",
+   "merged_at": "2026-10-16T01:30:16Z",
+   "hours": 65.58
+  },
+  {
+   "number": 6565,
+   "created_at": "2026-10-13T07:55:12Z",
+   "merged_at": "2026-10-16T01:30:12Z",
+   "hours": 65.58
+  },
+  {
+   "number": 6564,
+   "created_at": "2026-10-13T07:55:04Z",
+   "merged_at": "2026-10-16T01:28:31Z",
+   "hours": 65.56
+  },
+  {
+   "number": 6563,
+   "created_at": "2026-10-13T07:54:57Z",
+   "merged_at": "2026-10-16T01:28:27Z",
+   "hours": 65.56
+  },
+  {
+   "number": 6557,
+   "created_at": "2026-10-13T07:54:16Z",
+   "merged_at": "2026-10-16T01:20:21Z",
+   "hours": 65.43
+  },
+  {
+   "number": 6523,
+   "created_at": "2026-10-12T08:12:28Z",
+   "merged_at": "2026-10-16T01:23:14Z",
+   "hours": 89.18
+  },
+  {
+   "number": 6522,
+   "created_at": "2026-10-12T08:12:22Z",
+   "merged_at": "2026-10-16T01:23:10Z",
+   "hours": 89.18
+  },
+  {
+   "number": 6479,
+   "created_at": "2026-10-12T08:07:20Z",
+   "merged_at": "2026-10-16T01:28:19Z",
+   "hours": 89.35
+  },
+  {
+   "number": 6478,
+   "created_at": "2026-10-12T08:07:14Z",
+   "merged_at": "2026-10-16T01:28:11Z",
+   "hours": 89.35
+  },
+  {
+   "number": 6477,
+   "created_at": "2026-10-12T08:07:06Z",
+   "merged_at": "2026-10-16T01:28:06Z",
+   "hours": 89.35
+  },
+  {
+   "number": 6525,
+   "created_at": "2026-10-12T08:12:43Z",
+   "merged_at": "2026-10-16T01:20:10Z",
+   "hours": 89.12
+  },
+  {
+   "number": 6521,
+   "created_at": "2026-10-12T08:12:15Z",
+   "merged_at": "2026-10-16T01:20:06Z",
+   "hours": 89.13
+  },
+  {
+   "number": 6513,
+   "created_at": "2026-10-12T08:11:17Z",
+   "merged_at": "2026-10-16T01:19:53Z",
+   "hours": 89.14
+  },
+  {
+   "number": 6509,
+   "created_at": "2026-10-12T08:10:48Z",
+   "merged_at": "2026-10-16T01:19:46Z",
+   "hours": 89.15
+  },
+  {
+   "number": 6501,
+   "created_at": "2026-10-12T08:09:52Z",
+   "merged_at": "2026-10-16T01:19:42Z",
+   "hours": 89.16
+  },
+  {
+   "number": 6507,
+   "created_at": "2026-10-12T08:10:34Z",
+   "merged_at": "2026-10-16T01:13:01Z",
+   "hours": 89.04
+  },
+  {
+   "number": 6492,
+   "created_at": "2026-10-12T08:08:51Z",
+   "merged_at": "2026-10-16T01:14:25Z",
+   "hours": 89.09
+  },
+  {
+   "number": 6496,
+   "created_at": "2026-10-12T08:09:19Z",
+   "merged_at": "2026-10-16T01:12:58Z",
+   "hours": 89.06
+  },
+  {
+   "number": 6495,
+   "created_at": "2026-10-12T08:09:12Z",
+   "merged_at": "2026-10-16T01:12:49Z",
+   "hours": 89.06
+  },
+  {
+   "number": 6490,
+   "created_at": "2026-10-12T08:08:35Z",
+   "merged_at": "2026-10-16T01:12:38Z",
+   "hours": 89.07
+  },
+  {
+   "number": 6489,
+   "created_at": "2026-10-12T08:08:28Z",
+   "merged_at": "2026-10-16T01:12:26Z",
+   "hours": 89.07
+  },
+  {
+   "number": 6485,
+   "created_at": "2026-10-12T08:08:00Z",
+   "merged_at": "2026-10-16T01:12:18Z",
+   "hours": 89.07
+  },
+  {
+   "number": 6532,
+   "created_at": "2026-10-12T08:13:32Z",
+   "merged_at": "2026-10-15T21:40:18Z",
+   "hours": 85.45
+  },
+  {
+   "number": 6459,
+   "created_at": "2026-10-11T07:46:50Z",
+   "merged_at": "2026-10-16T01:33:22Z",
+   "hours": 113.78
+  },
+  {
+   "number": 6465,
+   "created_at": "2026-10-11T07:47:25Z",
+   "merged_at": "2026-10-16T01:28:02Z",
+   "hours": 113.68
+  },
+  {
+   "number": 6463,
+   "created_at": "2026-10-11T07:47:12Z",
+   "merged_at": "2026-10-16T01:27:54Z",
+   "hours": 113.68
+  },
+  {
+   "number": 6438,
+   "created_at": "2026-10-11T07:44:30Z",
+   "merged_at": "2026-10-16T01:22:35Z",
+   "hours": 113.63
+  },
+  {
+   "number": 6456,
+   "created_at": "2026-10-11T07:46:31Z",
+   "merged_at": "2026-10-16T01:19:38Z",
+   "hours": 113.55
+  },
+  {
+   "number": 6448,
+   "created_at": "2026-10-11T07:45:37Z",
+   "merged_at": "2026-10-16T01:19:33Z",
+   "hours": 113.57
+  },
+  {
+   "number": 6450,
+   "created_at": "2026-10-11T07:45:50Z",
+   "merged_at": "2026-10-16T01:18:44Z",
+   "hours": 113.55
+  },
+  {
+   "number": 6469,
+   "created_at": "2026-10-11T07:47:52Z",
+   "merged_at": "2026-10-16T01:12:07Z",
+   "hours": 113.4
+  },
+  {
+   "number": 6421,
+   "created_at": "2026-10-11T07:42:36Z",
+   "merged_at": "2026-10-16T01:12:03Z",
+   "hours": 113.49
+  },
+  {
+   "number": 6420,
+   "created_at": "2026-10-11T07:42:29Z",
+   "merged_at": "2026-10-16T01:11:56Z",
+   "hours": 113.49
+  },
+  {
+   "number": 6415,
+   "created_at": "2026-10-11T07:41:57Z",
+   "merged_at": "2026-10-16T01:11:52Z",
+   "hours": 113.5
+  },
+  {
+   "number": 6412,
+   "created_at": "2026-10-11T07:41:38Z",
+   "merged_at": "2026-10-16T01:09:14Z",
+   "hours": 113.46
+  },
+  {
+   "number": 6515,
+   "created_at": "2026-10-12T08:11:32Z",
+   "merged_at": "2026-10-14T04:54:10Z",
+   "hours": 44.71
+  },
+  {
+   "number": 6832,
+   "created_at": "2026-10-20T17:09:47Z",
+   "merged_at": "2026-10-20T17:11:40Z",
+   "hours": 0.03
+  },
+  {
+   "number": 6705,
+   "created_at": "2026-10-16T02:30:08Z",
+   "merged_at": "2026-10-16T02:39:39Z",
+   "hours": 0.16
+  },
+  {
+   "number": 6703,
+   "created_at": "2026-10-16T02:29:55Z",
+   "merged_at": "2026-10-16T02:39:33Z",
+   "hours": 0.16
+  },
+  {
+   "number": 6690,
+   "created_at": "2026-10-16T02:28:27Z",
+   "merged_at": "2026-10-16T02:40:22Z",
+   "hours": 0.2
+  },
+  {
+   "number": 6693,
+   "created_at": "2026-10-16T02:28:47Z",
+   "merged_at": "2026-10-16T02:39:03Z",
+   "hours": 0.17
+  },
+  {
+   "number": 6692,
+   "created_at": "2026-10-16T02:28:40Z",
+   "merged_at": "2026-10-16T02:39:00Z",
+   "hours": 0.17
+  },
+  {
+   "number": 6684,
+   "created_at": "2026-10-16T02:27:47Z",
+   "merged_at": "2026-10-16T02:38:32Z",
+   "hours": 0.18
+  },
+  {
+   "number": 6679,
+   "created_at": "2026-10-16T02:27:12Z",
+   "merged_at": "2026-10-16T02:38:28Z",
+   "hours": 0.19
+  },
+  {
+   "number": 6675,
+   "created_at": "2026-10-16T02:26:43Z",
+   "merged_at": "2026-10-16T02:38:18Z",
+   "hours": 0.19
+  },
+  {
+   "number": 6674,
+   "created_at": "2026-10-16T02:26:36Z",
+   "merged_at": "2026-10-16T02:38:11Z",
+   "hours": 0.19
+  },
+  {
+   "number": 6602,
+   "created_at": "2026-10-14T16:23:57Z",
+   "merged_at": "2026-10-14T18:13:55Z",
+   "hours": 1.83
+  },
+  {
+   "number": 6576,
+   "created_at": "2026-10-13T07:56:42Z",
+   "merged_at": "2026-10-16T01:33:26Z",
+   "hours": 65.61
+  },
+  {
+   "number": 6570,
+   "created_at": "2026-10-13T07:55:52Z",
+   "merged_at": "2026-10-16T01:30:24Z",
+   "hours": 65.58
+  },
+  {
+   "number": 6560,
+   "created_at": "2026-10-13T07:54:37Z",
+   "merged_at": "2026-10-16T01:20:25Z",
+   "hours": 65.43
+  },
+  {
+   "number": 6926,
+   "created_at": "2026-10-28T07:30:26Z",
+   "merged_at": "2026-11-04T02:40:39Z",
+   "hours": 163.17
+  },
+  {
+   "number": 6908,
+   "created_at": "2026-10-27T00:16:36Z",
+   "merged_at": "2026-10-27T00:23:47Z",
+   "hours": 0.12
+  },
+  {
+   "number": 6387,
+   "created_at": "2026-10-08T15:34:48Z",
+   "merged_at": "2026-10-09T20:53:47Z",
+   "hours": 29.32
+  },
+  {
+   "number": 6384,
+   "created_at": "2026-10-08T15:34:26Z",
+   "merged_at": "2026-10-09T20:53:21Z",
+   "hours": 29.32
+  },
+  {
+   "number": 6383,
+   "created_at": "2026-10-08T15:34:18Z",
+   "merged_at": "2026-10-09T20:53:10Z",
+   "hours": 29.31
+  },
+  {
+   "number": 6534,
+   "created_at": "2026-10-12T08:13:48Z",
+   "merged_at": "2026-10-16T01:20:14Z",
+   "hours": 89.11
+  },
+  {
+   "number": 6519,
+   "created_at": "2026-10-12T08:12:00Z",
+   "merged_at": "2026-10-16T01:20:02Z",
+   "hours": 89.13
+  },
+  {
+   "number": 6510,
+   "created_at": "2026-10-12T08:10:56Z",
+   "merged_at": "2026-10-16T01:19:49Z",
+   "hours": 89.15
+  },
+  {
+   "number": 6476,
+   "created_at": "2026-10-12T08:07:00Z",
+   "merged_at": "2026-10-16T01:23:06Z",
+   "hours": 89.27
+  },
+  {
+   "number": 6511,
+   "created_at": "2026-10-12T08:11:02Z",
+   "merged_at": "2026-10-16T01:13:05Z",
+   "hours": 89.03
+  },
+  {
+   "number": 6497,
+   "created_at": "2026-10-12T08:09:26Z",
+   "merged_at": "2026-10-16T01:12:54Z",
+   "hours": 89.06
+  },
+  {
+   "number": 6491,
+   "created_at": "2026-10-12T08:08:43Z",
+   "merged_at": "2026-10-16T01:12:42Z",
+   "hours": 89.07
+  },
+  {
+   "number": 6487,
+   "created_at": "2026-10-12T08:08:14Z",
+   "merged_at": "2026-10-16T01:12:22Z",
+   "hours": 89.07
+  },
+  {
+   "number": 6481,
+   "created_at": "2026-10-12T08:07:34Z",
+   "merged_at": "2026-10-16T01:12:14Z",
+   "hours": 89.08
+  },
+  {
+   "number": 6467,
+   "created_at": "2026-10-11T07:47:38Z",
+   "merged_at": "2026-10-16T01:22:54Z",
+   "hours": 113.59
+  },
+  {
+   "number": 6455,
+   "created_at": "2026-10-11T07:46:25Z",
+   "merged_at": "2026-10-16T01:22:46Z",
+   "hours": 113.61
+  },
+  {
+   "number": 6452,
+   "created_at": "2026-10-11T07:46:03Z",
+   "merged_at": "2026-10-16T01:18:49Z",
+   "hours": 113.55
+  },
+  {
+   "number": 6428,
+   "created_at": "2026-10-11T07:43:26Z",
+   "merged_at": "2026-10-16T01:18:53Z",
+   "hours": 113.59
+  },
+  {
+   "number": 6416,
+   "created_at": "2026-10-11T07:42:03Z",
+   "merged_at": "2026-10-16T01:11:49Z",
+   "hours": 113.5
+  },
+  {
+   "number": 6433,
+   "created_at": "2026-10-11T07:43:59Z",
+   "merged_at": "2026-10-15T07:40:14Z",
+   "hours": 95.94
+  },
+  {
+   "number": 6432,
+   "created_at": "2026-10-11T07:43:53Z",
+   "merged_at": "2026-10-15T07:39:53Z",
+   "hours": 95.93
+  },
+  {
+   "number": 6713,
+   "created_at": "2026-10-16T02:31:00Z",
+   "merged_at": "2026-10-16T02:40:05Z",
+   "hours": 0.15
+  },
+  {
+   "number": 6708,
+   "created_at": "2026-10-16T02:30:26Z",
+   "merged_at": "2026-10-16T02:38:36Z",
+   "hours": 0.14
+  },
+  {
+   "number": 6691,
+   "created_at": "2026-10-16T02:28:33Z",
+   "merged_at": "2026-10-16T02:38:56Z",
+   "hours": 0.17
+  },
+  {
+   "number": 6686,
+   "created_at": "2026-10-16T02:28:00Z",
+   "merged_at": "2026-10-16T02:38:44Z",
+   "hours": 0.18
+  },
+  {
+   "number": 6685,
+   "created_at": "2026-10-16T02:27:53Z",
+   "merged_at": "2026-10-16T02:38:40Z",
+   "hours": 0.18
+  },
+  {
+   "number": 6673,
+   "created_at": "2026-10-16T02:26:30Z",
+   "merged_at": "2026-10-16T02:38:07Z",
+   "hours": 0.19
+  },
+  {
+   "number": 6669,
+   "created_at": "2026-10-16T02:14:10Z",
+   "merged_at": "2026-10-16T02:17:14Z",
+   "hours": 0.05
+  },
+  {
+   "number": 6554,
+   "created_at": "2026-10-13T07:53:55Z",
+   "merged_at": "2026-10-16T02:05:03Z",
+   "hours": 66.19
+  },
+  {
+   "number": 6561,
+   "created_at": "2026-10-13T07:54:43Z",
+   "merged_at": "2026-10-16T01:23:21Z",
+   "hours": 65.48
+  },
+  {
+   "number": 6518,
+   "created_at": "2026-10-12T08:11:53Z",
+   "merged_at": "2026-10-16T01:19:58Z",
+   "hours": 89.13
+  },
+  {
+   "number": 6475,
+   "created_at": "2026-10-12T08:06:54Z",
+   "merged_at": "2026-10-16T01:22:58Z",
+   "hours": 89.27
+  },
+  {
+   "number": 6516,
+   "created_at": "2026-10-12T08:11:38Z",
+   "merged_at": "2026-10-16T01:13:09Z",
+   "hours": 89.03
+  },
+  {
+   "number": 6464,
+   "created_at": "2026-10-11T07:47:18Z",
+   "merged_at": "2026-10-16T01:27:58Z",
+   "hours": 113.68
+  },
+  {
+   "number": 6460,
+   "created_at": "2026-10-11T07:46:55Z",
+   "merged_at": "2026-10-16T01:22:50Z",
+   "hours": 113.6
+  },
+  {
+   "number": 6453,
+   "created_at": "2026-10-11T07:46:12Z",
+   "merged_at": "2026-10-16T01:22:42Z",
+   "hours": 113.61
+  },
+  {
+   "number": 6442,
+   "created_at": "2026-10-11T07:44:57Z",
+   "merged_at": "2026-10-16T01:19:28Z",
+   "hours": 113.58
+  },
+  {
+   "number": 6441,
+   "created_at": "2026-10-11T07:44:50Z",
+   "merged_at": "2026-10-16T01:19:24Z",
+   "hours": 113.58
+  },
+  {
+   "number": 6440,
+   "created_at": "2026-10-11T07:44:42Z",
+   "merged_at": "2026-10-16T01:19:20Z",
+   "hours": 113.58
+  },
+  {
+   "number": 6439,
+   "created_at": "2026-10-11T07:44:36Z",
+   "merged_at": "2026-10-16T01:19:16Z",
+   "hours": 113.58
+  },
+  {
+   "number": 6429,
+   "created_at": "2026-10-11T07:43:33Z",
+   "merged_at": "2026-10-16T01:18:57Z",
+   "hours": 113.59
+  },
+  {
+   "number": 6419,
+   "created_at": "2026-10-11T07:42:23Z",
+   "merged_at": "2026-10-16T01:18:41Z",
+   "hours": 113.61
+  },
+  {
+   "number": 6431,
+   "created_at": "2026-10-11T07:43:47Z",
+   "merged_at": "2026-10-15T07:39:34Z",
+   "hours": 95.93
+  },
+  {
+   "number": 6377,
+   "created_at": "2026-10-07T20:37:13Z",
+   "merged_at": "2026-10-08T14:35:51Z",
+   "hours": 17.98
+  },
+  {
+   "number": 6376,
+   "created_at": "2026-10-07T20:37:11Z",
+   "merged_at": "2026-10-08T14:35:40Z",
+   "hours": 17.97
+  },
+  {
+   "number": 6553,
+   "created_at": "2026-10-13T07:53:48Z",
+   "merged_at": "2026-10-16T01:20:18Z",
+   "hours": 65.44
+  },
+  {
+   "number": 6630,
+   "created_at": "2026-10-15T22:44:32Z",
+   "merged_at": "2026-10-20T21:59:07Z",
+   "hours": 119.24
+  },
+  {
+   "number": 6389,
+   "created_at": "2026-10-08T15:35:06Z",
+   "merged_at": "2026-10-09T20:54:10Z",
+   "hours": 29.32
+  },
+  {
+   "number": 6386,
+   "created_at": "2026-10-08T15:34:40Z",
+   "merged_at": "2026-10-09T20:53:34Z",
+   "hours": 29.32
+  },
+  {
+   "number": 6400,
+   "created_at": "2026-10-09T16:03:49Z",
+   "merged_at": "2026-10-10T22:23:17Z",
+   "hours": 30.32
+  },
+  {
+   "number": 6398,
+   "created_at": "2026-10-09T10:53:11Z",
+   "merged_at": "2026-10-09T11:57:57Z",
+   "hours": 1.08
+  },
+  {
+   "number": 6373,
+   "created_at": "2026-10-07T14:08:04Z",
+   "merged_at": "2026-10-07T16:47:21Z",
+   "hours": 2.65
+  },
+  {
+   "number": 6380,
+   "created_at": "2026-10-08T01:23:40Z",
+   "merged_at": "2026-10-15T22:43:00Z",
+   "hours": 189.32
+  },
+  {
+   "number": 6385,
+   "created_at": "2026-10-08T15:34:33Z",
+   "merged_at": "2026-10-09T20:23:56Z",
+   "hours": 28.82
+  },
+  {
+   "number": 6696,
+   "created_at": "2026-10-16T02:29:06Z",
+   "merged_at": "2026-10-16T02:39:15Z",
+   "hours": 0.17
+  },
+  {
+   "number": 6695,
+   "created_at": "2026-10-16T02:28:59Z",
+   "merged_at": "2026-10-16T02:39:11Z",
+   "hours": 0.17
+  },
+  {
+   "number": 6694,
+   "created_at": "2026-10-16T02:28:53Z",
+   "merged_at": "2026-10-16T02:39:07Z",
+   "hours": 0.17
+  },
+  {
+   "number": 6366,
+   "created_at": "2026-10-07T00:56:25Z",
+   "merged_at": "2026-10-07T13:09:08Z",
+   "hours": 12.21
+  },
+  {
+   "number": 6408,
+   "created_at": "2026-10-10T22:23:06Z",
+   "merged_at": "2026-10-11T02:41:22Z",
+   "hours": 4.3
+  },
+  {
+   "number": 6349,
+   "created_at": "2026-10-02T20:09:23Z",
+   "merged_at": "2026-10-02T20:55:50Z",
+   "hours": 0.77
+  },
+  {
+   "number": 6388,
+   "created_at": "2026-10-08T15:34:57Z",
+   "merged_at": "2026-10-09T20:53:59Z",
+   "hours": 29.32
+  },
+  {
+   "number": 7209,
+   "created_at": "2026-11-23T19:13:01Z",
+   "merged_at": "2026-11-23T19:16:29Z",
+   "hours": 0.06
+  },
+  {
+   "number": 7190,
+   "created_at": "2026-11-20T19:06:15Z",
+   "merged_at": "2026-11-23T14:44:49Z",
+   "hours": 67.64
+  },
+  {
+   "number": 7188,
+   "created_at": "2026-11-20T16:06:28Z",
+   "merged_at": "2026-11-20T16:26:50Z",
+   "hours": 0.34
+  },
+  {
+   "number": 7166,
+   "created_at": "2026-11-18T19:29:02Z",
+   "merged_at": "2026-11-18T23:19:03Z",
+   "hours": 3.83
+  },
+  {
+   "number": 7164,
+   "created_at": "2026-11-18T19:12:40Z",
+   "merged_at": "2026-11-18T19:14:25Z",
+   "hours": 0.03
+  },
+  {
+   "number": 7155,
+   "created_at": "2026-11-17T21:34:21Z",
+   "merged_at": "2026-11-19T01:14:57Z",
+   "hours": 27.68
+  },
+  {
+   "number": 7114,
+   "created_at": "2026-11-13T18:13:56Z",
+   "merged_at": "2026-11-16T20:51:18Z",
+   "hours": 74.62
+  },
+  {
+   "number": 7099,
+   "created_at": "2026-11-12T19:27:19Z",
+   "merged_at": "2026-11-12T19:49:59Z",
+   "hours": 0.38
+  },
+  {
+   "number": 7097,
+   "created_at": "2026-11-12T18:05:35Z",
+   "merged_at": "2026-11-12T18:55:04Z",
+   "hours": 0.82
+  },
+  {
+   "number": 7083,
+   "created_at": "2026-11-11T18:48:08Z",
+   "merged_at": "2026-11-13T15:24:58Z",
+   "hours": 44.61
+  },
+  {
+   "number": 7018,
+   "created_at": "2026-11-06T02:25:29Z",
+   "merged_at": "2026-11-06T07:07:20Z",
+   "hours": 4.7
+  },
+  {
+   "number": 6981,
+   "created_at": "2026-11-03T07:28:44Z",
+   "merged_at": "2026-11-19T20:07:03Z",
+   "hours": 396.64
+  },
+  {
+   "number": 7023,
+   "created_at": "2026-11-06T08:26:27Z",
+   "merged_at": "2026-11-06T23:51:05Z",
+   "hours": 15.41
+  },
+  {
+   "number": 7010,
+   "created_at": "2026-11-05T17:11:41Z",
+   "merged_at": "2026-11-05T17:15:26Z",
+   "hours": 0.06
+  },
+  {
+   "number": 7096,
+   "created_at": "2026-11-12T17:58:42Z",
+   "merged_at": "2026-11-13T15:24:02Z",
+   "hours": 21.42
+  },
+  {
+   "number": 7143,
+   "created_at": "2026-11-17T04:01:49Z",
+   "merged_at": "2026-11-20T20:33:49Z",
+   "hours": 88.53
+  },
+  {
+   "number": 7113,
+   "created_at": "2026-11-13T17:14:28Z",
+   "merged_at": "2026-11-13T22:15:58Z",
+   "hours": 5.03
+  },
+  {
+   "number": 7115,
+   "created_at": "2026-11-13T18:34:08Z",
+   "merged_at": "2026-11-16T20:22:06Z",
+   "hours": 73.8
+  },
+  {
+   "number": 7094,
+   "created_at": "2026-11-12T15:11:20Z",
+   "merged_at": "2026-11-13T00:10:36Z",
+   "hours": 8.99
+  },
+  {
+   "number": 7034,
+   "created_at": "2026-11-07T02:04:41Z",
+   "merged_at": "2026-11-10T01:27:10Z",
+   "hours": 71.37
+  },
+  {
+   "number": 7014,
+   "created_at": "2026-11-05T22:38:13Z",
+   "merged_at": "2026-11-06T19:43:08Z",
+   "hours": 21.08
+  }
+ ]
+}
